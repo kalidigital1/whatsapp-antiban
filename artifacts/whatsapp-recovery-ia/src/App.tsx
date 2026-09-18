@@ -97,16 +97,18 @@ function formatDay(value?: string) {
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === 'read' || status === 'delivered') return <CheckCheck size={14} strokeWidth={2.4} />;
-  if (status === 'sent') return <Check size={14} strokeWidth={2.4} />;
-  if (status === 'failed') return <AlertCircle size={14} />;
-  return <Loader2 size={13} className="animate-spin" />;
+  if (status === 'read') return <CheckCheck className="message-status-icon status-read" size={14} strokeWidth={2.4} aria-label="Lida" />;
+  if (status === 'delivered') return <CheckCheck className="message-status-icon status-delivered" size={14} strokeWidth={2.4} aria-label="Entregue" />;
+  if (status === 'sent') return <Check className="message-status-icon status-sent" size={14} strokeWidth={2.4} aria-label="Enviada" />;
+  if (status === 'failed') return <AlertCircle className="message-status-icon status-failed" size={14} aria-label="Falhou" />;
+  return <Loader2 className="message-status-icon status-pending animate-spin" size={13} aria-label="Enviando" />;
 }
 
 function ConversationPreviewStatus({ status }: { status: string }) {
-  if (status === 'failed') return <AlertCircle size={15} strokeWidth={2.1} />;
-  if (status === 'read' || status === 'delivered') return <CheckCheck size={15} strokeWidth={2.2} />;
-  return <Check size={15} strokeWidth={2.2} />;
+  if (status === 'read') return <CheckCheck className="message-status-icon status-read" size={15} strokeWidth={2.2} />;
+  if (status === 'delivered') return <CheckCheck className="message-status-icon status-delivered" size={15} strokeWidth={2.2} />;
+  if (status === 'failed') return <AlertCircle className="message-status-icon status-failed" size={15} strokeWidth={2.1} />;
+  return <Check className="message-status-icon status-sent" size={15} strokeWidth={2.2} />;
 }
 
 function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'large' }) {
@@ -120,16 +122,18 @@ function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'la
 function NavigationRail({ onSettings, connected, profilePictureUrl, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; activeSection: 'inbox' | 'templates'; onSectionChange: (section: 'inbox' | 'templates') => void }) {
   return (
     <aside className="wa-rail" aria-label="Navegação principal">
-      <div className="rail-brand" aria-label="WhatsApp Recovery IA"><MessageCircle size={23} /></div>
+      <div className="rail-brand" aria-label="Meta Business Partner">
+        <img src="/assets/meta-business-partner.png" alt="Meta Business Partner" />
+      </div>
       <nav className="rail-nav">
-        <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={23} /></button>
-        <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Templates" data-testid="rail-templates"><FileText size={22} strokeWidth={1.8} /></button>
-        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Atualizações" data-testid="rail-updates"><Wifi size={22} /></button>
-        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={22} /></button>
-        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Chamadas" data-testid="rail-calls"><Phone size={22} /></button>
+        <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
+        <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Templates" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Templates</span></button>
+        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Atualizações" data-testid="rail-updates"><Wifi size={17} /><span className="rail-btn-label">Atualizações</span></button>
+        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
+        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Chamadas" data-testid="rail-calls"><Phone size={17} /><span className="rail-btn-label">Chamadas</span></button>
       </nav>
       <div className="rail-bottom">
-        <button type="button" className="rail-btn" onClick={onSettings} aria-label="Configurações" data-testid="rail-settings"><Settings size={22} /></button>
+        <button type="button" className="rail-btn" onClick={onSettings} aria-label="Configurações" data-testid="rail-settings"><Settings size={17} /><span className="rail-btn-label">Configurações</span></button>
         <button type="button" className="rail-btn" onClick={onSettings} aria-label={connected ? 'Perfil conectado' : 'Configurar conexão'} data-testid="rail-profile">
           <div
             className={`profile-photo !m-0 !h-8 !w-8 text-[10px] ${connected ? 'connected-profile-photo' : ''}`}
@@ -137,6 +141,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
           >
             {connected ? (profilePictureUrl ? '' : '?') : '?'}
           </div>
+          <span className="rail-btn-label">Perfil</span>
         </button>
       </div>
     </aside>

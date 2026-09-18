@@ -310,7 +310,7 @@ async function conversationResponse(
   return {
     id: conversation.id,
     contact: {
-      name: contact.name || `Cliente ${contact.phoneNumber.slice(-4)}`,
+      name: contactDisplayName(contact),
       phoneNumber: contact.phoneNumber,
     },
     lastMessage: lastMessage ? messageResponse(lastMessage) : fallback,
@@ -345,6 +345,17 @@ async function sendTextMessage(
   return id;
 }
 
+function isGeneratedContactName(name: string, phoneNumber: string): boolean {
+  return name.trim() === `Cliente ${phoneNumber.slice(-4)}`;
+}
+
+function contactDisplayName(contact: typeof contacts.$inferSelect): string {
+  const name = contact.name.trim();
+  return name && !isGeneratedContactName(name, contact.phoneNumber)
+    ? name
+    : contact.phoneNumber;
+}
+
 async function getOrCreateContact(phoneNumber: string, name?: string) {
   const [existing] = await db
     .select()
@@ -352,10 +363,16 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
     .where(eq(contacts.phoneNumber, phoneNumber))
     .limit(1);
   if (existing) {
-    if (name && existing.name !== name) {
+    const incomingName = name?.trim();
+    const nextName =
+      incomingName ||
+      (isGeneratedContactName(existing.name, phoneNumber)
+        ? phoneNumber
+        : existing.name);
+    if (nextName !== existing.name) {
       const [updated] = await db
         .update(contacts)
-        .set({ name, updatedAt: new Date() })
+        .set({ name: nextName, updatedAt: new Date() })
         .where(eq(contacts.id, existing.id))
         .returning();
       return updated ?? existing;
@@ -365,7 +382,7 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
 
   const [created] = await db
     .insert(contacts)
-    .values({ phoneNumber, name: name || `Cliente ${phoneNumber.slice(-4)}` })
+    .values({ phoneNumber, name: name?.trim() || phoneNumber })
     .returning();
   return created;
 }
@@ -382,6 +399,16 @@ async function getOrCreateConversation(contactId: number, phoneNumberId: string)
     )
     .limit(1);
   if (existing) return existing;
+
+  if (phoneNumberId === "unknown") {
+    const [contactConversation] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.contactId, contactId))
+      .orderBy(desc(conversations.updatedAt), desc(conversations.id))
+      .limit(1);
+    if (contactConversation) return contactConversation;
+  }
 
   const [created] = await db
     .insert(conversations)
@@ -827,10 +854,17 @@ router.post("/webhook", async (req, res) => {
         const value = asRecord(asRecord(change).value);
         const metadata = asRecord(value.metadata);
         const phoneNumberId = stringValue(metadata.phone_number_id);
-        const contactPayload = Array.isArray(value.contacts)
-          ? asRecord(value.contacts[0])
-          : {};
-        const profile = asRecord(contactPayload.profile);
+        const contactProfiles = new Map<string, Record<string, unknown>>();
+        let defaultProfile: Record<string, unknown> = {};
+        if (Array.isArray(value.contacts)) {
+          for (const rawContact of value.contacts) {
+            const contactPayload = asRecord(rawContact);
+            const profile = asRecord(contactPayload.profile);
+            if (!Object.keys(defaultProfile).length) defaultProfile = profile;
+            const contactPhone = normalizePhone(stringValue(contactPayload.wa_id));
+            if (contactPhone) contactProfiles.set(contactPhone, profile);
+          }
+        }
         const messagePayloads = Array.isArray(value.messages)
           ? value.messages
           : [];
@@ -848,6 +882,7 @@ router.post("/webhook", async (req, res) => {
             .limit(1);
           if (alreadyStored) continue;
 
+          const profile = contactProfiles.get(from) ?? defaultProfile;
           const contact = await getOrCreateContact(
             from,
             stringValue(profile.name) || undefined,
