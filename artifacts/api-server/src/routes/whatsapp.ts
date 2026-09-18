@@ -159,14 +159,21 @@ async function loadPhoneNumbers(
     numbers.map(async (phone) => {
       try {
         const profile = await graphRequest<{
-          data?: { profile_picture_url?: string };
+          data?: Array<Record<string, unknown>> | Record<string, unknown>;
+          profile_picture_url?: string;
         }>(
           `${encodeURIComponent(phone.id)}/whatsapp_business_profile?fields=profile_picture_url`,
           accessToken,
         );
+        const profileData = Array.isArray(profile.data)
+          ? asRecord(profile.data[0])
+          : asRecord(profile.data);
         return {
           ...phone,
-          profilePictureUrl: profile.data?.profile_picture_url ?? null,
+          profilePictureUrl:
+            stringValue(profileData.profile_picture_url) ||
+            stringValue(profile.profile_picture_url) ||
+            null,
         };
       } catch {
         return phone;

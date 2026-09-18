@@ -129,7 +129,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
             className={`profile-photo !m-0 !h-8 !w-8 text-[10px] ${connected ? 'connected-profile-photo' : ''}`}
             style={profilePictureUrl ? { backgroundImage: `url(${profilePictureUrl})` } : undefined}
           >
-            {connected ? '' : '?'}
+            {connected ? (profilePictureUrl ? '' : '?') : '?'}
           </div>
         </button>
       </div>
@@ -141,11 +141,12 @@ function ConnectedProfile({ connection, onSettings }: { connection?: ConnectionS
   const selectedPhone = connection?.phoneNumbers.find((phone) => phone.id === connection.selectedPhoneNumberId) ?? connection?.phoneNumbers[0];
   const name = selectedPhone?.verifiedName || 'Número comercial';
   const number = selectedPhone?.displayPhoneNumber || 'Número não conectado';
-  const profileStyle = selectedPhone?.profilePictureUrl ? { backgroundImage: `url(${selectedPhone.profilePictureUrl})` } : undefined;
+  const profilePictureUrl = selectedPhone?.profilePictureUrl;
+  const profileStyle = profilePictureUrl ? { backgroundImage: `url(${profilePictureUrl})` } : undefined;
   return (
     <div className="profile-card">
-      <div className={`profile-photo ${connection?.connected ? 'connected-profile-photo' : ''}`} style={profileStyle} aria-hidden="true">
-        {connection?.connected ? '' : initials(selectedPhone?.verifiedName || 'WA')}
+      <div className={`profile-photo ${profilePictureUrl ? 'connected-profile-photo' : ''}`} style={profileStyle} aria-hidden="true">
+        {profilePictureUrl ? '' : initials(name)}
       </div>
       <div className="profile-details">
         <strong data-testid="text-connected-verified-name">
@@ -524,7 +525,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
             <div className="space-y-4">
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
                 <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium"><Smartphone size={16} className="text-[#65cb87]" /> Número conectado</div><span className="text-[11px] text-[#8c9993]">{connection.phoneNumbers.length} disponível(is)</span></div>
-                {connection.phoneNumbers.length > 0 ? <div className="divide-y divide-[#303633]">{connection.phoneNumbers.map((phone) => <div className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0" key={phone.id}><div><p className="text-[13px] font-medium">{phone.verifiedName || 'Número comercial'}</p><p className="mt-1 text-[11px] text-[#8f9b95]">{phone.displayPhoneNumber} · qualidade {phone.qualityRating}</p></div>{phone.id === connection.selectedPhoneNumberId && <span className="flex items-center gap-1 text-[11px] font-semibold text-[#68d18c]"><Check size={14} /> selecionado</span>}</div>)}</div> : <p className="text-xs text-[#8f9b95]">Nenhum número retornado pela conta.</p>}
+                {connection.phoneNumbers.length > 0 ? <div className="divide-y divide-[#303633]">{connection.phoneNumbers.map((phone) => <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0" key={phone.id}><div className="flex min-w-0 items-center gap-3"><div className="profile-photo !m-0 !h-9 !w-9 shrink-0 text-[10px]" style={phone.profilePictureUrl ? { backgroundImage: `url(${phone.profilePictureUrl})` } : undefined}>{phone.profilePictureUrl ? '' : initials(phone.verifiedName || 'WA')}</div><div className="min-w-0"><p className="truncate text-[13px] font-medium">{phone.verifiedName || 'Número comercial'}</p><p className="mt-1 truncate text-[11px] text-[#8f9b95]">{phone.displayPhoneNumber} · qualidade {phone.qualityRating}</p></div></div>{phone.id === connection.selectedPhoneNumberId && <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#68d18c]"><Check size={14} /> selecionado</span>}</div>)}</div> : <p className="text-xs text-[#8f9b95]">Nenhum número retornado pela conta.</p>}
               </div>
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-medium"><ShieldCheck size={16} className="text-[#65cb87]" /> Callback do webhook</div>
