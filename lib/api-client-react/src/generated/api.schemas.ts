@@ -22,6 +22,8 @@ export interface PhoneNumber {
   displayPhoneNumber: string;
   verifiedName: string;
   qualityRating: string;
+  /** @nullable */
+  profilePictureUrl: string | null;
 }
 
 export interface ConnectionInput {

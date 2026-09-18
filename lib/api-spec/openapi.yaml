@@ -250,7 +250,9 @@ components:
           type: string
         qualityRating:
           type: string
-      required: [id, displayPhoneNumber, verifiedName, qualityRating]
+        profilePictureUrl:
+          type: ["string", "null"]
+      required: [id, displayPhoneNumber, verifiedName, qualityRating, profilePictureUrl]
     ConnectionInput:
       type: object
       properties:

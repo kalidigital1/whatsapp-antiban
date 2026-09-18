@@ -31,6 +31,7 @@ type PhoneNumber = {
   displayPhoneNumber: string;
   verifiedName: string;
   qualityRating: string;
+  profilePictureUrl: string | null;
 };
 
 type ActiveConnection = {
@@ -138,12 +139,32 @@ async function loadPhoneNumbers(
     accessToken,
   );
 
-  return (body.data ?? []).map((phone) => ({
+  const numbers = (body.data ?? []).map((phone) => ({
     id: stringValue(phone.id),
     displayPhoneNumber: stringValue(phone.display_phone_number),
     verifiedName: stringValue(phone.verified_name) || "WhatsApp Business",
     qualityRating: stringValue(phone.quality_rating) || "UNKNOWN",
+    profilePictureUrl: null as string | null,
   }));
+
+  return Promise.all(
+    numbers.map(async (phone) => {
+      try {
+        const profile = await graphRequest<{
+          data?: { profile_picture_url?: string };
+        }>(
+          `${encodeURIComponent(phone.id)}/whatsapp_business_profile?fields=profile_picture_url`,
+          accessToken,
+        );
+        return {
+          ...phone,
+          profilePictureUrl: profile.data?.profile_picture_url ?? null,
+        };
+      } catch {
+        return phone;
+      }
+    }),
+  );
 }
 
 function normalizePhone(value: string): string {

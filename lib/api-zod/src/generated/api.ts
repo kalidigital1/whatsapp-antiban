@@ -27,7 +27,8 @@ export const GetConnectionResponse = zod.object({
   "id": zod.string(),
   "displayPhoneNumber": zod.string(),
   "verifiedName": zod.string(),
-  "qualityRating": zod.string()
+  "qualityRating": zod.string(),
+  "profilePictureUrl": zod.string().nullable()
 })),
   "selectedPhoneNumberId": zod.string().nullable(),
   "webhookUrl": zod.string(),
@@ -56,7 +57,8 @@ export const ConnectWhatsAppResponse = zod.object({
   "id": zod.string(),
   "displayPhoneNumber": zod.string(),
   "verifiedName": zod.string(),
-  "qualityRating": zod.string()
+  "qualityRating": zod.string(),
+  "profilePictureUrl": zod.string().nullable()
 })),
   "selectedPhoneNumberId": zod.string().nullable(),
   "webhookUrl": zod.string(),
