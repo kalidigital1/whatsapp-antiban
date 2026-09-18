@@ -171,6 +171,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /templates:
+    get:
+      operationId: listTemplates
+      tags: [whatsapp]
+      summary: List imported WhatsApp message templates
+      responses:
+        "200":
+          description: Imported templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Template"
+    post:
+      operationId: createTemplate
+      tags: [whatsapp]
+      summary: Import a WhatsApp template definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateInput"
+      responses:
+        "201":
+          description: Imported template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Template"
+        "400":
+          description: Invalid template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /templates/costs:
+    get:
+      operationId: getTemplateCosts
+      tags: [whatsapp]
+      summary: Get the configured estimated WhatsApp API cost
+      responses:
+        "200":
+          description: Cost estimate configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateCostSummary"
+  /templates/{templateId}/dispatch:
+    post:
+      operationId: dispatchTemplate
+      tags: [whatsapp]
+      summary: Send an imported WhatsApp template to multiple recipients
+      parameters:
+        - name: templateId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateDispatchInput"
+      responses:
+        "201":
+          description: Dispatch results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateDispatchResult"
+        "400":
+          description: Invalid request or disconnected account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /webhook:
     get:
       operationId: verifyWebhook
@@ -355,4 +440,115 @@ components:
     WebhookPayload:
       type: object
       additionalProperties: true
+    Template:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        languageCode:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        header:
+          type: ["string", "null"]
+        body:
+          type: string
+        footer:
+          type: ["string", "null"]
+        variables:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, name, languageCode, category, status, header, body, footer, variables, createdAt, updatedAt]
+    TemplateInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        languageCode:
+          type: string
+          minLength: 2
+        category:
+          type: string
+          minLength: 1
+        status:
+          type: string
+        header:
+          type: ["string", "null"]
+        body:
+          type: string
+          minLength: 1
+        footer:
+          type: ["string", "null"]
+        variables:
+          type: array
+          items:
+            type: string
+      required: [name, languageCode, category, body]
+    TemplateDispatchInput:
+      type: object
+      properties:
+        recipients:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 8
+        variables:
+          type: array
+          items:
+            type: string
+      required: [recipients]
+    TemplateCostSummary:
+      type: object
+      properties:
+        currency:
+          type: string
+        costPerMessage:
+          type: number
+        source:
+          type: string
+        disclaimer:
+          type: string
+      required: [currency, costPerMessage, source, disclaimer]
+    TemplateDispatchRecipient:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+        status:
+          type: string
+          enum: [sent, failed]
+        message:
+          type: ["string", "null"]
+      required: [phoneNumber, status, message]
+    TemplateDispatchResult:
+      type: object
+      properties:
+        template:
+          $ref: "#/components/schemas/Template"
+        recipientsCount:
+          type: integer
+        sentCount:
+          type: integer
+        failedCount:
+          type: integer
+        estimatedCost:
+          type: number
+        currency:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateDispatchRecipient"
+      required: [template, recipientsCount, sentCount, failedCount, estimatedCost, currency, results]
 
