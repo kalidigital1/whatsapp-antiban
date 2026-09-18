@@ -2,10 +2,16 @@ import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request } from "express";
 import {
   ConnectWhatsAppBody,
+  CreateTemplateBody,
+  DispatchTemplateBody,
+  DispatchTemplateParams,
+  GetTemplateCostsResponse,
   GetConnectionResponse,
   ListConversationsResponse,
   ListConversationMessagesParams,
   ListConversationMessagesResponse,
+  ListTemplatesResponse,
+  ListTemplatesResponseItem,
   ListConversationMessagesResponseItem,
   MessageInput,
   ReceiveWebhookBody,
@@ -13,6 +19,7 @@ import {
   SendConversationMessageParams,
   StartConversationBody,
   StartConversationResponse,
+  DispatchTemplateResponse,
 } from "@workspace/api-zod";
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
@@ -20,6 +27,7 @@ import {
   contacts,
   conversations,
   db,
+  whatsappTemplates,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 
@@ -169,6 +177,71 @@ async function loadPhoneNumbers(
 
 function normalizePhone(value: string): string {
   return value.replace(/[^\d]/g, "");
+}
+
+function estimatedCostPerMessage(): number {
+  const configured = Number(process.env.WHATSAPP_ESTIMATED_COST_PER_MESSAGE ?? "0.05");
+  return Number.isFinite(configured) && configured >= 0 ? configured : 0.05;
+}
+
+function templateResponse(template: typeof whatsappTemplates.$inferSelect) {
+  return ListTemplatesResponseItem.parse({
+    id: template.id,
+    name: template.name,
+    languageCode: template.languageCode,
+    category: template.category,
+    status: template.status,
+    header: template.header,
+    body: template.body,
+    footer: template.footer,
+    variables: Array.isArray(template.variables) ? template.variables : [],
+    createdAt: template.createdAt.toISOString(),
+    updatedAt: template.updatedAt.toISOString(),
+  });
+}
+
+function renderTemplateBody(body: string, variables: string[]) {
+  return body.replace(/\{\{(\d+)\}\}/g, (_match, index: string) => variables[Number(index) - 1] ?? `{{${index}}}`);
+}
+
+async function sendTemplateMessage(
+  phoneNumberId: string,
+  to: string,
+  template: typeof whatsappTemplates.$inferSelect,
+  variables: string[],
+  accessToken: string,
+) {
+  const components = variables.length
+    ? [
+        {
+          type: "body",
+          parameters: variables.map((text) => ({ type: "text", text })),
+        },
+      ]
+    : undefined;
+
+  const body = await graphRequest<{ messages?: Array<{ id?: string }> }>(
+    `${encodeURIComponent(phoneNumberId)}/messages`,
+    accessToken,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "template",
+        template: {
+          name: template.name,
+          language: { code: template.languageCode },
+          ...(components ? { components } : {}),
+        },
+      }),
+    },
+  );
+
+  const id = stringValue(body.messages?.[0]?.id);
+  if (!id) throw new MetaApiError("A Meta não retornou o ID do template enviado.");
+  return id;
 }
 
 function messageResponse(message: typeof chatMessages.$inferSelect) {
@@ -399,6 +472,30 @@ router.get("/conversations", async (_req, res) => {
   }
 });
 
+router.delete("/conversations/:conversationId", async (req, res) => {
+  try {
+    const conversationId = Number(req.params.conversationId);
+    if (!Number.isInteger(conversationId) || conversationId <= 0) {
+      res.status(404).json({ error: "Conversa não encontrada." });
+      return;
+    }
+
+    const deleted = await db
+      .delete(conversations)
+      .where(eq(conversations.id, conversationId))
+      .returning({ id: conversations.id });
+    if (deleted.length === 0) {
+      res.status(404).json({ error: "Conversa não encontrada." });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ err: error }, "Failed to delete WhatsApp conversation");
+    res.status(500).json({ error: "Não foi possível apagar a conversa." });
+  }
+});
+
 router.get("/conversations/:conversationId/messages", async (req, res) => {
   try {
     const params = ListConversationMessagesParams.parse(req.params);
@@ -496,6 +593,155 @@ router.post("/conversations/start", async (req, res) => {
     const status = error instanceof MetaApiError ? error.status : 400;
     const message = error instanceof Error ? error.message : "Falha ao iniciar conversa.";
     logger.warn({ status, message }, "New WhatsApp conversation failed");
+    res.status(status).json({ error: message });
+  }
+});
+
+router.get("/templates", async (_req, res) => {
+  try {
+    const templates = await db
+      .select()
+      .from(whatsappTemplates)
+      .orderBy(desc(whatsappTemplates.updatedAt));
+    res.json(ListTemplatesResponse.parse(templates.map(templateResponse)));
+  } catch (error) {
+    logger.error({ err: error }, "Failed to list WhatsApp templates");
+    res.status(500).json({ error: "Não foi possível carregar os templates." });
+  }
+});
+
+router.post("/templates", async (req, res) => {
+  try {
+    const input = CreateTemplateBody.parse(req.body);
+    const variables = input.variables ?? [];
+    const [existing] = await db
+      .select()
+      .from(whatsappTemplates)
+      .where(
+        and(
+          eq(whatsappTemplates.name, input.name.trim()),
+          eq(whatsappTemplates.languageCode, input.languageCode.trim()),
+        ),
+      )
+      .limit(1);
+
+    const values = {
+      name: input.name.trim(),
+      languageCode: input.languageCode.trim(),
+      category: input.category.trim().toUpperCase(),
+      status: input.status?.trim().toUpperCase() || "IMPORTED",
+      header: input.header?.trim() || null,
+      body: input.body.trim(),
+      footer: input.footer?.trim() || null,
+      variables,
+      updatedAt: new Date(),
+    };
+    const [template] = existing
+      ? await db
+          .update(whatsappTemplates)
+          .set(values)
+          .where(eq(whatsappTemplates.id, existing.id))
+          .returning()
+      : await db.insert(whatsappTemplates).values(values).returning();
+
+    if (!template) throw new MetaApiError("Não foi possível salvar o template.");
+    res.status(201).json(templateResponse(template));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Template inválido.";
+    logger.warn({ message }, "WhatsApp template import failed");
+    res.status(400).json({ error: message });
+  }
+});
+
+router.get("/templates/costs", (_req, res) => {
+  res.json(
+    GetTemplateCostsResponse.parse({
+      currency: process.env.WHATSAPP_ESTIMATED_COST_CURRENCY ?? "BRL",
+      costPerMessage: estimatedCostPerMessage(),
+      source: "Estimativa configurada no servidor",
+      disclaimer: "O valor real varia conforme país, categoria e cobrança vigente da Meta.",
+    }),
+  );
+});
+
+router.post("/templates/:templateId/dispatch", async (req, res) => {
+  try {
+    const params = DispatchTemplateParams.parse(req.params);
+    const input = DispatchTemplateBody.parse(req.body);
+    if (!activeConnection) {
+      res.status(400).json({ error: "Conecte a API Oficial antes de disparar templates." });
+      return;
+    }
+
+    const [template] = await db
+      .select()
+      .from(whatsappTemplates)
+      .where(eq(whatsappTemplates.id, params.templateId))
+      .limit(1);
+    if (!template) {
+      res.status(404).json({ error: "Template não encontrado." });
+      return;
+    }
+
+    const recipients = [...new Set(input.recipients.map(normalizePhone).filter((phone) => phone.length >= 8))];
+    if (recipients.length === 0) {
+      res.status(400).json({ error: "Informe pelo menos um telefone válido com DDI." });
+      return;
+    }
+
+    const results: Array<{ phoneNumber: string; status: "sent" | "failed"; message: string | null }> = [];
+    for (const phoneNumber of recipients) {
+      try {
+        const whatsappMessageId = await sendTemplateMessage(
+          activeConnection.selectedPhoneNumberId,
+          phoneNumber,
+          template,
+          input.variables ?? [],
+          activeConnection.accessToken,
+        );
+        const contact = await getOrCreateContact(phoneNumber);
+        const conversation = await getOrCreateConversation(
+          contact.id,
+          activeConnection.selectedPhoneNumberId,
+        );
+        await db.insert(chatMessages).values({
+          conversationId: conversation.id,
+          whatsappMessageId,
+          direction: "outbound",
+          messageType: "template",
+          content: renderTemplateBody(template.body, input.variables ?? []),
+          status: "sent",
+        });
+        await db
+          .update(conversations)
+          .set({ lastMessageAt: new Date(), updatedAt: new Date() })
+          .where(eq(conversations.id, conversation.id));
+        results.push({ phoneNumber, status: "sent", message: null });
+      } catch (error) {
+        results.push({
+          phoneNumber,
+          status: "failed",
+          message: error instanceof Error ? error.message : "Falha ao enviar.",
+        });
+      }
+    }
+
+    const sentCount = results.filter((result) => result.status === "sent").length;
+    res.status(201).json(
+      DispatchTemplateResponse.parse({
+        template: templateResponse(template),
+        recipientsCount: recipients.length,
+        sentCount,
+        failedCount: recipients.length - sentCount,
+        estimatedCost: Number((recipients.length * estimatedCostPerMessage()).toFixed(4)),
+        currency: process.env.WHATSAPP_ESTIMATED_COST_CURRENCY ?? "BRL",
+        results,
+      }),
+    );
+  } catch (error) {
+    const status = error instanceof MetaApiError ? error.status : 400;
+    const message = error instanceof Error ? error.message : "Falha ao disparar template.";
+    logger.warn({ status, message }, "WhatsApp template dispatch failed");
     res.status(status).json({ error: message });
   }
 });

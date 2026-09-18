@@ -144,6 +144,18 @@ export const SendConversationMessageResponse = zod.object({
 
 
 /**
+ * @summary Delete a conversation from the local inbox history
+ */
+export const DeleteConversationParams = zod.object({
+  "conversationId": zod.coerce.number().int()
+})
+
+export const DeleteConversationResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
  * @summary Start a new conversation with a phone number
  */
 export const startConversationBodyPhoneNumberMin = 8;
@@ -184,6 +196,116 @@ export const StartConversationResponse = zod.object({
   "createdAt": zod.string(),
   "whatsappMessageId": zod.string().nullable()
 })
+})
+
+
+/**
+ * @summary List imported WhatsApp message templates
+ */
+export const ListTemplatesResponseItem = zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "languageCode": zod.string(),
+  "category": zod.string(),
+  "status": zod.string(),
+  "header": zod.string().nullable(),
+  "body": zod.string(),
+  "footer": zod.string().nullable(),
+  "variables": zod.array(zod.string()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+export const ListTemplatesResponse = zod.array(ListTemplatesResponseItem)
+
+
+/**
+ * @summary Import a WhatsApp template definition
+ */
+
+export const createTemplateBodyLanguageCodeMin = 2;
+
+
+
+
+
+export const CreateTemplateBody = zod.object({
+  "name": zod.string().min(1),
+  "languageCode": zod.string().min(createTemplateBodyLanguageCodeMin),
+  "category": zod.string().min(1),
+  "status": zod.string().optional(),
+  "header": zod.string().nullish(),
+  "body": zod.string().min(1),
+  "footer": zod.string().nullish(),
+  "variables": zod.array(zod.string()).optional()
+})
+
+export const CreateTemplateResponse = zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "languageCode": zod.string(),
+  "category": zod.string(),
+  "status": zod.string(),
+  "header": zod.string().nullable(),
+  "body": zod.string(),
+  "footer": zod.string().nullable(),
+  "variables": zod.array(zod.string()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Get the configured estimated WhatsApp API cost
+ */
+export const GetTemplateCostsResponse = zod.object({
+  "currency": zod.string(),
+  "costPerMessage": zod.number(),
+  "source": zod.string(),
+  "disclaimer": zod.string()
+})
+
+
+/**
+ * @summary Send an imported WhatsApp template to multiple recipients
+ */
+export const DispatchTemplateParams = zod.object({
+  "templateId": zod.coerce.number().int()
+})
+
+export const dispatchTemplateBodyRecipientsItemMin = 8;
+
+
+
+
+export const DispatchTemplateBody = zod.object({
+  "recipients": zod.array(zod.string().min(dispatchTemplateBodyRecipientsItemMin)).min(1),
+  "variables": zod.array(zod.string()).optional()
+})
+
+export const DispatchTemplateResponse = zod.object({
+  "template": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "languageCode": zod.string(),
+  "category": zod.string(),
+  "status": zod.string(),
+  "header": zod.string().nullable(),
+  "body": zod.string(),
+  "footer": zod.string().nullable(),
+  "variables": zod.array(zod.string()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}),
+  "recipientsCount": zod.number().int(),
+  "sentCount": zod.number().int(),
+  "failedCount": zod.number().int(),
+  "estimatedCost": zod.number(),
+  "currency": zod.string(),
+  "results": zod.array(zod.object({
+  "phoneNumber": zod.string(),
+  "status": zod.enum(['sent', 'failed']),
+  "message": zod.string().nullable()
+}))
 })
 
 

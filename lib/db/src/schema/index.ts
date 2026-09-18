@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  jsonb,
   pgTable,
   serial,
   text,
@@ -78,6 +79,31 @@ export const appSettings = pgTable("whatsapp_app_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const whatsappTemplates = pgTable(
+  "whatsapp_templates",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    languageCode: text("language_code").notNull(),
+    category: text("category").notNull(),
+    status: text("status").notNull().default("IMPORTED"),
+    header: text("header"),
+    body: text("body").notNull(),
+    footer: text("footer"),
+    variables: jsonb("variables").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    nameLanguageUnique: uniqueIndex("whatsapp_templates_name_language_unique").on(
+      table.name,
+      table.languageCode,
+    ),
+    updatedAtIndex: index("whatsapp_templates_updated_at_idx").on(table.updatedAt),
+  }),
+);
+
 export type Contact = typeof contacts.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+export type WhatsappTemplate = typeof whatsappTemplates.$inferSelect;

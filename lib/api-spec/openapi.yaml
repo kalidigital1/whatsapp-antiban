@@ -147,6 +147,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /conversations/{conversationId}:
+    delete:
+      operationId: deleteConversation
+      tags: [whatsapp]
+      summary: Delete a conversation from the local inbox history
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation deleted from the local inbox
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations/start:
     post:
       operationId: startConversation

@@ -98,6 +98,80 @@ export interface StartConversationResult {
 
 export interface WebhookPayload { [key: string]: unknown }
 
+export interface Template {
+  id: number;
+  name: string;
+  languageCode: string;
+  category: string;
+  status: string;
+  /** @nullable */
+  header: string | null;
+  body: string;
+  /** @nullable */
+  footer: string | null;
+  variables: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TemplateInput {
+  /** @minLength 1 */
+  name: string;
+  /** @minLength 2 */
+  languageCode: string;
+  /** @minLength 1 */
+  category: string;
+  status?: string;
+  /** @nullable */
+  header?: string | null;
+  /** @minLength 1 */
+  body: string;
+  /** @nullable */
+  footer?: string | null;
+  variables?: string[];
+}
+
+export interface TemplateDispatchInput {
+  /**
+     * @minItems 1
+     * @items.minLength 8
+     */
+  recipients: string[];
+  variables?: string[];
+}
+
+export interface TemplateCostSummary {
+  currency: string;
+  costPerMessage: number;
+  source: string;
+  disclaimer: string;
+}
+
+export type TemplateDispatchRecipientStatus = typeof TemplateDispatchRecipientStatus[keyof typeof TemplateDispatchRecipientStatus];
+
+
+export const TemplateDispatchRecipientStatus = {
+  sent: 'sent',
+  failed: 'failed',
+} as const;
+
+export interface TemplateDispatchRecipient {
+  phoneNumber: string;
+  status: TemplateDispatchRecipientStatus;
+  /** @nullable */
+  message: string | null;
+}
+
+export interface TemplateDispatchResult {
+  template: Template;
+  recipientsCount: number;
+  sentCount: number;
+  failedCount: number;
+  estimatedCost: number;
+  currency: string;
+  results: TemplateDispatchRecipient[];
+}
+
 export type VerifyWebhookParams = {
 'hub.mode': string;
 'hub.verify_token': string;

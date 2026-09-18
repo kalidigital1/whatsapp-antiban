@@ -30,6 +30,11 @@ import type {
   StartConversationInput,
   StartConversationResult,
   SuccessResponse,
+  Template,
+  TemplateCostSummary,
+  TemplateDispatchInput,
+  TemplateDispatchResult,
+  TemplateInput,
   VerifyWebhookParams,
   WebhookPayload
 } from './api.schemas';
@@ -621,6 +626,80 @@ export const useSendConversationMessage = <TError = ErrorType<ErrorResponse>,
       return useMutation(getSendConversationMessageMutationOptions(options));
     }
 
+export const getDeleteConversationUrl = (conversationId: number,) => {
+
+
+
+
+  return `/api/conversations/${conversationId}`
+}
+
+/**
+ * @summary Delete a conversation from the local inbox history
+ */
+export const deleteConversation = async (conversationId: number, options?: Parameters<typeof customFetch>[1]): Promise<SuccessResponse> => {
+
+  return customFetch<SuccessResponse>(getDeleteConversationUrl(conversationId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteConversationMutationKey = () => ['deleteConversation'] as const;
+
+export const getDeleteConversationMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConversation>>, TError,DeleteConversationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteConversation>>, TError,DeleteConversationMutationVariables, TContext> => {
+
+const mutationKey = getDeleteConversationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteConversation>>, DeleteConversationMutationVariables> = (props) => {
+          const {conversationId} = props ?? {};
+
+          return  deleteConversation(conversationId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteConversationMutationResult = NonNullable<Awaited<ReturnType<typeof deleteConversation>>>
+
+    export type DeleteConversationMutationError = ErrorType<ErrorResponse>
+    export type DeleteConversationMutationVariables = {conversationId: number}
+
+    /**
+ * @summary Delete a conversation from the local inbox history
+ */
+export const useDeleteConversation = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConversation>>, TError,DeleteConversationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteConversation>>,
+        TError,
+        DeleteConversationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteConversationMutationOptions(options));
+    }
+
 export const getStartConversationUrl = () => {
 
 
@@ -707,6 +786,337 @@ export const useStartConversation = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getStartConversationMutationOptions(options));
+    }
+
+export const getListTemplatesUrl = () => {
+
+
+
+
+  return `/api/templates`
+}
+
+/**
+ * @summary List imported WhatsApp message templates
+ */
+export const listTemplates = async ( options?: Parameters<typeof customFetch>[1]): Promise<Template[]> => {
+
+  return customFetch<Template[]>(getListTemplatesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTemplatesQueryKey = () => {
+    return [
+    `/api/templates`
+    ] as const;
+    }
+
+
+export const getListTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listTemplates>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTemplates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTemplatesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTemplates>>> = ({ signal }) => listTemplates({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTemplates>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof listTemplates>>>
+export type ListTemplatesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List imported WhatsApp message templates
+ */
+
+export function useListTemplates<TData = Awaited<ReturnType<typeof listTemplates>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTemplates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListTemplatesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateTemplateUrl = () => {
+
+
+
+
+  return `/api/templates`
+}
+
+/**
+ * @summary Import a WhatsApp template definition
+ */
+export const createTemplate = async (templateInput: TemplateInput, options?: Parameters<typeof customFetch>[1]): Promise<Template> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Template>(getCreateTemplateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(templateInput)
+  }
+);}
+
+
+
+
+
+export const getCreateTemplateMutationKey = () => ['createTemplate'] as const;
+
+export const getCreateTemplateMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTemplate>>, TError,CreateTemplateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createTemplate>>, TError,CreateTemplateMutationVariables, TContext> => {
+
+const mutationKey = getCreateTemplateMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createTemplate>>, CreateTemplateMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createTemplate(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof createTemplate>>>
+    export type CreateTemplateMutationBody = BodyType<TemplateInput>
+    export type CreateTemplateMutationError = ErrorType<ErrorResponse>
+    export type CreateTemplateMutationVariables = {data: BodyType<TemplateInput>}
+
+    /**
+ * @summary Import a WhatsApp template definition
+ */
+export const useCreateTemplate = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTemplate>>, TError,CreateTemplateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createTemplate>>,
+        TError,
+        CreateTemplateMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateTemplateMutationOptions(options));
+    }
+
+export const getGetTemplateCostsUrl = () => {
+
+
+
+
+  return `/api/templates/costs`
+}
+
+/**
+ * @summary Get the configured estimated WhatsApp API cost
+ */
+export const getTemplateCosts = async ( options?: Parameters<typeof customFetch>[1]): Promise<TemplateCostSummary> => {
+
+  return customFetch<TemplateCostSummary>(getGetTemplateCostsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTemplateCostsQueryKey = () => {
+    return [
+    `/api/templates/costs`
+    ] as const;
+    }
+
+
+export const getGetTemplateCostsQueryOptions = <TData = Awaited<ReturnType<typeof getTemplateCosts>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTemplateCosts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTemplateCostsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTemplateCosts>>> = ({ signal }) => getTemplateCosts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTemplateCosts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTemplateCostsQueryResult = NonNullable<Awaited<ReturnType<typeof getTemplateCosts>>>
+export type GetTemplateCostsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the configured estimated WhatsApp API cost
+ */
+
+export function useGetTemplateCosts<TData = Awaited<ReturnType<typeof getTemplateCosts>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTemplateCosts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTemplateCostsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDispatchTemplateUrl = (templateId: number,) => {
+
+
+
+
+  return `/api/templates/${templateId}/dispatch`
+}
+
+/**
+ * @summary Send an imported WhatsApp template to multiple recipients
+ */
+export const dispatchTemplate = async (templateId: number,
+    templateDispatchInput: TemplateDispatchInput, options?: Parameters<typeof customFetch>[1]): Promise<TemplateDispatchResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<TemplateDispatchResult>(getDispatchTemplateUrl(templateId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(templateDispatchInput)
+  }
+);}
+
+
+
+
+
+export const getDispatchTemplateMutationKey = () => ['dispatchTemplate'] as const;
+
+export const getDispatchTemplateMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dispatchTemplate>>, TError,DispatchTemplateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof dispatchTemplate>>, TError,DispatchTemplateMutationVariables, TContext> => {
+
+const mutationKey = getDispatchTemplateMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dispatchTemplate>>, DispatchTemplateMutationVariables> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  dispatchTemplate(templateId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DispatchTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof dispatchTemplate>>>
+    export type DispatchTemplateMutationBody = BodyType<TemplateDispatchInput>
+    export type DispatchTemplateMutationError = ErrorType<ErrorResponse>
+    export type DispatchTemplateMutationVariables = {templateId: number;data: BodyType<TemplateDispatchInput>}
+
+    /**
+ * @summary Send an imported WhatsApp template to multiple recipients
+ */
+export const useDispatchTemplate = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dispatchTemplate>>, TError,DispatchTemplateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof dispatchTemplate>>,
+        TError,
+        DispatchTemplateMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDispatchTemplateMutationOptions(options));
     }
 
 export const getVerifyWebhookUrl = (params: VerifyWebhookParams,) => {

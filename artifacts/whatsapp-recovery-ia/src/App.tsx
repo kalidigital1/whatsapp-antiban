@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -6,7 +6,10 @@ import {
   Check,
   CheckCheck,
   CircleHelp,
+  CircleDollarSign,
   Clipboard,
+  FileJson,
+  FileText,
   Inbox,
   Loader2,
   Menu,
@@ -19,6 +22,8 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
+  Trash2,
+  Upload,
   UserRound,
   Video,
   Wifi,
@@ -26,18 +31,28 @@ import {
 } from 'lucide-react';
 import {
   getGetConnectionQueryKey,
+  getGetTemplateCostsQueryKey,
   getListConversationMessagesQueryKey,
   getListConversationsQueryKey,
+  getListTemplatesQueryKey,
   useConnectWhatsApp,
+  useCreateTemplate,
   useDisconnectWhatsApp,
+  useDeleteConversation,
+  useDispatchTemplate,
   useGetConnection,
+  useGetTemplateCosts,
   useListConversationMessages,
   useListConversations,
+  useListTemplates,
   useSendConversationMessage,
   useStartConversation,
   type ChatMessage,
   type ConnectionStatus,
   type Conversation,
+  type Template,
+  type TemplateDispatchResult,
+  type TemplateInput,
 } from '@workspace/api-client-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -96,12 +111,13 @@ function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'la
   );
 }
 
-function NavigationRail({ onSettings, connected, profilePictureUrl }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null }) {
+function NavigationRail({ onSettings, connected, profilePictureUrl, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; activeSection: 'inbox' | 'templates'; onSectionChange: (section: 'inbox' | 'templates') => void }) {
   return (
     <aside className="wa-rail" aria-label="Navegação principal">
       <div className="rail-brand" aria-label="WhatsApp Recovery IA"><MessageCircle size={23} /></div>
       <nav className="rail-nav">
-        <button type="button" className="rail-btn" data-active="true" onClick={() => undefined} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={23} /></button>
+        <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={23} /></button>
+        <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Templates" data-testid="rail-templates"><FileText size={22} strokeWidth={1.8} /></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Atualizações" data-testid="rail-updates"><Wifi size={22} /></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={22} /></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Chamadas" data-testid="rail-calls"><Phone size={22} /></button>
@@ -294,11 +310,13 @@ function ChatPanel({
   connected,
   onBack,
   onSettings,
+  onDeleteConversation,
 }: {
   conversation: Conversation | undefined;
   connected: boolean;
   onBack: () => void;
   onSettings: () => void;
+  onDeleteConversation: () => void;
 }) {
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
@@ -347,6 +365,7 @@ function ChatPanel({
               <div className="absolute right-0 top-11 z-10 w-52 rounded-lg border border-[#4b514e] bg-[#272b29] p-2 shadow-2xl" data-testid="menu-chat-options">
                 <div className="flex items-center gap-2 rounded-md px-2 py-2 text-xs text-[#c0cac4]"><UserRound size={14} /> Dados do contato</div>
                 <div className="border-t border-[#404643] px-2 pb-1 pt-2 text-[11px] text-[#eef3ef]">{conversation.contact.phoneNumber}</div>
+                  <button type="button" className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#efaaa2] hover:bg-[#432725]" onClick={() => { setMenuOpen(false); onDeleteConversation(); }} data-testid="button-delete-conversation"><Trash2 size={14} /> Apagar conversa da inbox</button>
               </div>
             )}
           </div>
@@ -390,6 +409,46 @@ function ChatPanel({
         {sendMessage.isError && <p className="mx-auto mt-2 max-w-[1000px] text-right text-[11px] text-[#eea59e]" data-testid="status-send-error">{errorText(sendMessage.error)}</p>}
       </div>
     </section>
+  );
+}
+
+function DeleteConversationDialog({
+  conversation,
+  pending,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  conversation: Conversation;
+  pending: boolean;
+  error: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="delete-conversation-title" data-testid="dialog-delete-conversation">
+      <div className="settings-card rise-in">
+        <div className="settings-section flex items-start justify-between">
+          <div>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[.12em] text-[#eea59e]">Ação permanente</p>
+            <h2 id="delete-conversation-title" className="settings-title">Apagar conversa?</h2>
+            <p className="settings-copy">As mensagens de <strong className="text-[#e5ece8]">{conversation.contact.name}</strong> serão removidas desta inbox e do histórico local.</p>
+          </div>
+          <button type="button" className="action-btn" onClick={onClose} disabled={pending} data-testid="button-close-delete-conversation" aria-label="Cancelar exclusão"><X size={20} /></button>
+        </div>
+        <div className="space-y-4 p-5">
+          <div className="status-note"><AlertCircle size={16} /><span>A conversa remota no WhatsApp não é apagada. Esta ação remove somente a cópia persistida nesta plataforma.</span></div>
+          {error && <p className="flex items-center gap-2 text-xs text-[#eea59e]" data-testid="status-delete-conversation-error"><AlertCircle size={15} />{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={onClose} disabled={pending} data-testid="button-cancel-delete-conversation">Cancelar</button>
+            <button type="button" className="btn-primary btn-danger" onClick={onConfirm} disabled={pending} data-testid="button-confirm-delete-conversation">
+              {pending ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+              {pending ? 'Apagando...' : 'Apagar conversa'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -517,6 +576,212 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
   );
 }
 
+function normalizeImportedTemplate(value: unknown): TemplateInput {
+  const root = Array.isArray(value) ? value[0] : value;
+  const source = (root && typeof root === 'object' ? root : {}) as Record<string, unknown>;
+  const nested = Array.isArray(source.templates) ? source.templates[0] : undefined;
+  const data = (nested && typeof nested === 'object' ? nested : source) as Record<string, unknown>;
+  const components = Array.isArray(data.components) ? data.components.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : [];
+  const componentText = (type: string) => {
+    const component = components.find((item) => String(item.type ?? '').toUpperCase() === type);
+    return typeof component?.text === 'string' ? component.text : null;
+  };
+  const body = typeof data.body === 'string' ? data.body : componentText('BODY');
+  const header = typeof data.header === 'string' ? data.header : componentText('HEADER');
+  const footer = typeof data.footer === 'string' ? data.footer : componentText('FOOTER');
+  const variableMatches = (body ?? '').match(/{{\s*[^}]+\s*}}/g) ?? [];
+  const rawVariables = Array.isArray(data.variables) ? data.variables.filter((item): item is string => typeof item === 'string') : variableMatches;
+  const name = typeof data.name === 'string' ? data.name : '';
+  const languageCode = typeof data.languageCode === 'string'
+    ? data.languageCode
+    : typeof data.language_code === 'string'
+      ? data.language_code
+      : typeof data.language === 'string'
+        ? data.language
+        : (data.language && typeof data.language === 'object' && typeof (data.language as Record<string, unknown>).code === 'string' ? String((data.language as Record<string, unknown>).code) : '');
+  const category = typeof data.category === 'string' ? data.category : 'UTILITY';
+  const status = typeof data.status === 'string' ? data.status : undefined;
+  if (!name.trim() || !languageCode.trim() || !body?.trim()) throw new Error('O JSON precisa conter name, languageCode (ou language_code) e body (ou um componente BODY).');
+  return {
+    name: name.trim(),
+    languageCode: languageCode.trim(),
+    category: category.trim() || 'UTILITY',
+    ...(status ? { status } : {}),
+    header: header?.trim() || null,
+    body: body.trim(),
+    footer: footer?.trim() || null,
+    variables: rawVariables,
+  };
+}
+
+function TemplateWorkspace() {
+  const queryClient = useQueryClient();
+  const templatesQuery = useListTemplates({ query: { queryKey: getListTemplatesQueryKey() } });
+  const costsQuery = useGetTemplateCosts({ query: { queryKey: getGetTemplateCostsQueryKey() } });
+  const createTemplate = useCreateTemplate();
+  const dispatchTemplate = useDispatchTemplate();
+  const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [importDraft, setImportDraft] = useState<TemplateInput | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [importError, setImportError] = useState('');
+  const [recipientsText, setRecipientsText] = useState('');
+  const [variablesText, setVariablesText] = useState('');
+  const [dispatchError, setDispatchError] = useState('');
+  const [dispatchResult, setDispatchResult] = useState<TemplateDispatchResult | null>(null);
+  const selectedTemplate = useMemo(() => templates.find((template) => template.id === selectedId), [templates, selectedId]);
+  const recipients = useMemo(() => recipientsText.split(/[,\n;]+/).map((item) => item.trim()).filter(Boolean), [recipientsText]);
+  const variables = useMemo(() => variablesText.split(/[,\n;]+/).map((item) => item.trim()).filter(Boolean), [variablesText]);
+  const cost = costsQuery.data;
+  const estimatedTotal = cost ? cost.costPerMessage * recipients.length : null;
+
+  useEffect(() => {
+    if (selectedId === null && templates.length > 0) setSelectedId(templates[0].id);
+    if (selectedId !== null && templates.length > 0 && !templates.some((template) => template.id === selectedId)) setSelectedId(templates[0].id);
+    if (templates.length === 0) setSelectedId(null);
+  }, [templates, selectedId]);
+
+  useEffect(() => {
+    if (selectedTemplate) setVariablesText(selectedTemplate.variables.join(', '));
+  }, [selectedTemplate]);
+
+  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setImportError('');
+    setImportDraft(null);
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      setImportDraft(normalizeImportedTemplate(parsed));
+    } catch (error) {
+      setImportError(error instanceof SyntaxError ? 'O arquivo não contém um JSON válido.' : errorText(error));
+    }
+    event.target.value = '';
+  };
+
+  const submitImport = () => {
+    if (!importDraft || createTemplate.isPending) return;
+    createTemplate.mutate({ data: importDraft }, {
+      onSuccess: (created) => {
+        queryClient.setQueryData<Template[]>(getListTemplatesQueryKey(), (current = []) => current.some((template) => template.id === created.id) ? current : [...current, created]);
+        void queryClient.invalidateQueries({ queryKey: getListTemplatesQueryKey() });
+        setSelectedId(created.id);
+        setImportDraft(null);
+        setFileName('');
+      },
+      onError: (error) => setImportError(errorText(error)),
+    });
+  };
+
+  const dispatch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setDispatchError('');
+    setDispatchResult(null);
+    if (!selectedTemplate) { setDispatchError('Selecione um template aprovado para continuar.'); return; }
+    if (selectedTemplate.status.toLowerCase() !== 'approved') { setDispatchError('Somente templates aprovados podem ser enviados pela API oficial.'); return; }
+    if (recipients.length === 0) { setDispatchError('Informe ao menos um número de telefone.'); return; }
+    dispatchTemplate.mutate({ templateId: selectedTemplate.id, data: { recipients, ...(variables.length ? { variables } : {}) } }, {
+      onSuccess: (result) => setDispatchResult(result),
+      onError: (error) => setDispatchError(errorText(error)),
+    });
+  };
+
+  const statusLabel = (status: string) => {
+    const normalized = status.toLowerCase();
+    return normalized === 'approved' ? 'Aprovado' : normalized === 'pending' ? 'Pendente' : normalized === 'rejected' ? 'Rejeitado' : status;
+  };
+
+  return (
+    <section className="templates-area" data-testid="workspace-templates">
+      <header className="templates-topbar">
+        <div>
+          <p className="templates-kicker">WhatsApp Cloud API · operação</p>
+          <h1 className="templates-title">Templates de mensagem</h1>
+          <p className="templates-subtitle">Importe uma definição aprovada, revise e envie para sua lista.</p>
+        </div>
+        <div className="templates-connection-note"><ShieldCheck size={14} /> envio oficial pela Meta</div>
+      </header>
+      <div className="templates-body">
+        <section className="templates-library" aria-label="Biblioteca de templates" data-testid="template-list">
+          <div className="templates-section-label"><span>Biblioteca</span><span className="templates-count">{templates.length} {templates.length === 1 ? 'template' : 'templates'}</span></div>
+          {templatesQuery.isLoading && <div className="templates-loading" data-testid="state-templates-loading"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div>}
+          {templatesQuery.isError && <div className="status-note" data-testid="state-templates-error"><AlertCircle size={16} /><span>Não foi possível carregar os templates.</span></div>}
+          {!templatesQuery.isLoading && !templatesQuery.isError && templates.length === 0 && (
+            <div className="template-empty" data-testid="state-templates-empty"><FileText size={27} strokeWidth={1.5} /><div><strong>Nenhum template importado</strong><p>Use um JSON exportado da Meta ou a definição normalizada abaixo.</p></div></div>
+          )}
+          {!templatesQuery.isLoading && templates.length > 0 && (
+            <div className="template-list">
+              {templates.map((template) => (
+                <button type="button" key={template.id} className="template-row" data-active={template.id === selectedId} onClick={() => { setSelectedId(template.id); setDispatchResult(null); }} data-testid={`template-row-${template.id}`}>
+                  <span className="template-row-name">{template.name}</span>
+                  <span className="template-row-meta"><span>{template.languageCode}</span><span>·</span><span>{template.category}</span><span className="template-status" data-status={template.status.toLowerCase()}>{statusLabel(template.status)}</span></span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="template-import-card">
+            <div className="template-import-heading"><FileJson size={16} /><span>Importar arquivo JSON</span></div>
+            <p className="template-import-help">Aceita o formato normalizado e exportações da Meta com componentes BODY, HEADER e FOOTER.</p>
+            <label className="template-file-label" htmlFor="template-json-file"><Upload size={15} /> Escolher arquivo JSON<input id="template-json-file" type="file" accept="application/json,.json" onChange={handleFile} data-testid="input-template-file" /></label>
+            {fileName && <p className="template-file-name" data-testid="text-template-file-name">{fileName}{importDraft ? ' · pronto para importar' : ''}</p>}
+            {importDraft && (
+              <div className="mt-3 grid gap-2">
+                <p className="text-[11px] text-[#b9c8be]"><strong>{importDraft.name}</strong> · {importDraft.languageCode} · {importDraft.category}</p>
+                <button type="button" className="btn-primary w-full" onClick={submitImport} disabled={createTemplate.isPending} data-testid="button-import-template">{createTemplate.isPending ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}{createTemplate.isPending ? 'Importando...' : 'Importar template'}</button>
+              </div>
+            )}
+            {importError && <p className="template-inline-error mt-3" data-testid="status-template-import-error"><AlertCircle size={15} />{importError}</p>}
+          </div>
+        </section>
+        <section className="templates-dispatch" aria-label="Envio de template">
+          <div className="templates-section-label"><span>Revisão e envio</span><span className="templates-count">API oficial</span></div>
+          {selectedTemplate ? (
+            <>
+              <div className="template-preview-card" data-testid={`template-preview-${selectedTemplate.id}`}>
+                <div className="template-preview-header">
+                  <div><h2 className="template-preview-name">{selectedTemplate.name}</h2><p className="template-preview-meta">{selectedTemplate.languageCode} · {selectedTemplate.category} · {statusLabel(selectedTemplate.status)}</p></div>
+                  <span className="template-status" data-status={selectedTemplate.status.toLowerCase()}>{statusLabel(selectedTemplate.status)}</span>
+                </div>
+                <div className="template-message-preview">
+                  {selectedTemplate.header && <div className="template-message-header">{selectedTemplate.header}</div>}
+                  <div>{selectedTemplate.body}</div>
+                  {selectedTemplate.footer && <div className="template-message-footer">{selectedTemplate.footer}</div>}
+                </div>
+              </div>
+              <form className="template-dispatch-form" onSubmit={dispatch}>
+                <div className="field"><label className="field-label" htmlFor="template-recipients">Destinatários</label><textarea id="template-recipients" className="field-input min-h-24 resize-y" value={recipientsText} onChange={(event) => setRecipientsText(event.target.value)} placeholder="+55 11 99999-0000&#10;+55 21 98888-0000" data-testid="input-template-recipients" /><p className="field-help">Separe números por linha, vírgula ou ponto e vírgula. {recipients.length > 0 ? `${recipients.length} destinatário(s) detectado(s).` : ''}</p></div>
+                <div className="field"><label className="field-label" htmlFor="template-variables">Variáveis</label><textarea id="template-variables" className="field-input min-h-20 resize-y" value={variablesText} onChange={(event) => setVariablesText(event.target.value)} placeholder="Nome do cliente, código do pedido" data-testid="input-template-variables" /><p className="field-help">Valores na ordem dos placeholders do template. Separe por linha, vírgula ou ponto e vírgula.</p></div>
+                <div className="template-cost-card" data-testid="template-cost-summary">
+                  <div><div className="template-cost-label"><CircleDollarSign size={13} className="mr-1 inline-block align-[-2px]" />Estimativa para {recipients.length || 0} destinatário(s)</div><div className="template-cost-value">{cost ? `${cost.currency} ${estimatedTotal?.toFixed(2)}` : costsQuery.isLoading ? 'Consultando tarifa...' : 'Tarifa indisponível'}</div></div>
+                  <p className="template-cost-note">{cost?.disclaimer ?? (costsQuery.isError ? 'Não foi possível consultar a tarifa configurada.' : 'A estimativa será carregada pela API.')}</p>
+                </div>
+                {dispatchError && <p className="template-inline-error" data-testid="status-template-dispatch-error"><AlertCircle size={15} />{dispatchError}</p>}
+                <button type="submit" className="btn-primary w-full" disabled={dispatchTemplate.isPending || !selectedTemplate} data-testid="button-dispatch-template">{dispatchTemplate.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{dispatchTemplate.isPending ? 'Enviando pelo WhatsApp...' : 'Revisar e enviar template'}</button>
+              </form>
+              {dispatchResult && (
+                <div className="template-results-card rise-in" data-testid="template-dispatch-results">
+                  <div className="template-results-summary">
+                    <div className="template-result-stat"><span>Destinatários</span><strong>{dispatchResult.recipientsCount}</strong></div>
+                    <div className="template-result-stat" data-tone="success"><span>Enviados</span><strong>{dispatchResult.sentCount}</strong></div>
+                    <div className="template-result-stat" data-tone="error"><span>Falhas</span><strong>{dispatchResult.failedCount}</strong></div>
+                    <div className="template-result-stat"><span>Estimativa</span><strong>{dispatchResult.currency} {dispatchResult.estimatedCost.toFixed(2)}</strong></div>
+                  </div>
+                  {dispatchResult.results.map((result) => (
+                    <div className="template-result-row" key={`${result.phoneNumber}-${result.status}`}><span className="template-result-phone">{result.phoneNumber}</span><span className="template-result-message">{result.message ?? ''}</span><span className="template-result-status" data-status={result.status}><span className="dot" />{result.status === 'sent' ? 'enviado' : 'falhou'}</span></div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="template-empty" data-testid="state-template-selection-empty"><FileText size={28} strokeWidth={1.5} /><div><strong>Selecione um template</strong><p>Depois de importar ou escolher um item, a revisão e o envio aparecem aqui.</p></div></div>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function Home() {
   const conversationsQuery = useListConversations({ query: { refetchInterval: 5000, queryKey: getListConversationsQueryKey() } });
   const connectionQuery = useGetConnection({ query: { refetchInterval: 10000, queryKey: getGetConnectionQueryKey() } });
@@ -526,12 +791,35 @@ function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [mobileListOpen, setMobileListOpen] = useState(true);
+  const [activeSection, setActiveSection] = useState<'inbox' | 'templates'>('inbox');
+  const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const deleteConversation = useDeleteConversation();
   const selectedConversation = useMemo(() => conversations.find((item) => item.id === selectedId), [conversations, selectedId]);
 
   useEffect(() => {
     if (selectedId === null && conversations.length > 0) setSelectedId(conversations[0].id);
     if (selectedId !== null && conversations.length > 0 && !conversations.some((item) => item.id === selectedId)) setSelectedId(null);
   }, [conversations, selectedId]);
+
+  const confirmDeleteConversation = () => {
+    if (!conversationToDelete || deleteConversation.isPending) return;
+    setDeleteError('');
+    deleteConversation.mutate(
+      { conversationId: conversationToDelete.id },
+      {
+        onSuccess: () => {
+          const deletedId = conversationToDelete.id;
+          setConversationToDelete(null);
+          setSelectedId((current) => (current === deletedId ? null : current));
+          setMobileListOpen(true);
+          void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+          void queryClient.removeQueries({ queryKey: getListConversationMessagesQueryKey(deletedId) });
+        },
+        onError: (error) => setDeleteError(errorText(error)),
+      },
+    );
+  };
 
   return (
     <main className="app-frame">
@@ -540,14 +828,21 @@ function Home() {
           onSettings={() => setSettingsOpen(true)}
           connected={Boolean(connection?.connected)}
           profilePictureUrl={connection?.phoneNumbers.find((phone) => phone.id === connection.selectedPhoneNumberId)?.profilePictureUrl}
+          activeSection={activeSection}
+          onSectionChange={setActiveSection}
         />
-        <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={Boolean(connection?.connected)} connection={connection} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
-        <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
-        <ChatPanel conversation={selectedConversation} connected={Boolean(connection?.connected)} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} />
+        {activeSection === 'templates' ? <TemplateWorkspace /> : (
+          <>
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={Boolean(connection?.connected)} connection={connection} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
+            <ChatPanel conversation={selectedConversation} connected={Boolean(connection?.connected)} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
+          </>
+        )}
       </div>
       <button type="button" className="mobile-list-trigger" onClick={() => setMobileListOpen(true)} data-testid="button-open-conversations" aria-label="Abrir lista de conversas"><Menu size={20} /></button>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {newConversationOpen && <NewConversationDialog onClose={() => setNewConversationOpen(false)} onCreated={(conversation) => { setNewConversationOpen(false); setSelectedId(conversation.id); setMobileListOpen(false); }} />}
+      {conversationToDelete && <DeleteConversationDialog conversation={conversationToDelete} pending={deleteConversation.isPending} error={deleteError} onClose={() => { if (!deleteConversation.isPending) { setConversationToDelete(null); setDeleteError(''); } }} onConfirm={confirmDeleteConversation} />}
     </main>
   );
 }
