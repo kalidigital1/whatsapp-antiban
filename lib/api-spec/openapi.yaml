@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: WhatsApp Recovery IA API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: whatsapp
+    description: WhatsApp Cloud API connection and messaging
 paths:
   /healthz:
     get:
@@ -24,6 +26,198 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /connection:
+    get:
+      operationId: getConnection
+      tags: [whatsapp]
+      summary: Get the current WhatsApp connection
+      responses:
+        "200":
+          description: Current connection state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionStatus"
+    post:
+      operationId: connectWhatsApp
+      tags: [whatsapp]
+      summary: Validate credentials and connect to WhatsApp Cloud API
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectionInput"
+      responses:
+        "200":
+          description: Connected account details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionStatus"
+        "400":
+          description: Invalid input or Meta API rejected credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: disconnectWhatsApp
+      tags: [whatsapp]
+      summary: Disconnect the current WhatsApp account
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+  /conversations:
+    get:
+      operationId: listConversations
+      tags: [whatsapp]
+      summary: List conversations received through the webhook
+      responses:
+        "200":
+          description: Conversation list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+  /conversations/{conversationId}/messages:
+    get:
+      operationId: listConversationMessages
+      tags: [whatsapp]
+      summary: List messages for a conversation
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: sendConversationMessage
+      tags: [whatsapp]
+      summary: Send a text message to the contact through WhatsApp Cloud API
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "201":
+          description: Message queued and sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "400":
+          description: Invalid request or disconnected account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /conversations/start:
+    post:
+      operationId: startConversation
+      tags: [whatsapp]
+      summary: Start a new conversation with a phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartConversationInput"
+      responses:
+        "201":
+          description: Created conversation and sent message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartConversationResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /webhook:
+    get:
+      operationId: verifyWebhook
+      tags: [whatsapp]
+      summary: Verify the Meta webhook subscription
+      parameters:
+        - name: hub.mode
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: hub.verify_token
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: hub.challenge
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Challenge string
+          content:
+            text/plain:
+              schema:
+                type: string
+        "403":
+          description: Verification failed
+    post:
+      operationId: receiveWebhook
+      tags: [whatsapp]
+      summary: Receive inbound WhatsApp messages and delivery statuses
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookPayload"
+      responses:
+        "200":
+          description: Webhook accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +227,130 @@ components:
           type: string
       required:
         - status
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required: [success]
+    PhoneNumber:
+      type: object
+      properties:
+        id:
+          type: string
+        displayPhoneNumber:
+          type: string
+        verifiedName:
+          type: string
+        qualityRating:
+          type: string
+      required: [id, displayPhoneNumber, verifiedName, qualityRating]
+    ConnectionInput:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          minLength: 1
+        businessAccountId:
+          type: string
+          minLength: 1
+        phoneNumberId:
+          type: string
+      required: [accessToken, businessAccountId]
+    ConnectionStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        businessAccountId:
+          type: ["string", "null"]
+        phoneNumbers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhoneNumber"
+        selectedPhoneNumberId:
+          type: ["string", "null"]
+        webhookUrl:
+          type: string
+        webhookVerifyTokenConfigured:
+          type: boolean
+        webhookVerifyToken:
+          type: ["string", "null"]
+      required:
+        [connected, businessAccountId, phoneNumbers, selectedPhoneNumberId, webhookUrl, webhookVerifyTokenConfigured, webhookVerifyToken]
+    Contact:
+      type: object
+      properties:
+        name:
+          type: string
+        phoneNumber:
+          type: string
+      required: [name, phoneNumber]
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        contact:
+          $ref: "#/components/schemas/Contact"
+        lastMessage:
+          $ref: "#/components/schemas/ChatMessage"
+        unreadCount:
+          type: integer
+        updatedAt:
+          type: string
+      required: [id, contact, lastMessage, unreadCount, updatedAt]
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        content:
+          type: string
+        messageType:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+        whatsappMessageId:
+          type: ["string", "null"]
+      required: [id, direction, content, messageType, status, createdAt, whatsappMessageId]
+    MessageInput:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+      required: [content]
+    StartConversationInput:
+      type: object
+      properties:
+        phoneNumber:
+          type: string
+          minLength: 8
+        content:
+          type: string
+          minLength: 1
+      required: [phoneNumber, content]
+    StartConversationResult:
+      type: object
+      properties:
+        conversation:
+          $ref: "#/components/schemas/Conversation"
+        message:
+          $ref: "#/components/schemas/ChatMessage"
+      required: [conversation, message]
+    WebhookPayload:
+      type: object
+      additionalProperties: true
 

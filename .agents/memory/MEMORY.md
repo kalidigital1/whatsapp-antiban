@@ -1,0 +1,1 @@
+- [WhatsApp connection security](whatsapp-connection.md) — keep the Meta access token server-side; add persistence only with authenticated, encrypted, user-scoped storage.

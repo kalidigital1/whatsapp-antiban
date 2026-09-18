@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "WhatsApp Recovery IA"
+description = "A dark WhatsApp Business inbox for connecting the official Meta API, receiving webhook messages, browsing conversations, and replying to contacts from one workspace."
+version = "1.0.0"
+id = "artifacts/whatsapp-recovery-ia"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21940
+
+[services.development]
+run = "pnpm --filter @workspace/whatsapp-recovery-ia run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/whatsapp-recovery-ia", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/whatsapp-recovery-ia/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21940"
+BASE_PATH = "/"
