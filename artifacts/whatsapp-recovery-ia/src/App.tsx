@@ -381,7 +381,7 @@ function ChatPanel({
 
       <div className="message-wall quiet-scroll" data-testid={`messages-${conversation.id}`}>
         <div className="message-wall-inner">
-          <div className="wall-notice">Mensagens sincronizadas pelo webhook</div>
+          <div className="wall-notice">Mensagens criptografadas</div>
           {messagesQuery.isLoading && (
             <div className="space-y-3 py-4" data-testid="state-messages-loading">
               <div className="skeleton ml-auto h-11 w-44 rounded-lg opacity-60" />
