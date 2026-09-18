@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import {
   ConnectWhatsAppBody,
   CreateTemplateBody,
@@ -50,6 +50,29 @@ type ActiveConnection = {
 };
 
 let activeConnection: ActiveConnection | null = null;
+const eventClients = new Set<Response>();
+
+type ConversationEvent = {
+  conversationId: number;
+  reason: "message" | "status";
+  whatsappMessageId?: string;
+};
+
+function publishConversationEvent(event: ConversationEvent) {
+  const payload = `event: conversation.updated\ndata: ${JSON.stringify(event)}\n\n`;
+  for (const client of eventClients) {
+    if (client.writableEnded || client.destroyed) {
+      eventClients.delete(client);
+      continue;
+    }
+
+    try {
+      client.write(payload);
+    } catch {
+      eventClients.delete(client);
+    }
+  }
+}
 
 class MetaApiError extends Error {
   status: number;
@@ -462,6 +485,34 @@ router.delete("/connection", (_req, res) => {
   res.json({ success: true });
 });
 
+router.get("/events", (req, res) => {
+  res.status(200);
+  res.set({
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+  res.write(": connected\n\n");
+  eventClients.add(res);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    eventClients.delete(res);
+  };
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded || res.destroyed) {
+      cleanup();
+      return;
+    }
+    res.write(": heartbeat\n\n");
+  }, 25000);
+
+  req.on("close", cleanup);
+  res.on("close", cleanup);
+});
+
 router.get("/conversations", async (_req, res) => {
   try {
     const rows = await db
@@ -830,6 +881,11 @@ router.post("/webhook", async (req, res) => {
               updatedAt: new Date(),
             })
             .where(eq(conversations.id, conversation.id));
+          publishConversationEvent({
+            conversationId: conversation.id,
+            reason: "message",
+            whatsappMessageId,
+          });
         }
 
         const statuses = Array.isArray(value.statuses) ? value.statuses : [];
@@ -838,10 +894,23 @@ router.post("/webhook", async (req, res) => {
           const messageId = stringValue(status.id);
           const statusValue = stringValue(status.status);
           if (!messageId || !statusValue) continue;
+
+          const [storedMessage] = await db
+            .select({ conversationId: chatMessages.conversationId })
+            .from(chatMessages)
+            .where(eq(chatMessages.whatsappMessageId, messageId))
+            .limit(1);
+          if (!storedMessage) continue;
+
           await db
             .update(chatMessages)
             .set({ status: statusValue })
             .where(eq(chatMessages.whatsappMessageId, messageId));
+          publishConversationEvent({
+            conversationId: storedMessage.conversationId,
+            reason: "status",
+            whatsappMessageId: messageId,
+          });
         }
       }
     }

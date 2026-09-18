@@ -103,6 +103,12 @@ function StatusIcon({ status }: { status: string }) {
   return <Loader2 size={13} className="animate-spin" />;
 }
 
+function ConversationPreviewStatus({ status }: { status: string }) {
+  if (status === 'failed') return <AlertCircle size={15} strokeWidth={2.1} />;
+  if (status === 'read' || status === 'delivered') return <CheckCheck size={15} strokeWidth={2.2} />;
+  return <Check size={15} strokeWidth={2.2} />;
+}
+
 function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'large' }) {
   return (
     <div className={`${size === 'large' ? 'chat-contact-photo' : ''} avatar`} aria-hidden="true">
@@ -209,10 +215,6 @@ function Sidebar({
       <ConnectedProfile connection={connection} onSettings={onSettings} />
 
       <div className="sidebar-tools">
-        <div className="list-caption">
-          <span className={`connection-pill ${connected ? '' : 'offline'}`}><span className="dot" />{connected ? 'Conectado' : 'Não conectado'}</span>
-          <span>{conversations.length} {conversations.length === 1 ? 'conversa' : 'conversas'}</span>
-        </div>
         <label className="search-box">
           <Search size={17} />
           <input type="search" placeholder="Pesquisar" value={search} onChange={(event) => setSearch(event.target.value)} data-testid="input-search-conversations" aria-label="Pesquisar conversas" />
@@ -256,7 +258,14 @@ function Sidebar({
                 <span className="conversation-row-time">{formatDay(conversation.updatedAt)}</span>
               </div>
               <div className="conversation-row-preview">
-                <p>{conversation.lastMessage.content || 'Sem mensagem de texto'}</p>
+                <p>
+                  {conversation.lastMessage.direction === 'outbound' && (
+                    <span className={`conversation-row-status ${conversation.lastMessage.status === 'failed' ? 'failed' : ''}`} aria-label={`Status: ${conversation.lastMessage.status}`}>
+                      <ConversationPreviewStatus status={conversation.lastMessage.status} />
+                    </span>
+                  )}
+                  <span className="conversation-row-preview-text">{conversation.lastMessage.content || 'Sem mensagem de texto'}</span>
+                </p>
                 {conversation.unreadCount > 0 && <span className="unread-badge">{conversation.unreadCount}</span>}
               </div>
             </div>
@@ -794,6 +803,30 @@ function Home() {
   const [deleteError, setDeleteError] = useState('');
   const deleteConversation = useDeleteConversation();
   const selectedConversation = useMemo(() => conversations.find((item) => item.id === selectedId), [conversations, selectedId]);
+
+  useEffect(() => {
+    const events = new EventSource('/api/events');
+    const handleConversationUpdate = (event: Event) => {
+      const message = event as MessageEvent<string>;
+      try {
+        const payload = JSON.parse(message.data) as { conversationId?: unknown };
+        if (typeof payload.conversationId !== 'number') return;
+
+        void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+        void queryClient.invalidateQueries({
+          queryKey: getListConversationMessagesQueryKey(payload.conversationId),
+        });
+      } catch {
+        // The stream is best-effort; polling remains the recovery mechanism.
+      }
+    };
+
+    events.addEventListener('conversation.updated', handleConversationUpdate);
+    return () => {
+      events.removeEventListener('conversation.updated', handleConversationUpdate);
+      events.close();
+    };
+  }, []);
 
   useEffect(() => {
     if (selectedId === null && conversations.length > 0) setSelectedId(conversations[0].id);
