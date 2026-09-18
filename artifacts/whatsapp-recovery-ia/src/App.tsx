@@ -198,10 +198,7 @@ function Sidebar({
   return (
     <aside className="sidebar-panel" data-open={mobileOpen}>
       <header className="sidebar-header">
-        <div>
-          <div className="brand-title">Conversas</div>
-          <div className="brand-subtitle">Recovery IA · atendimento</div>
-        </div>
+        <img className="brand-logo" src="/assets/antiban-logo-white.png" alt="Antiban" />
         <div className="flex items-center gap-1">
           <button type="button" className="action-btn" onClick={onNewConversation} data-testid="button-new-conversation" aria-label="Nova conversa"><Plus size={21} /></button>
           <button type="button" className="action-btn md:hidden" onClick={onCloseMobile} data-testid="button-close-sidebar" aria-label="Fechar conversas"><X size={19} /></button>
