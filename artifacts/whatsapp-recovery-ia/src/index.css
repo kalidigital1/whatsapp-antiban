@@ -183,7 +183,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .profile-details { min-width:0; flex:1; }
 .profile-details strong { display:flex; align-items:center; gap:6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:#f1f5f2; font-size:13px; font-weight:500; }
 .profile-details p { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; margin:3px 0 0; color:#9ea9a4; font-size:11px; }
-.verified-badge { width:21px; height:21px; flex:none; object-fit:cover; object-position:left center; }
+.verified-badge { width:18px; height:18px; flex:none; object-fit:cover; object-position:left center; }
 .profile-action { flex:none; }
 .mobile-scrim { display:none; }
 
