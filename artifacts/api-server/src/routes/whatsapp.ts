@@ -848,15 +848,16 @@ function contactDisplayName(contact: typeof contacts.$inferSelect): string {
 
 async function getOrCreateContact(phoneNumber: string, name?: string) {
   const normalizedPhone = normalizePhone(phoneNumber);
-  const candidatePhones = [normalizedPhone];
+  const candidatePhones: string[] = [];
   if (activeConnection) {
     const canonicalPhone = recipientPhoneNumber(normalizedPhone, activeConnection);
-    if (!candidatePhones.includes(canonicalPhone)) candidatePhones.push(canonicalPhone);
     if (canonicalPhone.startsWith("55") && canonicalPhone.length > 12) {
       const localPhone = canonicalPhone.slice(2);
-      if (!candidatePhones.includes(localPhone)) candidatePhones.push(localPhone);
+      candidatePhones.push(localPhone);
     }
+    candidatePhones.push(canonicalPhone);
   }
+  candidatePhones.push(normalizedPhone);
 
   let existing: typeof contacts.$inferSelect | undefined;
   for (const candidatePhone of candidatePhones) {
