@@ -652,7 +652,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title" data-testid="dialog-settings">
       <div className="settings-card rise-in">
         <div className="settings-section flex items-start justify-between">
-          <div><h2 id="settings-title" className="settings-title">Configurações da conta</h2><p className="settings-copy">Credenciais ficam somente na API do servidor.</p></div>
+          <div><h2 id="settings-title" className="settings-title">Configurações da conta</h2></div>
           <button type="button" className="action-btn" onClick={onClose} data-testid="button-close-settings" aria-label="Fechar configurações"><X size={20} /></button>
         </div>
         <div className="space-y-5 p-5">
