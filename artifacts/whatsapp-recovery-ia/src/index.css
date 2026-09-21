@@ -169,7 +169,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .login-card { width:min(410px,100%); padding:34px; border:1px solid #3c4b44; border-radius:16px; background:rgba(26,31,29,.94); box-shadow:0 28px 90px rgba(0,0,0,.42); }
 .login-brand { display:flex; justify-content:center; margin-bottom:28px; }
 .login-brand img { display:block; width:min(190px,70%); height:auto; object-fit:contain; }
-.login-kicker { margin:0 0 8px; color:#68c98a; font-size:10px; font-weight:700; letter-spacing:.14em; text-align:center; text-transform:uppercase; }
+.login-kicker { margin:0 0 8px; color:#ffffff; font-size:10px; font-weight:700; letter-spacing:.14em; text-align:center; text-transform:uppercase; }
 .login-card h1 { margin:0; color:#f0f4f1; font-size:26px; font-weight:500; letter-spacing:-.04em; text-align:center; }
 .login-copy { margin:9px auto 26px; max-width:300px; color:#9ca8a2; font-size:12px; line-height:1.55; text-align:center; }
 .login-form { display:grid; gap:16px; }
