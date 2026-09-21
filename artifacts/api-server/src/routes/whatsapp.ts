@@ -43,6 +43,7 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v23.0";
+const metaRequestTimeoutMs = 15_000;
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
@@ -211,16 +212,10 @@ async function graphRequest<T>(
   accessToken: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(
+  const response = await fetchMeta(
     `https://graph.facebook.com/${graphVersion}/${path}`,
-    {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
-    },
+    accessToken,
+    init,
   );
 
   const body = (await response.json().catch(() => ({}))) as Record<
@@ -236,6 +231,41 @@ async function graphRequest<T>(
   }
 
   return body as T;
+}
+
+async function fetchMeta(
+  url: string,
+  accessToken: string,
+  init: RequestInit = {},
+) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), metaRequestTimeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new MetaApiError(
+        "A Meta não respondeu dentro de 15 segundos. O envio não pôde ser confirmado.",
+        504,
+        "META_TIMEOUT",
+      );
+    }
+    throw new MetaApiError(
+      "Não foi possível alcançar a API da Meta para confirmar o envio.",
+      502,
+      "META_NETWORK_ERROR",
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function subscribeWhatsAppBusinessAccount(
@@ -680,13 +710,10 @@ async function uploadMediaToMeta(
     new Blob([fileBytes], { type: file.mimetype }),
     file.originalname,
   );
-  const response = await fetch(
+  const response = await fetchMeta(
     `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(phoneNumberId)}/media`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
-      body: form,
-    },
+    accessToken,
+    { method: "POST", headers: {}, body: form },
   );
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {

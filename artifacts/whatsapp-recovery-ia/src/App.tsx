@@ -459,6 +459,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             </div>
           </div>
         ) : <div className="whitespace-pre-wrap break-words">{message.content}</div>}
+        {message.status === 'failed' && <div className="message-failure-note">Não foi possível confirmar o envio</div>}
         <div className="bubble-meta">
           {formatClock(message.createdAt)}
           {outbound && <StatusIcon status={message.status} />}
