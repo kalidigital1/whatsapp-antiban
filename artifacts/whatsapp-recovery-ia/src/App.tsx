@@ -581,6 +581,7 @@ function ChatPanel({
       return () => URL.revokeObjectURL(url);
     }
     setMediaPreviewUrl(null);
+    return undefined;
   }, [mediaFile]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -602,7 +603,6 @@ function ChatPanel({
     const onError = () => setOptimistic({ ...temporary, status: 'failed' });
     if (mediaFile) {
       const fileToSend = mediaFile;
-      setMediaFile(null);
       sendMedia.mutate({ conversationId: conversation.id, data: { file: fileToSend, ...(messageContent ? { caption: messageContent } : {}) } }, { onSuccess, onError });
       return;
     }
