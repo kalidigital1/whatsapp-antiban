@@ -5,9 +5,17 @@
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "build:heroku": "pnpm run typecheck && pnpm --filter @workspace/whatsapp-recovery-ia run build && pnpm --filter @workspace/api-server run build",
+    "heroku-postbuild": "pnpm run build:heroku",
+    "start:heroku": "NODE_ENV=production pnpm --filter @workspace/api-server run start",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
+  "engines": {
+    "node": ">=20",
+    "pnpm": "10.26.1"
+  },
+  "packageManager": "pnpm@10.26.1",
   "private": true,
   "dependencies": {
     "@replit/connectors-sdk": "^0.4.3"

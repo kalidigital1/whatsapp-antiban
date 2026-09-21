@@ -1,10 +1,11 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
 
 const router = Router();
 const SESSION_COOKIE = "antiban_session";
 const LOGIN_USERNAME = "antiban";
-const SESSION_TTL_SECONDS = 60 * 60 * 12;
+const DEFAULT_SESSION_TTL_SECONDS = 60 * 60 * 12;
+const REMEMBERED_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 type SessionPayload = {
   username: string;
@@ -40,20 +41,17 @@ function sign(value: string) {
   return createHmac("sha256", authSecret()).update(value).digest("base64url");
 }
 
-function createSessionToken() {
+function createSessionToken(ttlSeconds: number) {
   const payload = encodePayload({
     username: LOGIN_USERNAME,
-    expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000,
+    expiresAt: Date.now() + ttlSeconds * 1000,
     nonce: cryptoRandomNonce(),
   });
   return `${payload}.${sign(payload)}`;
 }
 
 function cryptoRandomNonce() {
-  return createHash("sha256")
-    .update(`${Date.now()}:${process.pid}:${Math.random()}`)
-    .digest("base64url")
-    .slice(0, 24);
+  return randomBytes(18).toString("base64url");
 }
 
 function parseCookies(header: string | undefined) {
@@ -100,11 +98,12 @@ function readSession(req: Request): SessionPayload | null {
   }
 }
 
-function setSessionCookie(res: Response, token: string) {
+function setSessionCookie(res: Response, token: string, maxAgeSeconds?: number) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const maxAge = maxAgeSeconds === undefined ? "" : `; Max-Age=${maxAgeSeconds}`;
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${SESSION_TTL_SECONDS}; Path=/; HttpOnly; SameSite=Lax${secure}`,
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure}`,
   );
 }
 
@@ -135,6 +134,7 @@ router.get("/auth/me", (req, res) => {
 router.post("/auth/login", (req, res) => {
   const username = normalizeUsername(req.body?.username);
   const password = String(req.body?.password ?? "");
+  const remember = req.body?.remember === true;
   const expectedPassword = process.env.APP_LOGIN_PASSWORD;
 
   if (!expectedPassword) {
@@ -147,7 +147,14 @@ router.post("/auth/login", (req, res) => {
     return;
   }
 
-  setSessionCookie(res, createSessionToken());
+  const ttlSeconds = remember
+    ? REMEMBERED_SESSION_TTL_SECONDS
+    : DEFAULT_SESSION_TTL_SECONDS;
+  setSessionCookie(
+    res,
+    createSessionToken(ttlSeconds),
+    remember ? REMEMBERED_SESSION_TTL_SECONDS : undefined,
+  );
   res.json({ authenticated: true, username: `@${LOGIN_USERNAME}` });
 });
 

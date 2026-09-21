@@ -77,6 +77,7 @@ function errorText(error: unknown) {
 function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
 
@@ -90,7 +91,7 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, remember }),
       });
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(body.error || 'Não foi possível entrar.');
@@ -121,6 +122,10 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
             <label className="field-label" htmlFor="login-password">Senha</label>
             <input id="login-password" className="field-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Digite sua senha" autoComplete="current-password" data-testid="input-login-password" />
           </div>
+          <label className="remember-login">
+            <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} data-testid="checkbox-remember-login" />
+            <span>Manter conectado por 30 dias</span>
+          </label>
           {error && <p className="login-error" role="alert" data-testid="status-login-error"><AlertCircle size={15} />{error}</p>}
           <button type="submit" className="btn-primary login-submit" disabled={pending || !username.trim() || !password}>
             {pending ? <Loader2 size={17} className="animate-spin" /> : <LockKeyhole size={17} />}

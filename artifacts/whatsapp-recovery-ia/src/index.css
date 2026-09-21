@@ -173,6 +173,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .login-card h1 { margin:0; color:#f0f4f1; font-size:26px; font-weight:500; letter-spacing:-.04em; text-align:center; }
 .login-copy { margin:9px auto 26px; max-width:300px; color:#9ca8a2; font-size:12px; line-height:1.55; text-align:center; }
 .login-form { display:grid; gap:16px; }
+.remember-login { display:flex; align-items:center; gap:8px; color:#aab5af; cursor:pointer; font-size:11px; line-height:1.35; }
+.remember-login input { width:14px; height:14px; margin:0; accent-color:#42c875; }
 .login-submit { width:100%; min-height:44px; margin-top:3px; }
 .login-error { display:flex; align-items:center; gap:7px; margin:0; color:#efaaa2; font-size:12px; line-height:1.4; }
 .login-footnote { display:flex; align-items:center; justify-content:center; gap:6px; margin:24px 0 0; color:#718079; font-size:10px; }
