@@ -240,15 +240,16 @@ async function fetchMeta(
 ) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), metaRequestTimeoutMs);
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   try {
     return await fetch(url, {
       ...init,
       signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        ...(init.headers ?? {}),
-      },
+      headers,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
