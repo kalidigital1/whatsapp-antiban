@@ -186,9 +186,19 @@ export const startConversationBodyPhoneNumberMin = 8;
 
 
 
+
 export const StartConversationBody = zod.object({
   "phoneNumber": zod.string().min(startConversationBodyPhoneNumberMin),
-  "content": zod.string().min(1)
+  "content": zod.string().min(1).optional(),
+  "templateId": zod.number().int().optional(),
+  "variables": zod.array(zod.string()).optional(),
+  "componentParameters": zod.array(zod.object({
+  "component": zod.enum(['header', 'body', 'button']),
+  "parameterType": zod.enum(['text', 'image', 'video', 'document']),
+  "index": zod.number().int().nullable(),
+  "subType": zod.string().nullable(),
+  "value": zod.string().min(1)
+})).optional()
 })
 
 export const StartConversationResponse = zod.object({

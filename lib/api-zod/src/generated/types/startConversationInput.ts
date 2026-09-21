@@ -5,10 +5,14 @@
  * WhatsApp Recovery IA API
  * OpenAPI spec version: 0.1.0
  */
+import type { TemplateComponentParameter } from './templateComponentParameter';
 
 export interface StartConversationInput {
   /** @minLength 8 */
   phoneNumber: string;
   /** @minLength 1 */
-  content: string;
+  content?: string;
+  templateId?: number;
+  variables?: string[];
+  componentParameters?: TemplateComponentParameter[];
 }

@@ -96,11 +96,44 @@ export interface MediaInput {
   caption?: string;
 }
 
+export type TemplateComponentParameterComponent = typeof TemplateComponentParameterComponent[keyof typeof TemplateComponentParameterComponent];
+
+
+export const TemplateComponentParameterComponent = {
+  header: 'header',
+  body: 'body',
+  button: 'button',
+} as const;
+
+export type TemplateComponentParameterParameterType = typeof TemplateComponentParameterParameterType[keyof typeof TemplateComponentParameterParameterType];
+
+
+export const TemplateComponentParameterParameterType = {
+  text: 'text',
+  image: 'image',
+  video: 'video',
+  document: 'document',
+} as const;
+
+export interface TemplateComponentParameter {
+  component: TemplateComponentParameterComponent;
+  parameterType: TemplateComponentParameterParameterType;
+  /** @nullable */
+  index: number | null;
+  /** @nullable */
+  subType: string | null;
+  /** @minLength 1 */
+  value: string;
+}
+
 export interface StartConversationInput {
   /** @minLength 8 */
   phoneNumber: string;
   /** @minLength 1 */
-  content: string;
+  content?: string;
+  templateId?: number;
+  variables?: string[];
+  componentParameters?: TemplateComponentParameter[];
 }
 
 export interface StartConversationResult {
@@ -171,36 +204,6 @@ export interface TemplateInput {
   footer?: string | null;
   variables?: string[];
   components?: TemplateComponent[];
-}
-
-export type TemplateComponentParameterComponent = typeof TemplateComponentParameterComponent[keyof typeof TemplateComponentParameterComponent];
-
-
-export const TemplateComponentParameterComponent = {
-  header: 'header',
-  body: 'body',
-  button: 'button',
-} as const;
-
-export type TemplateComponentParameterParameterType = typeof TemplateComponentParameterParameterType[keyof typeof TemplateComponentParameterParameterType];
-
-
-export const TemplateComponentParameterParameterType = {
-  text: 'text',
-  image: 'image',
-  video: 'video',
-  document: 'document',
-} as const;
-
-export interface TemplateComponentParameter {
-  component: TemplateComponentParameterComponent;
-  parameterType: TemplateComponentParameterParameterType;
-  /** @nullable */
-  index: number | null;
-  /** @nullable */
-  subType: string | null;
-  /** @minLength 1 */
-  value: string;
 }
 
 export interface TemplateDispatchInput {

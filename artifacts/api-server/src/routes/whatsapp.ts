@@ -956,6 +956,46 @@ async function storeOutboundMessage(
   }
 }
 
+async function storeOutboundTemplateMessage(
+  conversation: typeof conversations.$inferSelect,
+  template: typeof whatsappTemplates.$inferSelect,
+  variables: string[],
+  componentParameters: ComponentParameterInput[],
+  connection: ActiveConnection,
+) {
+  const [contact] = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.id, conversation.contactId))
+    .limit(1);
+  if (!contact) throw new MetaApiError("Contato da conversa não encontrado.", 404);
+
+  const whatsappMessageId = await sendTemplateMessage(
+    conversation.phoneNumberId,
+    recipientPhoneNumber(contact.phoneNumber, connection),
+    template,
+    variables,
+    componentParameters,
+    connection.accessToken,
+  );
+  const [sent] = await db
+    .insert(chatMessages)
+    .values({
+      conversationId: conversation.id,
+      direction: "outbound",
+      messageType: "template",
+      content: renderTemplateBody(template.body, variables),
+      status: "sent",
+      whatsappMessageId,
+    })
+    .returning();
+  await db
+    .update(conversations)
+    .set({ lastMessageAt: new Date(), updatedAt: new Date() })
+    .where(eq(conversations.id, conversation.id));
+  return sent;
+}
+
 router.get("/connection", (req, res) => {
   res.json(GetConnectionResponse.parse(connectionStatus(req)));
 });
@@ -1215,6 +1255,12 @@ router.post("/conversations/start", async (req, res) => {
       res.status(400).json({ error: "Conecte a API Oficial antes de iniciar conversas." });
       return;
     }
+    if (!input.content?.trim() && !input.templateId) {
+      res.status(400).json({
+        error: "Para iniciar conversa com um novo contato, selecione um template aprovado pela Meta.",
+      });
+      return;
+    }
 
     const phoneNumber = normalizePhone(input.phoneNumber);
     if (phoneNumber.length < 8) {
@@ -1226,11 +1272,37 @@ router.post("/conversations/start", async (req, res) => {
       contact.id,
       activeConnection.selectedPhoneNumberId,
     );
-    const message = await storeOutboundMessage(
-      conversation,
-      input.content.trim(),
-      activeConnection,
-    );
+    let message;
+    if (input.templateId) {
+      const [template] = await db
+        .select()
+        .from(whatsappTemplates)
+        .where(eq(whatsappTemplates.id, input.templateId))
+        .limit(1);
+      if (!template) {
+        res.status(404).json({ error: "Template não encontrado." });
+        return;
+      }
+      if (template.status.toUpperCase() !== "APPROVED") {
+        res.status(400).json({
+          error: "O template selecionado ainda não foi aprovado pela Meta.",
+        });
+        return;
+      }
+      message = await storeOutboundTemplateMessage(
+        conversation,
+        template,
+        input.variables ?? [],
+        (input.componentParameters ?? []) as ComponentParameterInput[],
+        activeConnection,
+      );
+    } else {
+      message = await storeOutboundMessage(
+        conversation,
+        input.content!.trim(),
+        activeConnection,
+      );
+    }
     const currentConversation =
       (await conversationResponse(conversation, contact)) ?? conversation;
     res.status(201).json(

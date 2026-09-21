@@ -582,7 +582,17 @@ components:
         content:
           type: string
           minLength: 1
-      required: [phoneNumber, content]
+        templateId:
+          type: integer
+        variables:
+          type: array
+          items:
+            type: string
+        componentParameters:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateComponentParameter"
+      required: [phoneNumber]
     StartConversationResult:
       type: object
       properties:

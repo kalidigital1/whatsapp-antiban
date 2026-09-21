@@ -1,3 +1,4 @@
 - [WhatsApp connection security](whatsapp-connection.md) — keep the Meta access token server-side; add persistence only with authenticated, encrypted, user-scoped storage.
 - [WhatsApp media uploads](whatsapp-media-upload.md) — send transient chat files directly to Meta; keep multipart schema components compatible with generated clients.
 - [Conversation list caching](conversation-list-cache.md) — keep WhatsApp conversation API responses no-store because the generated client treats 304 responses without a body as null.
+- [New WhatsApp conversations](new-whatsapp-conversations.md) — initiate new contacts with an approved Meta template; free-form text is limited to an active customer-service window.
