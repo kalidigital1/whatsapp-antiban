@@ -333,6 +333,21 @@ function normalizePhone(value: string): string {
   return value.replace(/[^\d]/g, "");
 }
 
+function recipientPhoneNumber(phoneNumber: string, connection: ActiveConnection): string {
+  const normalized = normalizePhone(phoneNumber);
+  const selectedPhone = connection.phoneNumbers.find(
+    (phone) => phone.id === connection.selectedPhoneNumberId,
+  );
+  const senderDigits = normalizePhone(selectedPhone?.displayPhoneNumber ?? "");
+  const senderIsBrazilian = senderDigits.startsWith("55");
+  const looksLikeBrazilianLocalNumber =
+    senderIsBrazilian &&
+    (normalized.length === 10 || normalized.length === 11) &&
+    !normalized.startsWith("1");
+
+  return looksLikeBrazilianLocalNumber ? `55${normalized}` : normalized;
+}
+
 function estimatedCostPerMessage(): number {
   const configured = Number(process.env.WHATSAPP_ESTIMATED_COST_PER_MESSAGE ?? "0.05");
   return Number.isFinite(configured) && configured >= 0 ? configured : 0.05;
@@ -791,7 +806,7 @@ async function storeOutboundMediaMessage(
   try {
     const sent = await sendMediaMessage(
       conversation.phoneNumberId,
-      contact.phoneNumber,
+      recipientPhoneNumber(contact.phoneNumber, connection),
       file,
       caption,
       connection.accessToken,
@@ -913,7 +928,7 @@ async function storeOutboundMessage(
   try {
     const whatsappMessageId = await sendTextMessage(
       conversation.phoneNumberId,
-      contact.phoneNumber,
+      recipientPhoneNumber(contact.phoneNumber, connection),
       content,
       connection.accessToken,
     );
@@ -1634,6 +1649,20 @@ router.post("/webhook", async (req, res) => {
           const messageId = stringValue(status.id);
           const statusValue = stringValue(status.status);
           if (!messageId || !statusValue) continue;
+          const statusErrors = Array.isArray(status.errors)
+            ? asRecord(status.errors[0])
+            : {};
+          if (statusValue === "failed") {
+            logger.warn(
+              {
+                messageId,
+                errorCode: stringValue(statusErrors.code),
+                errorTitle: stringValue(statusErrors.title),
+                errorMessage: stringValue(statusErrors.message),
+              },
+              "WhatsApp message delivery failed",
+            );
+          }
 
           const [storedMessage] = await db
             .select({ conversationId: chatMessages.conversationId })
@@ -1652,7 +1681,6 @@ router.post("/webhook", async (req, res) => {
             .where(eq(whatsappTemplateDispatchRecipients.whatsappMessageId, messageId))
             .limit(1);
           if (dispatchRecipient) {
-            const statusErrors = Array.isArray(status.errors) ? asRecord(status.errors[0]) : {};
             const normalizedStatus = ["sent", "delivered", "read", "failed"].includes(statusValue)
               ? statusValue
               : "pending";
