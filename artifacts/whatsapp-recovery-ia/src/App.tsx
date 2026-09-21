@@ -687,7 +687,6 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
               <button type="button" className="btn-ghost btn-danger w-full" onClick={disconnectNow} disabled={disconnect.isPending} data-testid="button-disconnect-whatsapp">{disconnect.isPending ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}{disconnect.isPending ? 'Desconectando...' : 'Desconectar WhatsApp'}</button>
             </div>
           )}
-          <div className="flex items-start gap-2 border-t border-[#383d3b] pt-4 text-[11px] leading-relaxed text-[#8f9b95]"><CircleHelp size={15} className="mt-0.5 shrink-0" />A conexão usa os endpoints oficiais da WhatsApp Cloud API. O servidor recebe eventos pelo webhook e mantém o histórico das conversas.</div>
           <button type="button" className="btn-ghost w-full" onClick={() => void logout()} data-testid="button-logout"><LogOut size={16} /> Sair da conta</button>
         </div>
       </div>
