@@ -847,6 +847,8 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
   const queryClient = useQueryClient();
   const templatesQuery = useListTemplates({ query: { queryKey: getListTemplatesQueryKey() } });
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [sendMode, setSendMode] = useState<'text' | 'template'>('text');
+  const [content, setContent] = useState('');
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
@@ -894,6 +896,22 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
       setFormError('Informe um telefone válido com DDI.');
       return;
     }
+    if (sendMode === 'text') {
+      if (!content.trim()) {
+        setFormError('Digite a mensagem inicial.');
+        return;
+      }
+      startConversation.mutate({
+        data: {
+          phoneNumber: phoneNumber.trim(),
+          content: content.trim(),
+        },
+      }, {
+        onSuccess: (result) => { void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() }); onCreated(result.conversation); },
+        onError: (error) => setFormError(errorText(error)),
+      });
+      return;
+    }
     if (!selectedTemplate) {
       setFormError('É necessário ter um template aprovado pela Meta para iniciar uma conversa.');
       return;
@@ -928,15 +946,17 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="new-conversation-title" data-testid="dialog-new-conversation">
       <div className="settings-card rise-in">
-        <div className="settings-section flex items-start justify-between"><div><p className="mb-2 text-[11px] font-bold uppercase tracking-[.12em] text-[#68c98a]">Novo contato</p><h2 id="new-conversation-title" className="settings-title">Iniciar conversa</h2><p className="settings-copy">Novos contatos precisam receber um template aprovado pela Meta.</p></div><button type="button" className="action-btn" onClick={onClose} data-testid="button-close-new-conversation" aria-label="Fechar nova conversa"><X size={20} /></button></div>
+        <div className="settings-section flex items-start justify-between"><div><p className="mb-2 text-[11px] font-bold uppercase tracking-[.12em] text-[#68c98a]">Novo contato</p><h2 id="new-conversation-title" className="settings-title">Iniciar conversa</h2><p className="settings-copy">Envie uma mensagem normal ou use um template aprovado.</p></div><button type="button" className="action-btn" onClick={onClose} data-testid="button-close-new-conversation" aria-label="Fechar nova conversa"><X size={20} /></button></div>
         <form className="space-y-4 p-5" onSubmit={submit}>
           <div className="field"><label className="field-label" htmlFor="new-phone-number">Telefone com DDI</label><input id="new-phone-number" className="field-input" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+55 11 99999-0000" data-testid="input-new-phone-number" /><p className="field-help">Use o mesmo formato cadastrado no WhatsApp.</p></div>
+          <div className="field"><label className="field-label" htmlFor="new-message-mode">Tipo de mensagem</label><select id="new-message-mode" className="field-input" value={sendMode} onChange={(event) => setSendMode(event.target.value as 'text' | 'template')} data-testid="select-new-message-mode"><option value="text">Mensagem normal</option><option value="template" disabled={approvedTemplates.length === 0}>Template aprovado{approvedTemplates.length === 0 ? ' (nenhum disponível)' : ''}</option></select></div>
+          {sendMode === 'text' && <div className="field"><label className="field-label" htmlFor="new-message">Mensagem inicial</label><textarea id="new-message" className="field-input min-h-28 resize-y" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Olá, como podemos ajudar?" data-testid="input-new-message" /><p className="field-help">A Meta pode bloquear texto normal quando o contato ainda não iniciou uma conversa ou não há janela de atendimento ativa.</p></div>}
           {templatesQuery.isLoading && <div className="status-note"><Loader2 size={16} className="animate-spin" /> Carregando templates aprovados...</div>}
-          {!templatesQuery.isLoading && approvedTemplates.length === 0 && <div className="status-note"><AlertCircle size={16} /> Nenhum template aprovado está disponível. Cadastre ou aguarde a aprovação de um template antes de iniciar conversas.</div>}
-          {approvedTemplates.length > 0 && <div className="field"><label className="field-label" htmlFor="new-template">Template aprovado</label><select id="new-template" className="field-input" value={templateId ?? ''} onChange={(event) => setTemplateId(Number(event.target.value))} data-testid="select-new-template">{approvedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.languageCode}</option>)}</select><p className="field-help">{selectedTemplate?.body}</p></div>}
-          {parameterSlots.map((slot) => <div className="field" key={slot.key}><label className="field-label" htmlFor={`new-template-${slot.key}`}>{slot.label}</label><input id={`new-template-${slot.key}`} className="field-input" value={parameterValues[slot.key] ?? ''} onChange={(event) => setParameterValues((current) => ({ ...current, [slot.key]: event.target.value }))} placeholder={slot.placeholder} data-testid={`input-new-template-${slot.key}`} /></div>)}
+          {sendMode === 'template' && !templatesQuery.isLoading && approvedTemplates.length === 0 && <div className="status-note"><AlertCircle size={16} /> Nenhum template aprovado está disponível.</div>}
+          {sendMode === 'template' && approvedTemplates.length > 0 && <div className="field"><label className="field-label" htmlFor="new-template">Template aprovado</label><select id="new-template" className="field-input" value={templateId ?? ''} onChange={(event) => setTemplateId(Number(event.target.value))} data-testid="select-new-template">{approvedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.languageCode}</option>)}</select><p className="field-help">{selectedTemplate?.body}</p></div>}
+          {sendMode === 'template' && parameterSlots.map((slot) => <div className="field" key={slot.key}><label className="field-label" htmlFor={`new-template-${slot.key}`}>{slot.label}</label><input id={`new-template-${slot.key}`} className="field-input" value={parameterValues[slot.key] ?? ''} onChange={(event) => setParameterValues((current) => ({ ...current, [slot.key]: event.target.value }))} placeholder={slot.placeholder} data-testid={`input-new-template-${slot.key}`} /></div>)}
           {formError && <p className="flex items-center gap-2 text-xs text-[#eea59e]" data-testid="status-new-conversation-error"><AlertCircle size={15} />{formError}</p>}
-          <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-ghost" onClick={onClose} data-testid="button-cancel-new-conversation">Cancelar</button><button type="submit" className="btn-primary" disabled={startConversation.isPending || !selectedTemplate} data-testid="button-start-conversation">{startConversation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{startConversation.isPending ? 'Iniciando...' : 'Iniciar conversa'}</button></div>
+          <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-ghost" onClick={onClose} data-testid="button-cancel-new-conversation">Cancelar</button><button type="submit" className="btn-primary" disabled={startConversation.isPending || (sendMode === 'template' && !selectedTemplate)} data-testid="button-start-conversation">{startConversation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{startConversation.isPending ? 'Iniciando...' : 'Iniciar conversa'}</button></div>
         </form>
       </div>
     </div>

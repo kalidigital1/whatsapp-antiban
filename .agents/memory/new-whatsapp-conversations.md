@@ -3,8 +3,8 @@ name: New WhatsApp conversations
 description: Meta policy constraint and app flow for starting conversations with new contacts
 ---
 
-Starting a conversation with a new WhatsApp contact must use a Meta-approved template. Free-form text is only reliable inside an active customer-service window after the contact has messaged the business.
+The new-contact flow offers normal text first and keeps an approved template as an alternative. Free-form text is only reliable inside an active customer-service window after the contact has messaged the business.
 
-**Why:** Meta can accept the API request but later mark a free-form outbound message as failed when no customer-service window exists. Treating the request as an ordinary text send makes the UI look like it sent a message when the contact never receives it.
+**Why:** The product requirement is to attempt a normal message, but Meta can accept the API request and later mark it as failed when no customer-service window exists. The UI must not silently replace the user's text with a template.
 
-**How to apply:** Keep the new-contact flow template-based, collect template parameters before sending, and reserve free-form text for existing conversations.
+**How to apply:** Default to free-form text, preserve the actual Meta error if it is rejected, and collect template parameters only when the user explicitly chooses the template option.
