@@ -950,7 +950,6 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
       <header className="templates-topbar">
         <div>
           <button type="button" className="templates-mobile-back mobile-only" onClick={onBackToInbox} data-testid="button-back-to-inbox"><ArrowLeft size={16} /> Conversas</button>
-          <p className="templates-kicker">WhatsApp Cloud API · operação</p>
           <h1 className="templates-title">Envios oficiais</h1>
           <p className="templates-subtitle">Use os componentes aprovados pela Meta e acompanhe a entrega por destinatário.</p>
         </div>
