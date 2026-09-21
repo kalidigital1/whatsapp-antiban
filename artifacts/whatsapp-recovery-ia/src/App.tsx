@@ -444,19 +444,39 @@ function ChatEmpty({ connected, onSettings, onOpenConversations }: { connected: 
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+type DisplayChatMessage = ChatMessage & {
+  mediaPreviewUrl?: string;
+  mediaFileName?: string;
+  mediaCaption?: string;
+};
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function MessageBubble({ message }: { message: DisplayChatMessage }) {
   const outbound = message.direction === 'outbound';
   const isMedia = message.messageType !== 'text';
   return (
     <div className={`message-row ${outbound ? 'outbound' : 'inbound'} rise-in`} data-testid={`message-${message.id}`}>
       <div className={`bubble ${outbound ? 'bubble-out' : 'bubble-in'} ${message.status === 'failed' ? 'border border-[#8d4942]' : ''}`}>
         {isMedia ? (
-          <div className="message-attachment">
-            <Paperclip size={16} />
-            <div>
-              <strong>{message.content || 'Arquivo'}</strong>
-              <span>{message.messageType === 'document' ? 'Documento' : message.messageType}</span>
-            </div>
+          <div className="message-media">
+            {message.mediaPreviewUrl && message.messageType === 'image' && <img src={message.mediaPreviewUrl} alt={message.content || 'Imagem enviada'} />}
+            {message.mediaPreviewUrl && message.messageType === 'video' && <video src={message.mediaPreviewUrl} controls muted preload="metadata" />}
+            {message.mediaPreviewUrl && message.messageType === 'audio' && <audio src={message.mediaPreviewUrl} controls preload="metadata" />}
+            {(!message.mediaPreviewUrl || message.messageType === 'document') && (
+              <div className="message-attachment">
+                <Paperclip size={16} />
+                <div>
+                  <strong>{message.mediaFileName || message.content || 'Arquivo'}</strong>
+                  <span>{message.messageType === 'document' ? 'Documento' : message.messageType}</span>
+                </div>
+              </div>
+            )}
+            {message.mediaCaption && <p className="message-media-caption">{message.mediaCaption}</p>}
           </div>
         ) : <div className="whitespace-pre-wrap break-words">{message.content}</div>}
         {message.status === 'failed' && <div className="message-failure-note">Não foi possível confirmar o envio</div>}
@@ -531,10 +551,11 @@ function ChatPanel({
 }) {
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
-  const [optimistic, setOptimistic] = useState<ChatMessage | null>(null);
+  const [optimistic, setOptimistic] = useState<DisplayChatMessage | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
   const messagesQuery = useListConversationMessages(conversation?.id ?? 0, {
     query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 5000 },
   });
@@ -543,6 +564,25 @@ function ChatPanel({
   const messages = messagesQuery.data ?? [];
   const sending = sendMessage.isPending || sendMedia.isPending;
 
+  useEffect(() => {
+    if (!mediaFile) {
+      setMediaPreviewUrl(null);
+      return;
+    }
+    if (mediaFile.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = () => setMediaPreviewUrl(typeof reader.result === 'string' ? reader.result : null);
+      reader.readAsDataURL(mediaFile);
+      return () => reader.abort();
+    }
+    if (mediaFile.type.startsWith('video/') || mediaFile.type.startsWith('audio/')) {
+      const url = URL.createObjectURL(mediaFile);
+      setMediaPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+    setMediaPreviewUrl(null);
+  }, [mediaFile]);
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const messageContent = content.trim();
@@ -550,7 +590,7 @@ function ChatPanel({
     const mediaType = mediaFile
       ? (mediaFile.type.startsWith('image/') ? 'image' : mediaFile.type.startsWith('video/') ? 'video' : mediaFile.type.startsWith('audio/') ? 'audio' : 'document')
       : 'text';
-    const temporary: ChatMessage = { id: -Date.now(), direction: 'outbound', content: mediaFile?.name || messageContent, messageType: mediaType, status: 'sending', createdAt: new Date().toISOString(), whatsappMessageId: null };
+    const temporary: DisplayChatMessage = { id: -Date.now(), direction: 'outbound', content: mediaFile?.name || messageContent, messageType: mediaType, status: 'sending', createdAt: new Date().toISOString(), whatsappMessageId: null, mediaPreviewUrl: mediaPreviewUrl ?? undefined, mediaFileName: mediaFile?.name, mediaCaption: mediaFile ? (messageContent || undefined) : undefined };
     setOptimistic(temporary);
     setContent('');
     const onSuccess = () => {
@@ -615,6 +655,22 @@ function ChatPanel({
       </div>
 
       <div className="composer-wrap">
+        {mediaFile && (
+          <div className="attachment-draft" data-testid="attachment-draft">
+            <div className="attachment-draft-preview">
+              {mediaPreviewUrl && mediaFile.type.startsWith('image/') && <img src={mediaPreviewUrl} alt="Prévia do arquivo selecionado" />}
+              {mediaPreviewUrl && mediaFile.type.startsWith('video/') && <video src={mediaPreviewUrl} controls muted preload="metadata" />}
+              {mediaPreviewUrl && mediaFile.type.startsWith('audio/') && <audio src={mediaPreviewUrl} controls preload="metadata" />}
+              {!mediaPreviewUrl && <FileText size={24} />}
+            </div>
+            <div className="attachment-draft-info">
+              <strong>{mediaFile.name}</strong>
+              <span>{formatFileSize(mediaFile.size)} · {mediaFile.type || 'Documento'}</span>
+              <small>{mediaFile.type.startsWith('image/') || mediaFile.type.startsWith('video/') || mediaFile.type.startsWith('audio/') ? 'Adicione uma legenda abaixo antes de enviar' : 'O documento será enviado como anexo'}</small>
+            </div>
+            <button type="button" className="action-btn" onClick={() => setMediaFile(null)} disabled={sending} aria-label="Remover arquivo selecionado"><X size={17} /></button>
+          </div>
+        )}
         <form className="composer" onSubmit={submit}>
           <label className="attach-btn" aria-label="Enviar arquivo" title="Enviar imagem, vídeo, áudio ou documento">
             <Paperclip size={19} />
@@ -632,7 +688,7 @@ function ChatPanel({
             value={content}
             onChange={(event) => setContent(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}
-            placeholder="Digite uma mensagem"
+            placeholder={mediaFile ? 'Adicione uma legenda (opcional)' : 'Digite uma mensagem'}
             disabled={sending}
             data-testid="input-message"
             aria-label="Mensagem"
