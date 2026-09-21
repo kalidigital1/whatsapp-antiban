@@ -433,8 +433,7 @@ function ChatEmpty({ connected, onSettings, onOpenConversations }: { connected: 
         <button type="button" className="empty-chat-list-button mobile-only" onClick={onOpenConversations} data-testid="button-open-conversations">
           <ArrowLeft size={16} /> Ver conversas
         </button>
-        <div className="empty-chat-icon"><MessageCircle size={32} strokeWidth={1.4} /></div>
-        <h1>WhatsApp Recovery IA</h1>
+        <img className="empty-chat-logo" src="/assets/antiban-logo-white.png" alt="Antiban" />
         <p>Selecione uma conversa à esquerda ou inicie uma nova conversa para responder aos seus clientes.</p>
         {!connected && <button type="button" className="btn-primary mt-6" onClick={onSettings} data-testid="button-empty-connect"><Settings size={16} /> Configurar conexão</button>}
         <div className="mt-7 flex items-center justify-center gap-2 text-[10px] uppercase tracking-[.12em] text-[#7f8d87]"><ShieldCheck size={14} /> API oficial da Meta</div>

@@ -155,8 +155,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .empty-chat { position:relative; flex:1; min-height:0; display:grid; place-items:center; padding:30px; text-align:center; }
 .empty-chat-card { max-width:380px; color:#9ba7a2; }
 .empty-chat-list-button { display:inline-flex; align-items:center; gap:6px; margin:0 auto 22px; min-height:34px; padding:0 12px; border:1px solid #40564a; border-radius:7px; color:#bed7c5; background:#1b2a22; font-size:12px; }
-.empty-chat-icon { width:74px; height:74px; display:grid; place-items:center; margin:0 auto 18px; border-radius:50%; color:#83b897; background:#263d32; border:1px solid #416552; }
-.empty-chat-card h1 { margin:0; color:#e5ebe8; font-size:25px; font-weight:500; letter-spacing:-.04em; }
+.empty-chat-logo { display:block; width:min(270px, 78vw); height:auto; margin:0 auto 20px; object-fit:contain; }
 .empty-chat-card p { margin:10px auto 0; font-size:13px; line-height:1.6; }
 .status-note { display:flex; align-items:center; gap:8px; padding:11px 14px; color:#efaaa3; background:#432321; border:1px solid #703a35; border-radius:8px; font-size:12px; }
 .skeleton { background:linear-gradient(90deg,#242a28 25%,#303735 50%,#242a28 75%); background-size:200% 100%; animation:shimmer 1.4s infinite; }
