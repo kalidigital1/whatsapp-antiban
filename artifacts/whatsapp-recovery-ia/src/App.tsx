@@ -993,9 +993,6 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
           <div className="templates-section-label"><span>Biblioteca</span><span className="templates-count">{templates.length} {templates.length === 1 ? 'template' : 'templates'}</span></div>
           {templatesQuery.isLoading && <div className="templates-loading" data-testid="state-templates-loading"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div>}
           {templatesQuery.isError && <div className="status-note" data-testid="state-templates-error"><AlertCircle size={16} /><span>Não foi possível carregar os templates.</span></div>}
-          {!templatesQuery.isLoading && !templatesQuery.isError && templates.length === 0 && (
-            <div className="template-empty" data-testid="state-templates-empty"><FileText size={27} strokeWidth={1.5} /><div><strong>Nenhum template cadastrado</strong><p>Crie manualmente o primeiro template seguindo o padrão da Meta.</p></div></div>
-          )}
           {!templatesQuery.isLoading && templates.length > 0 && (
             <div className="template-list">
               {templates.map((template) => (
