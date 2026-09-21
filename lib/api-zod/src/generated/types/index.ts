@@ -15,6 +15,7 @@ export * from './contactInput';
 export * from './conversation';
 export * from './errorResponse';
 export * from './healthStatus';
+export * from './mediaInput';
 export * from './messageInput';
 export * from './phoneNumber';
 export * from './startConversationInput';

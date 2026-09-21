@@ -17,6 +17,7 @@ import {
   LogOut,
   MessageCircle,
   MoreVertical,
+  Paperclip,
   Phone,
   Plus,
   Search,
@@ -54,6 +55,7 @@ import {
   useListTemplates,
   useListTemplateDispatches,
   useSendConversationMessage,
+  useSendConversationMedia,
   useStartConversation,
   type ChatMessage,
   type Contact,
@@ -444,16 +446,72 @@ function ChatEmpty({ connected, onSettings, onOpenConversations }: { connected: 
 
 function MessageBubble({ message }: { message: ChatMessage }) {
   const outbound = message.direction === 'outbound';
+  const isMedia = message.messageType !== 'text';
   return (
     <div className={`message-row ${outbound ? 'outbound' : 'inbound'} rise-in`} data-testid={`message-${message.id}`}>
       <div className={`bubble ${outbound ? 'bubble-out' : 'bubble-in'} ${message.status === 'failed' ? 'border border-[#8d4942]' : ''}`}>
-        <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        {isMedia ? (
+          <div className="message-attachment">
+            <Paperclip size={16} />
+            <div>
+              <strong>{message.content || 'Arquivo'}</strong>
+              <span>{message.messageType === 'document' ? 'Documento' : message.messageType}</span>
+            </div>
+          </div>
+        ) : <div className="whitespace-pre-wrap break-words">{message.content}</div>}
         <div className="bubble-meta">
           {formatClock(message.createdAt)}
           {outbound && <StatusIcon status={message.status} />}
         </div>
       </div>
     </div>
+  );
+}
+
+function ContactProfilePanel({
+  conversation,
+  messages,
+  onClose,
+}: {
+  conversation: Conversation;
+  messages: ChatMessage[];
+  onClose: () => void;
+}) {
+  const inboundCount = messages.filter((message) => message.direction === 'inbound').length;
+  const outboundCount = messages.filter((message) => message.direction === 'outbound').length;
+  return (
+    <aside className="contact-profile-panel rise-in" aria-label="Perfil do cliente" data-testid="contact-profile-panel">
+      <header className="contact-profile-header">
+        <div>
+          <p className="contact-profile-kicker">Cliente</p>
+          <h3>Dados do contato</h3>
+        </div>
+        <button type="button" className="action-btn" onClick={onClose} aria-label="Fechar perfil do cliente" data-testid="button-close-contact-profile"><X size={19} /></button>
+      </header>
+      <div className="contact-profile-content quiet-scroll">
+        <div className="contact-profile-hero">
+          <Avatar name={conversation.contact.name} size="large" />
+          <strong>{conversation.contact.name}</strong>
+          <span>{conversation.contact.phoneNumber}</span>
+        </div>
+        <div className="contact-profile-section">
+          <span className="contact-profile-label">Contato</span>
+          <a href={`tel:${conversation.contact.phoneNumber}`} className="contact-profile-phone"><Phone size={15} /> {conversation.contact.phoneNumber}</a>
+        </div>
+        <div className="contact-profile-section">
+          <span className="contact-profile-label">Resumo da conversa</span>
+          <div className="contact-profile-stats">
+            <div><strong>{messages.length}</strong><span>mensagens</span></div>
+            <div><strong>{inboundCount}</strong><span>recebidas</span></div>
+            <div><strong>{outboundCount}</strong><span>enviadas</span></div>
+          </div>
+        </div>
+        <div className="contact-profile-note">
+          <UserRound size={16} />
+          <p>A Meta informa o nome e o telefone do cliente no webhook. A foto pessoal do contato não é disponibilizada pela API oficial, então usamos as iniciais como identificação.</p>
+        </div>
+      </div>
+    </aside>
   );
 }
 
@@ -474,27 +532,40 @@ function ChatPanel({
   const [content, setContent] = useState('');
   const [optimistic, setOptimistic] = useState<ChatMessage | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
   const messagesQuery = useListConversationMessages(conversation?.id ?? 0, {
     query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 5000 },
   });
   const sendMessage = useSendConversationMessage();
+  const sendMedia = useSendConversationMedia();
   const messages = messagesQuery.data ?? [];
+  const sending = sendMessage.isPending || sendMedia.isPending;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const messageContent = content.trim();
-    if (!conversation || !messageContent || sendMessage.isPending) return;
-    const temporary: ChatMessage = { id: -Date.now(), direction: 'outbound', content: messageContent, messageType: 'text', status: 'sending', createdAt: new Date().toISOString(), whatsappMessageId: null };
+    if (!conversation || sending || (!messageContent && !mediaFile)) return;
+    const mediaType = mediaFile
+      ? (mediaFile.type.startsWith('image/') ? 'image' : mediaFile.type.startsWith('video/') ? 'video' : mediaFile.type.startsWith('audio/') ? 'audio' : 'document')
+      : 'text';
+    const temporary: ChatMessage = { id: -Date.now(), direction: 'outbound', content: mediaFile?.name || messageContent, messageType: mediaType, status: 'sending', createdAt: new Date().toISOString(), whatsappMessageId: null };
     setOptimistic(temporary);
     setContent('');
-    sendMessage.mutate({ conversationId: conversation.id, data: { content: messageContent } }, {
-      onSuccess: () => {
-        setOptimistic(null);
-        void queryClient.invalidateQueries({ queryKey: getListConversationMessagesQueryKey(conversation.id) });
-        void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
-      },
-      onError: () => setOptimistic({ ...temporary, status: 'failed' }),
-    });
+    const onSuccess = () => {
+      setOptimistic(null);
+      setMediaFile(null);
+      void queryClient.invalidateQueries({ queryKey: getListConversationMessagesQueryKey(conversation.id) });
+      void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+    };
+    const onError = () => setOptimistic({ ...temporary, status: 'failed' });
+    if (mediaFile) {
+      const fileToSend = mediaFile;
+      setMediaFile(null);
+      sendMedia.mutate({ conversationId: conversation.id, data: { file: fileToSend, ...(messageContent ? { caption: messageContent } : {}) } }, { onSuccess, onError });
+      return;
+    }
+    sendMessage.mutate({ conversationId: conversation.id, data: { content: messageContent } }, { onSuccess, onError });
   };
 
   if (!conversation) return <ChatEmpty connected={connected} onSettings={onSettings} onOpenConversations={onBack} />;
@@ -511,11 +582,12 @@ function ChatPanel({
         <div className="chat-header-actions">
           <button type="button" className="action-btn" onClick={() => { window.location.href = `tel:${conversation.contact.phoneNumber}`; }} data-testid="button-call-contact" aria-label="Ligar para contato"><Phone size={19} /></button>
           <button type="button" className="action-btn" onClick={() => undefined} data-testid="button-video-contact" aria-label="Iniciar chamada de vídeo"><Video size={19} /></button>
+           <button type="button" className="action-btn" onClick={() => setProfileOpen((open) => !open)} data-testid="button-contact-profile" aria-label="Ver perfil do cliente"><UserRound size={19} /></button>
           <div className="relative">
             <button type="button" className="action-btn" onClick={() => setMenuOpen((open) => !open)} data-testid="button-chat-menu" aria-label="Mais opções"><MoreVertical size={20} /></button>
             {menuOpen && (
               <div className="absolute right-0 top-11 z-10 w-52 rounded-lg border border-[#4b514e] bg-[#272b29] p-2 shadow-2xl" data-testid="menu-chat-options">
-                <div className="flex items-center gap-2 rounded-md px-2 py-2 text-xs text-[#c0cac4]"><UserRound size={14} /> Dados do contato</div>
+                 <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserRound size={14} /> Dados do contato</button>
                 <div className="border-t border-[#404643] px-2 pb-1 pt-2 text-[11px] text-[#eef3ef]">{conversation.contact.phoneNumber}</div>
                   <button type="button" className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#efaaa2] hover:bg-[#432725]" onClick={() => { setMenuOpen(false); onDeleteConversation(); }} data-testid="button-delete-conversation"><Trash2 size={14} /> Apagar conversa da inbox</button>
               </div>
@@ -543,6 +615,16 @@ function ChatPanel({
 
       <div className="composer-wrap">
         <form className="composer" onSubmit={submit}>
+          <label className="attach-btn" aria-label="Enviar arquivo" title="Enviar imagem, vídeo, áudio ou documento">
+            <Paperclip size={19} />
+            <input
+              type="file"
+              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+              onChange={(event) => setMediaFile(event.target.files?.[0] ?? null)}
+              disabled={sending}
+              data-testid="input-message-file"
+            />
+          </label>
           <textarea
             className="composer-field"
             rows={1}
@@ -550,16 +632,18 @@ function ChatPanel({
             onChange={(event) => setContent(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }}
             placeholder="Digite uma mensagem"
-            disabled={sendMessage.isPending}
+            disabled={sending}
             data-testid="input-message"
             aria-label="Mensagem"
           />
-          <button type="submit" className="send-btn" disabled={!content.trim() || sendMessage.isPending} data-testid="button-send-message" aria-label="Enviar mensagem">
-            {sendMessage.isPending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+          <button type="submit" className="send-btn" disabled={(!content.trim() && !mediaFile) || sending} data-testid="button-send-message" aria-label={mediaFile ? 'Enviar arquivo' : 'Enviar mensagem'}>
+            {sending ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
           </button>
         </form>
-        {sendMessage.isError && <p className="mx-auto mt-2 max-w-[1000px] text-right text-[11px] text-[#eea59e]" data-testid="status-send-error">{errorText(sendMessage.error)}</p>}
+        {mediaFile && <div className="attachment-selection"><Paperclip size={14} /><span>{mediaFile.name}</span><button type="button" onClick={() => setMediaFile(null)} aria-label="Remover arquivo selecionado"><X size={14} /></button></div>}
+        {(sendMessage.isError || sendMedia.isError) && <p className="mx-auto mt-2 max-w-[1000px] text-right text-[11px] text-[#eea59e]" data-testid="status-send-error">{errorText(sendMessage.error || sendMedia.error)}</p>}
       </div>
+      {profileOpen && <ContactProfilePanel conversation={conversation} messages={messages} onClose={() => setProfileOpen(false)} />}
     </section>
   );
 }

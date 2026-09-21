@@ -122,7 +122,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .conversation-row-status { display:inline-flex; flex:none; color:#9aa29e; }
 .conversation-row-status.failed { color:#df8d83; }
 .unread-badge { min-width:19px; height:19px; display:grid; place-items:center; flex:none; padding:0 5px; color:#17231b; background:#25d366; border-radius:99px; font-size:10px; font-weight:700; }
-.chat-area { min-width:0; min-height:0; display:flex; flex-direction:column; background:#efeae2; }
+.chat-area { position:relative; min-width:0; min-height:0; display:flex; flex-direction:column; background:#efeae2; }
 .chat-topbar { min-height:76px; display:flex; align-items:center; padding:10px 20px; border-bottom:1px solid #303736; background:hsl(var(--wa-header)); }
 .chat-contact-photo { width:46px; height:46px; font-size:14px; }
 .chat-contact-meta { margin-left:12px; min-width:0; }
@@ -137,6 +137,11 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .bubble { max-width:min(78%,630px); padding:7px 10px 5px; border-radius:8px; color:#26332e; box-shadow:0 1px 1px rgba(63,54,46,.18); font-size:14px; line-height:1.42; overflow-wrap:anywhere; }
 .bubble-in { background:#fff; border-top-left-radius:2px; }
 .bubble-out { background:#d9fdd3; border-top-right-radius:2px; }
+.message-attachment { display:flex; align-items:center; gap:9px; min-width:155px; color:#29523c; }
+.message-attachment > svg { flex:none; color:#4b8b62; }
+.message-attachment div { min-width:0; display:grid; gap:2px; }
+.message-attachment strong { overflow:hidden; max-width:260px; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:600; }
+.message-attachment span { color:#61806c; font-size:10px; text-transform:capitalize; }
 .bubble-meta { display:flex; align-items:center; justify-content:flex-end; gap:4px; margin-top:3px; color:#66746e; font-size:10px; line-height:1; }
 .bubble-out .bubble-meta svg:not(.message-status-icon) { color:#5a7560; }
 .message-status-icon.status-sent { color:#8d9995; }
@@ -146,6 +151,12 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .message-status-icon.status-pending { color:#8d9995; }
 .composer-wrap { flex:none; padding:10px 18px 14px; padding-bottom:calc(14px + env(safe-area-inset-bottom)); background:hsl(var(--wa-header)); border-top:1px solid #303735; }
 .composer { display:flex; align-items:flex-end; gap:8px; max-width:1000px; margin:0 auto; }
+.attach-btn { width:42px; height:42px; display:grid; place-items:center; flex:none; border-radius:50%; color:#a8b4ae; background:#242a28; cursor:pointer; transition:color .18s ease, background .18s ease; }
+.attach-btn:hover { color:#eaf2ec; background:#303a35; }
+.attach-btn input { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; }
+.attachment-selection { display:flex; align-items:center; gap:7px; width:min(1000px,100%); margin:7px auto 0; padding:7px 10px; border:1px solid #40574a; border-radius:7px; color:#b9d4c1; background:#1b2921; font-size:11px; }
+.attachment-selection span { min-width:0; overflow:hidden; flex:1; text-overflow:ellipsis; white-space:nowrap; }
+.attachment-selection button { display:grid; place-items:center; flex:none; padding:2px; border:0; color:#94a79b; background:transparent; }
 .composer-field { min-height:42px; max-height:130px; flex:1; resize:none; border:1px solid transparent; border-radius:9px; padding:11px 14px; color:#edf1ef; background:#242a28; outline:none; font-size:14px; }
 .composer-field:focus { border-color:#4e6d60; }
 .composer-field::placeholder { color:#89948f; }
@@ -213,6 +224,26 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .profile-details p { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; margin:3px 0 0; color:#9ea9a4; font-size:11px; }
 .verified-badge { width:18px; height:18px; flex:none; object-fit:cover; object-position:left center; }
 .profile-action { flex:none; }
+.contact-profile-panel { position:absolute; z-index:9; inset:0 0 0 auto; width:min(340px,100%); display:flex; flex-direction:column; border-left:1px solid #3a4540; background:#1b211e; box-shadow:-16px 0 38px rgba(0,0,0,.3); }
+.contact-profile-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:18px 18px 15px; border-bottom:1px solid #343d39; background:#202724; }
+.contact-profile-kicker { margin:0 0 5px; color:#6fd190; font-size:9px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; }
+.contact-profile-header h3 { margin:0; color:#edf4ef; font-size:17px; font-weight:500; }
+.contact-profile-content { min-height:0; overflow:auto; padding:22px 18px; }
+.contact-profile-hero { display:grid; justify-items:center; gap:7px; padding:8px 0 24px; text-align:center; }
+.contact-profile-hero .chat-contact-photo { width:76px; height:76px; margin-bottom:4px; font-size:21px; }
+.contact-profile-hero strong { color:#f0f5f1; font-size:17px; font-weight:500; }
+.contact-profile-hero span { color:#8d9b93; font-family:var(--app-font-mono); font-size:11px; }
+.contact-profile-section { padding:17px 0; border-top:1px solid #303a35; }
+.contact-profile-label { display:block; margin-bottom:10px; color:#7e8d84; font-size:9px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; }
+.contact-profile-phone { display:flex; align-items:center; gap:8px; color:#b9d8c1; font-size:13px; text-decoration:none; }
+.contact-profile-phone:hover { color:#e6f4e9; }
+.contact-profile-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+.contact-profile-stats div { display:grid; gap:3px; padding:10px 7px; border-radius:7px; background:#252d29; text-align:center; }
+.contact-profile-stats strong { color:#e6f1e9; font-size:16px; font-weight:600; }
+.contact-profile-stats span { color:#87968d; font-size:9px; }
+.contact-profile-note { display:flex; align-items:flex-start; gap:9px; margin-top:9px; padding:12px; border:1px solid #35453b; border-radius:8px; color:#91ad99; background:#1b2a21; }
+.contact-profile-note svg { flex:none; margin-top:1px; color:#69cf8b; }
+.contact-profile-note p { margin:0; font-size:10px; line-height:1.5; }
 .mobile-scrim { display:none; }
 
 /* Templates workspace — keeps the compact, graphite WhatsApp operator surface. */
@@ -391,18 +422,25 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .send-btn { width:42px; height:42px; }
   .empty-chat { padding:22px 18px; }
   .empty-chat-card { max-width:320px; }
-  .templates-body { grid-template-columns:1fr; }
-  .flow-stepper { overflow-x:auto; padding-inline:16px; }
-  .flow-step { min-width:155px; }
+  .templates-body { display:block; overflow-y:auto; overflow-x:hidden; }
+  .flow-stepper { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; overflow:visible; padding:9px 12px; }
+  .flow-step { min-width:0; gap:6px; padding:8px 7px; }
+  .flow-step-number { width:22px; height:22px; font-size:10px; }
+  .flow-step strong { overflow:hidden; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+  .flow-step small { display:none; }
   .templates-area { grid-column:auto; }
   .templates-library, .templates-dispatch, .dispatch-monitor { grid-column:auto; grid-row:auto; }
-  .templates-library { max-height:44svh; }
+  .templates-library, .templates-dispatch, .dispatch-monitor { max-height:none; overflow:visible; }
   .templates-topbar { align-items:flex-start; flex-direction:column; justify-content:center; gap:4px; padding:calc(12px + env(safe-area-inset-top)) 16px 12px; }
   .templates-dispatch { padding:18px 16px calc(28px + env(safe-area-inset-bottom)); }
   .templates-title { font-size:18px; }
   .templates-subtitle { line-height:1.4; }
   .template-preview-header { flex-wrap:wrap; gap:9px; }
   .template-preview-card { padding:14px; }
+  .manual-template-grid { grid-template-columns:1fr; }
+  .manual-button-row { grid-template-columns:minmax(0,1fr) auto; gap:7px; }
+  .manual-button-row .field-input:first-child { grid-column:1 / -1; }
+  .manual-button-row .action-btn { grid-column:2; grid-row:2; }
   .template-cost-card { align-items:flex-start; flex-direction:column; gap:8px; }
   .template-cost-note { max-width:none; text-align:left; }
   .flow-step-actions { align-items:stretch; flex-direction:column; }
@@ -413,6 +451,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .template-result-row { align-items:flex-start; flex-wrap:wrap; }
   .template-result-message { width:100%; margin-left:0; text-align:left; }
   .field-input, .search-box input { font-size:16px; }
+  .attach-btn { width:40px; height:40px; }
+  .composer { gap:6px; }
+  .contact-profile-panel { inset:64px 0 0; width:100%; border-left:0; border-top:1px solid #3a4540; box-shadow:0 -16px 38px rgba(0,0,0,.3); }
 }
 @media (min-width: 721px) { .mobile-only { display:none !important; } }
 

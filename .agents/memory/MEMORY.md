@@ -1,1 +1,2 @@
 - [WhatsApp connection security](whatsapp-connection.md) — keep the Meta access token server-side; add persistence only with authenticated, encrypted, user-scoped storage.
+- [WhatsApp media uploads](whatsapp-media-upload.md) — send transient chat files directly to Meta; keep multipart schema components compatible with generated clients.

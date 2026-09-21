@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
+import multer from "multer";
 import {
   ConnectWhatsAppBody,
   CreateContactBody,
@@ -42,6 +43,10 @@ import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v23.0";
+const mediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 },
+});
 
 type PhoneNumber = {
   id: string;
@@ -653,6 +658,135 @@ async function sendTextMessage(
   return id;
 }
 
+type MediaMessageType = "image" | "video" | "audio" | "document";
+
+function mediaMessageType(mimeType: string): MediaMessageType {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+async function uploadMediaToMeta(
+  phoneNumberId: string,
+  file: Express.Multer.File,
+  accessToken: string,
+) {
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  const fileBytes = new Uint8Array(file.buffer).slice().buffer;
+  form.append(
+    "file",
+    new Blob([fileBytes], { type: file.mimetype }),
+    file.originalname,
+  );
+  const response = await fetch(
+    `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(phoneNumberId)}/media`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+    },
+  );
+  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const error = asRecord(body.error);
+    throw new MetaApiError(
+      stringValue(error.message) || "A Meta recusou o arquivo enviado.",
+      response.status,
+      stringValue(error.code),
+    );
+  }
+  const mediaId = stringValue(body.id);
+  if (!mediaId) throw new MetaApiError("A Meta não retornou o ID da mídia.");
+  return mediaId;
+}
+
+async function sendMediaMessage(
+  phoneNumberId: string,
+  to: string,
+  file: Express.Multer.File,
+  caption: string,
+  accessToken: string,
+) {
+  const type = mediaMessageType(file.mimetype);
+  const mediaId = await uploadMediaToMeta(phoneNumberId, file, accessToken);
+  const media = {
+    id: mediaId,
+    ...(caption ? { caption } : {}),
+    ...(type === "document" ? { filename: file.originalname } : {}),
+  };
+  const body = await graphRequest<{ messages?: Array<{ id?: string }> }>(
+    `${encodeURIComponent(phoneNumberId)}/messages`,
+    accessToken,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type,
+        [type]: media,
+      }),
+    },
+  );
+  const id = stringValue(body.messages?.[0]?.id);
+  if (!id) throw new MetaApiError("A Meta não retornou o ID da mídia enviada.");
+  return { id, type };
+}
+
+async function storeOutboundMediaMessage(
+  conversation: typeof conversations.$inferSelect,
+  file: Express.Multer.File,
+  caption: string,
+  connection: ActiveConnection,
+) {
+  const [contact] = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.id, conversation.contactId))
+    .limit(1);
+  if (!contact) throw new MetaApiError("Contato da conversa não encontrado.", 404);
+
+  const type = mediaMessageType(file.mimetype);
+  const [pending] = await db
+    .insert(chatMessages)
+    .values({
+      conversationId: conversation.id,
+      direction: "outbound",
+      messageType: type,
+      content: caption || file.originalname,
+      status: "pending",
+    })
+    .returning();
+
+  try {
+    const sent = await sendMediaMessage(
+      conversation.phoneNumberId,
+      contact.phoneNumber,
+      file,
+      caption,
+      connection.accessToken,
+    );
+    const [updated] = await db
+      .update(chatMessages)
+      .set({ status: "sent", whatsappMessageId: sent.id })
+      .where(eq(chatMessages.id, pending.id))
+      .returning();
+    await db
+      .update(conversations)
+      .set({ lastMessageAt: new Date(), updatedAt: new Date() })
+      .where(eq(conversations.id, conversation.id));
+    return updated ?? pending;
+  } catch (error) {
+    await db
+      .update(chatMessages)
+      .set({ status: "failed" })
+      .where(eq(chatMessages.id, pending.id));
+    throw error;
+  }
+}
+
 function isGeneratedContactName(name: string, phoneNumber: string): boolean {
   return name.trim() === `Cliente ${phoneNumber.slice(-4)}`;
 }
@@ -983,6 +1117,48 @@ router.post("/conversations/:conversationId/messages", async (req, res) => {
     res.status(status).json({ error: message });
   }
 });
+
+router.post(
+  "/conversations/:conversationId/media",
+  mediaUpload.single("file"),
+  async (req, res) => {
+    try {
+      const params = SendConversationMessageParams.parse(req.params);
+      if (!activeConnection) {
+        res.status(400).json({ error: "Conecte a API Oficial antes de enviar arquivos." });
+        return;
+      }
+      if (!req.file) {
+        res.status(400).json({ error: "Selecione um arquivo para enviar." });
+        return;
+      }
+
+      const [conversation] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, params.conversationId))
+        .limit(1);
+      if (!conversation) {
+        res.status(404).json({ error: "Conversa não encontrada." });
+        return;
+      }
+
+      const caption = typeof req.body?.caption === "string" ? req.body.caption.trim() : "";
+      const message = await storeOutboundMediaMessage(
+        conversation,
+        req.file,
+        caption,
+        activeConnection,
+      );
+      res.status(201).json(messageResponse(message));
+    } catch (error) {
+      const status = error instanceof MetaApiError ? error.status : 400;
+      const message = error instanceof Error ? error.message : "Falha ao enviar arquivo.";
+      logger.warn({ status, message }, "WhatsApp media send failed");
+      res.status(status).json({ error: message });
+    }
+  },
+);
 
 router.post("/conversations/start", async (req, res) => {
   try {

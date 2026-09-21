@@ -28,6 +28,7 @@ import type {
   Conversation,
   ErrorResponse,
   HealthStatus,
+  MediaInput,
   MessageInput,
   StartConversationInput,
   StartConversationResult,
@@ -701,6 +702,86 @@ export const useDeleteConversation = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getDeleteConversationMutationOptions(options));
+    }
+
+export const getSendConversationMediaUrl = (conversationId: number,) => {
+
+
+
+
+  return `/api/conversations/${conversationId}/media`
+}
+
+/**
+ * @summary Send an image, video, audio, or document to a contact
+ */
+export const sendConversationMedia = async (conversationId: number,
+    mediaInput: MediaInput, options?: Parameters<typeof customFetch>[1]): Promise<ChatMessage> => {
+    const formData = new FormData();
+formData.append(`file`, mediaInput.file);
+if(mediaInput.caption !== undefined) {
+ formData.append(`caption`, mediaInput.caption);
+ }
+
+  return customFetch<ChatMessage>(getSendConversationMediaUrl(conversationId),
+  {
+    ...options,
+    method: 'POST'
+    ,
+    body: formData
+  }
+);}
+
+
+
+
+
+export const getSendConversationMediaMutationKey = () => ['sendConversationMedia'] as const;
+
+export const getSendConversationMediaMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendConversationMedia>>, TError,SendConversationMediaMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendConversationMedia>>, TError,SendConversationMediaMutationVariables, TContext> => {
+
+const mutationKey = getSendConversationMediaMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendConversationMedia>>, SendConversationMediaMutationVariables> = (props) => {
+          const {conversationId,data} = props ?? {};
+
+          return  sendConversationMedia(conversationId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendConversationMediaMutationResult = NonNullable<Awaited<ReturnType<typeof sendConversationMedia>>>
+    export type SendConversationMediaMutationBody = BodyType<MediaInput>
+    export type SendConversationMediaMutationError = ErrorType<ErrorResponse>
+    export type SendConversationMediaMutationVariables = {conversationId: number;data: BodyType<MediaInput>}
+
+    /**
+ * @summary Send an image, video, audio, or document to a contact
+ */
+export const useSendConversationMedia = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendConversationMedia>>, TError,SendConversationMediaMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendConversationMedia>>,
+        TError,
+        SendConversationMediaMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSendConversationMediaMutationOptions(options));
     }
 
 export const getStartConversationUrl = () => {

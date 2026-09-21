@@ -156,6 +156,29 @@ export const DeleteConversationResponse = zod.object({
 
 
 /**
+ * @summary Send an image, video, audio, or document to a contact
+ */
+export const SendConversationMediaParams = zod.object({
+  "conversationId": zod.coerce.number().int()
+})
+
+export const SendConversationMediaBody = zod.object({
+  "file": zod.instanceof(Blob),
+  "caption": zod.string().optional()
+})
+
+export const SendConversationMediaResponse = zod.object({
+  "id": zod.number().int(),
+  "direction": zod.enum(['inbound', 'outbound']),
+  "content": zod.string(),
+  "messageType": zod.string(),
+  "status": zod.string(),
+  "createdAt": zod.string(),
+  "whatsappMessageId": zod.string().nullable()
+})
+
+
+/**
  * @summary Start a new conversation with a phone number
  */
 export const startConversationBodyPhoneNumberMin = 8;

@@ -91,6 +91,11 @@ export interface MessageInput {
   content: string;
 }
 
+export interface MediaInput {
+  file: Blob;
+  caption?: string;
+}
+
 export interface StartConversationInput {
   /** @minLength 8 */
   phoneNumber: string;

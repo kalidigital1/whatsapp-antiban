@@ -171,6 +171,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /conversations/{conversationId}/media:
+    post:
+      operationId: sendConversationMedia
+      tags: [whatsapp]
+      summary: Send an image, video, audio, or document to a contact
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/MediaInput"
+      responses:
+        "201":
+          description: Media message queued and sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "400":
+          description: Invalid request or disconnected account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations/start:
     post:
       operationId: startConversation
@@ -528,6 +564,15 @@ components:
           type: string
           minLength: 1
       required: [content]
+    MediaInput:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        caption:
+          type: string
+      required: [file]
     StartConversationInput:
       type: object
       properties:
