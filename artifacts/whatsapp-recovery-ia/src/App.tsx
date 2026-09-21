@@ -60,6 +60,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
+import metaTermsText from '@assets/Pasted-Estamos-atualizando-nossos-Termos-da-Meta-para-a-Plataf_1789996530090.txt?raw';
 
 const queryClient = new QueryClient();
 const verifiedBadgePath = '/assets/SELO_META_VERIFIED_1789757214597.png';
@@ -79,6 +80,21 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!termsOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTermsOpen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [termsOpen]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -141,6 +157,42 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         >
           Termos de uso do WhatsApp Business
         </a>
+        {termsOpen && (
+          <div
+            className="terms-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meta-terms-title"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setTermsOpen(false);
+            }}
+            data-testid="dialog-meta-terms"
+          >
+            <section className="terms-modal rise-in">
+              <header className="terms-header">
+                <div>
+                  <p className="terms-kicker">Documento oficial</p>
+                  <h2 id="meta-terms-title">Termos da Meta para o WhatsApp Business</h2>
+                  <p>Última modificação: 15 de outubro de 2025</p>
+                </div>
+                <button type="button" className="action-btn" onClick={() => setTermsOpen(false)} aria-label="Fechar termos" data-testid="button-close-meta-terms">
+                  <X size={20} />
+                </button>
+              </header>
+              <div className="terms-content quiet-scroll" tabIndex={0} data-testid="content-meta-terms">
+                {metaTermsText}
+              </div>
+              <footer className="terms-footer">
+                <a href="https://www.whatsapp.com/legal/meta-terms-whatsapp-business?lang=pt" target="_blank" rel="noreferrer" className="terms-official-link" data-testid="link-official-meta-terms">
+                  Ver página oficial
+                </a>
+                <button type="button" className="btn-primary" onClick={() => setTermsOpen(false)} data-testid="button-understand-meta-terms">
+                  Fechar
+                </button>
+              </footer>
+            </section>
+          </div>
+        )}
       </section>
     </main>
   );
