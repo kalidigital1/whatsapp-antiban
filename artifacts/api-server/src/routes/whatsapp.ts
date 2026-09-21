@@ -68,6 +68,11 @@ let activeConnection: ActiveConnection | null = null;
 let connectionRestorePromise: Promise<void> | null = null;
 const eventClients = new Set<Response>();
 
+router.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+
 type ConversationEvent = {
   conversationId: number;
   reason: "message" | "status";
