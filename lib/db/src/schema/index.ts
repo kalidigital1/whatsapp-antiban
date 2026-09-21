@@ -76,6 +76,9 @@ export const chatMessages = pgTable(
 export const appSettings = pgTable("whatsapp_app_settings", {
   id: serial("id").primaryKey(),
   webhookVerifyToken: text("webhook_verify_token"),
+  whatsappAccessTokenEncrypted: text("whatsapp_access_token_encrypted"),
+  whatsappBusinessAccountId: text("whatsapp_business_account_id"),
+  whatsappSelectedPhoneNumberId: text("whatsapp_selected_phone_number_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

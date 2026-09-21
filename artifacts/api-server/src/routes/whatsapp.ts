@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   ConnectWhatsAppBody,
@@ -32,6 +32,7 @@ import {
   contacts,
   conversations,
   db,
+  appSettings,
   whatsappTemplateDispatchRecipients,
   whatsappTemplateDispatches,
   whatsappTemplates,
@@ -58,6 +59,7 @@ type ActiveConnection = {
 };
 
 let activeConnection: ActiveConnection | null = null;
+let connectionRestorePromise: Promise<void> | null = null;
 const eventClients = new Set<Response>();
 
 type ConversationEvent = {
@@ -92,6 +94,64 @@ class MetaApiError extends Error {
     this.code = code;
   }
 }
+
+function whatsappEncryptionKey() {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is required to protect the WhatsApp access token.");
+  return createHash("sha256").update(`${secret}:whatsapp-access-token`).digest();
+}
+
+function encryptWhatsAppToken(value: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", whatsappEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [iv, tag, encrypted].map((part) => part.toString("base64url")).join(".");
+}
+
+function decryptWhatsAppToken(value: string) {
+  const [ivEncoded, tagEncoded, encryptedEncoded] = value.split(".");
+  if (!ivEncoded || !tagEncoded || !encryptedEncoded) throw new Error("Stored WhatsApp token is invalid.");
+  const decipher = createDecipheriv("aes-256-gcm", whatsappEncryptionKey(), Buffer.from(ivEncoded, "base64url"));
+  decipher.setAuthTag(Buffer.from(tagEncoded, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedEncoded, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+async function restoreActiveConnection() {
+  if (activeConnection) return;
+  if (connectionRestorePromise) return connectionRestorePromise;
+  connectionRestorePromise = (async () => {
+    try {
+      const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1);
+      if (!settings?.whatsappAccessTokenEncrypted || !settings.whatsappBusinessAccountId) return;
+      const accessToken = decryptWhatsAppToken(settings.whatsappAccessTokenEncrypted);
+      const phoneNumbers = await loadPhoneNumbers(accessToken, settings.whatsappBusinessAccountId);
+      if (phoneNumbers.length === 0) return;
+      const selected = phoneNumbers.some((phone) => phone.id === settings.whatsappSelectedPhoneNumberId)
+        ? settings.whatsappSelectedPhoneNumberId!
+        : phoneNumbers[0].id;
+      activeConnection = {
+        accessToken,
+        businessAccountId: settings.whatsappBusinessAccountId,
+        phoneNumbers,
+        selectedPhoneNumberId: selected,
+      };
+    } catch (error) {
+      logger.warn({ err: error }, "Could not restore WhatsApp connection from storage");
+    } finally {
+      connectionRestorePromise = null;
+    }
+  })();
+  return connectionRestorePromise;
+}
+
+router.use(async (_req, _res, next) => {
+  await restoreActiveConnection();
+  next();
+});
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -718,6 +778,25 @@ router.post("/connection", async (req, res) => {
         phoneNumbers.find((phone) => phone.id === input.phoneNumberId)?.id) ??
       phoneNumbers[0].id;
 
+    const encryptedAccessToken = encryptWhatsAppToken(input.accessToken);
+    await db
+      .insert(appSettings)
+      .values({
+        id: 1,
+        whatsappAccessTokenEncrypted: encryptedAccessToken,
+        whatsappBusinessAccountId: input.businessAccountId,
+        whatsappSelectedPhoneNumberId: selected,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: appSettings.id,
+        set: {
+          whatsappAccessTokenEncrypted: encryptedAccessToken,
+          whatsappBusinessAccountId: input.businessAccountId,
+          whatsappSelectedPhoneNumberId: selected,
+          updatedAt: new Date(),
+        },
+      });
     activeConnection = {
       accessToken: input.accessToken,
       businessAccountId: input.businessAccountId,
@@ -737,8 +816,17 @@ router.post("/connection", async (req, res) => {
   }
 });
 
-router.delete("/connection", (_req, res) => {
+router.delete("/connection", async (_req, res) => {
   activeConnection = null;
+  await db
+    .update(appSettings)
+    .set({
+      whatsappAccessTokenEncrypted: null,
+      whatsappBusinessAccountId: null,
+      whatsappSelectedPhoneNumberId: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(appSettings.id, 1));
   res.json({ success: true });
 });
 

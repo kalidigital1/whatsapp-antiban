@@ -24,7 +24,7 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
 
    Os dados da conta WhatsApp conectada são configurados pela tela de configurações e persistidos no banco.
 
-4. O Heroku usa o `Procfile` e executa o build pelo `heroku-postbuild`.
+4. O Heroku instala a versão de pnpm declarada em `packageManager`, executa o build pelo `heroku-postbuild` e roda o `release` do `Procfile` para aplicar o schema do banco antes de iniciar o dyno web.
 5. No painel da Meta, configure o callback para:
 
    ```text
@@ -36,6 +36,21 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
 ## Login persistente
 
 Na tela de login, marcar **Manter conectado por 30 dias** cria um cookie HTTP-only com validade de 30 dias. Sem marcar, a sessão é temporária e o token expira em 12 horas.
+
+## Reinícios e segurança
+
+- A conexão com a Meta é persistida no Postgres; o access token é armazenado criptografado usando `SESSION_SECRET` e nunca é enviado ao frontend.
+- Não altere `SESSION_SECRET` depois de salvar uma conexão sem antes reconectar a conta, porque os tokens persistidos não poderão ser descriptografados com a nova chave.
+- O dyno web usa a porta `PORT` fornecida pelo Heroku e serve a API e o build do React no mesmo processo.
+
+## Verificação após o deploy
+
+```bash
+heroku logs --tail -a SEU_APP
+curl https://SEU_APP.herokuapp.com/api/healthz
+```
+
+O health check deve responder `{"status":"ok"}`. A tela principal pode exigir login, enquanto `/api/healthz` permanece público para monitoramento.
 
 ## Observações
 
