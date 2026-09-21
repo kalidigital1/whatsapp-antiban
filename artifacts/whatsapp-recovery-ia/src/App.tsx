@@ -787,56 +787,95 @@ function templateParameterSlots(template: Template): TemplateParameterSlot[] {
   return slots;
 }
 
-function normalizeImportedTemplate(value: unknown): TemplateInput {
-  const root = Array.isArray(value) ? value[0] : value;
-  const source = (root && typeof root === 'object' ? root : {}) as Record<string, unknown>;
-  const nested = Array.isArray(source.templates) ? source.templates[0] : undefined;
-  const data = (nested && typeof nested === 'object' ? nested : source) as Record<string, unknown>;
-  const rawComponents = Array.isArray(data.components) ? data.components.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : [];
-  const components: TemplateComponent[] = rawComponents.map((component) => {
-    const rawButtons = Array.isArray(component.buttons) ? component.buttons.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : [];
-    return {
-      type: String(component.type ?? '').toUpperCase(),
-      format: typeof component.format === 'string' ? component.format.toUpperCase() : null,
-      text: typeof component.text === 'string' ? component.text : null,
-      example: component.example && typeof component.example === 'object' && !Array.isArray(component.example) ? component.example as Record<string, unknown> : null,
-      buttons: rawButtons.map((button) => ({
-        type: String(button.type ?? '').toUpperCase(),
-        text: typeof button.text === 'string' ? button.text : null,
-        url: typeof button.url === 'string' ? button.url : null,
-        phoneNumber: typeof button.phone_number === 'string' ? button.phone_number : typeof button.phoneNumber === 'string' ? button.phoneNumber : null,
-        example: Array.isArray(button.example) ? button.example.filter((item): item is string => typeof item === 'string') : null,
-      })),
-    };
-  }).filter((component) => component.type);
-  const componentText = (type: string) => components.find((component) => component.type === type)?.text ?? null;
-  const body = typeof data.body === 'string' ? data.body : componentText('BODY');
-  const header = typeof data.header === 'string' ? data.header : componentText('HEADER');
-  const footer = typeof data.footer === 'string' ? data.footer : componentText('FOOTER');
-  const variableMatches = (body ?? '').match(/{{\s*[^}]+\s*}}/g) ?? [];
-  const rawVariables = Array.isArray(data.variables) ? data.variables.filter((item): item is string => typeof item === 'string') : variableMatches;
-  const name = typeof data.name === 'string' ? data.name : '';
-  const languageCode = typeof data.languageCode === 'string'
-    ? data.languageCode
-    : typeof data.language_code === 'string'
-      ? data.language_code
-      : typeof data.language === 'string'
-        ? data.language
-        : (data.language && typeof data.language === 'object' && typeof (data.language as Record<string, unknown>).code === 'string' ? String((data.language as Record<string, unknown>).code) : '');
-  const category = typeof data.category === 'string' ? data.category : 'UTILITY';
-  const status = typeof data.status === 'string' ? data.status : undefined;
-  if (!name.trim() || !languageCode.trim() || !body?.trim()) throw new Error('O JSON precisa conter name, languageCode (ou language_code) e body (ou um componente BODY).');
+type ManualButtonDraft = {
+  type: 'URL' | 'QUICK_REPLY' | 'PHONE_NUMBER';
+  text: string;
+  url: string;
+  phoneNumber: string;
+};
+
+type ManualTemplateDraft = {
+  name: string;
+  languageCode: string;
+  category: string;
+  headerFormat: 'NONE' | 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+  headerText: string;
+  body: string;
+  footer: string;
+  buttons: ManualButtonDraft[];
+};
+
+const emptyManualTemplate = (): ManualTemplateDraft => ({
+  name: '',
+  languageCode: 'pt_BR',
+  category: 'UTILITY',
+  headerFormat: 'NONE',
+  headerText: '',
+  body: '',
+  footer: '',
+  buttons: [],
+});
+
+function buildManualTemplateInput(draft: ManualTemplateDraft): TemplateInput {
+  const components: TemplateComponent[] = [
+    ...(draft.headerFormat !== 'NONE'
+      ? [{
+          type: 'HEADER',
+          format: draft.headerFormat,
+          text: draft.headerFormat === 'TEXT' ? draft.headerText.trim() || null : null,
+          example: null,
+          buttons: [],
+        }]
+      : []),
+    { type: 'BODY', format: null, text: draft.body.trim(), example: null, buttons: [] },
+    ...(draft.footer.trim()
+      ? [{ type: 'FOOTER', format: null, text: draft.footer.trim(), example: null, buttons: [] }]
+      : []),
+    ...(draft.buttons.length
+      ? [{
+          type: 'BUTTONS',
+          format: null,
+          text: null,
+          example: null,
+          buttons: draft.buttons.map((button) => ({
+            type: button.type,
+            text: button.text.trim() || null,
+            url: button.type === 'URL' ? button.url.trim() || null : null,
+            phoneNumber: button.type === 'PHONE_NUMBER' ? button.phoneNumber.trim() || null : null,
+            example: null,
+          })),
+        }]
+      : []),
+  ];
+  const variableSource = `${draft.headerText} ${draft.body} ${draft.buttons.map((button) => button.url).join(' ')}`;
   return {
-    name: name.trim(),
-    languageCode: languageCode.trim(),
-    category: category.trim() || 'UTILITY',
-    ...(status ? { status } : {}),
-    header: header?.trim() || null,
-    body: body.trim(),
-    footer: footer?.trim() || null,
-    variables: rawVariables,
+    name: draft.name.trim(),
+    languageCode: draft.languageCode.trim(),
+    category: draft.category,
+    status: 'PENDING',
+    header: draft.headerFormat === 'TEXT' ? draft.headerText.trim() || null : null,
+    body: draft.body.trim(),
+    footer: draft.footer.trim() || null,
+    variables: variableNumbers(variableSource).map((index) => `{{${index}}}`),
     components,
   };
+}
+
+function templateStatusLabel(status: string) {
+  const normalized = status.toUpperCase().replace(/[\s-]+/g, '_');
+  return ({
+    PENDING: 'Em análise',
+    IN_REVIEW: 'Em análise',
+    PENDING_REVIEW: 'Em análise',
+    APPROVED: 'Aprovado',
+    REJECTED: 'Rejeitado',
+    PAUSED: 'Pausado',
+    DISABLED: 'Desabilitado',
+    LIMITED: 'Limitado',
+    DELETED: 'Excluído',
+    DISABLED_BY_META: 'Desabilitado',
+    IMPORTED: 'Em análise',
+  } as Record<string, string>)[normalized] ?? status;
 }
 
 function dispatchStatusLabel(status: string) {
