@@ -14,7 +14,6 @@ import {
   LockKeyhole,
   Loader2,
   LogOut,
-  Menu,
   MessageCircle,
   MoreVertical,
   Phone,
@@ -247,6 +246,7 @@ function Sidebar({
   error,
   onSettings,
   onNewConversation,
+  onTemplates,
   mobileOpen,
   onCloseMobile,
 }: {
@@ -259,6 +259,7 @@ function Sidebar({
   error: unknown;
   onSettings: () => void;
   onNewConversation: () => void;
+  onTemplates: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }) {
@@ -279,6 +280,7 @@ function Sidebar({
         <img className="brand-logo" src="/assets/antiban-logo-white.png" alt="Antiban" />
         <div className="flex items-center gap-1">
           <button type="button" className="action-btn" onClick={onNewConversation} data-testid="button-new-conversation" aria-label="Nova conversa"><Plus size={21} /></button>
+          <button type="button" className="action-btn mobile-only" onClick={onTemplates} data-testid="button-open-templates" aria-label="Abrir templates"><FileText size={18} /></button>
           <button type="button" className="action-btn md:hidden" onClick={onCloseMobile} data-testid="button-close-sidebar" aria-label="Fechar conversas"><X size={19} /></button>
         </div>
       </header>
@@ -354,10 +356,13 @@ function Sidebar({
   );
 }
 
-function ChatEmpty({ connected, onSettings }: { connected: boolean; onSettings: () => void }) {
+function ChatEmpty({ connected, onSettings, onOpenConversations }: { connected: boolean; onSettings: () => void; onOpenConversations: () => void }) {
   return (
     <div className="empty-chat" data-testid="state-chat-empty">
       <div className="empty-chat-card rise-in">
+        <button type="button" className="empty-chat-list-button mobile-only" onClick={onOpenConversations} data-testid="button-open-conversations">
+          <ArrowLeft size={16} /> Ver conversas
+        </button>
         <div className="empty-chat-icon"><MessageCircle size={32} strokeWidth={1.4} /></div>
         <h1>WhatsApp Recovery IA</h1>
         <p>Selecione uma conversa à esquerda ou inicie uma nova conversa para responder aos seus clientes.</p>
@@ -423,7 +428,7 @@ function ChatPanel({
     });
   };
 
-  if (!conversation) return <ChatEmpty connected={connected} onSettings={onSettings} />;
+  if (!conversation) return <ChatEmpty connected={connected} onSettings={onSettings} onOpenConversations={onBack} />;
 
   return (
     <section className="chat-area" data-testid="panel-chat">
@@ -697,7 +702,7 @@ function normalizeImportedTemplate(value: unknown): TemplateInput {
   };
 }
 
-function TemplateWorkspace() {
+function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   const queryClient = useQueryClient();
   const templatesQuery = useListTemplates({ query: { queryKey: getListTemplatesQueryKey() } });
   const costsQuery = useGetTemplateCosts({ query: { queryKey: getGetTemplateCostsQueryKey() } });
@@ -779,6 +784,7 @@ function TemplateWorkspace() {
     <section className="templates-area" data-testid="workspace-templates">
       <header className="templates-topbar">
         <div>
+          <button type="button" className="templates-mobile-back mobile-only" onClick={onBackToInbox} data-testid="button-back-to-inbox"><ArrowLeft size={16} /> Conversas</button>
           <p className="templates-kicker">WhatsApp Cloud API · operação</p>
           <h1 className="templates-title">Templates de mensagem</h1>
           <p className="templates-subtitle">Importe uma definição aprovada, revise e envie para sua lista.</p>
@@ -930,7 +936,7 @@ function Home() {
 
   return (
     <main className="app-frame">
-      <div className="inbox-shell">
+      <div className="inbox-shell" data-mobile-list-open={activeSection === 'inbox' ? mobileListOpen : undefined}>
         <NavigationRail
           onSettings={() => setSettingsOpen(true)}
           connected={Boolean(connection?.connected)}
@@ -938,15 +944,14 @@ function Home() {
           activeSection={activeSection}
           onSectionChange={setActiveSection}
         />
-        {activeSection === 'templates' ? <TemplateWorkspace /> : (
+        {activeSection === 'templates' ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} /> : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={Boolean(connection?.connected)} connection={connection} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={Boolean(connection?.connected)} connection={connection} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
             <ChatPanel conversation={selectedConversation} connected={Boolean(connection?.connected)} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>
         )}
       </div>
-      <button type="button" className="mobile-list-trigger" onClick={() => setMobileListOpen(true)} data-testid="button-open-conversations" aria-label="Abrir lista de conversas"><Menu size={20} /></button>
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {newConversationOpen && <NewConversationDialog onClose={() => setNewConversationOpen(false)} onCreated={(conversation) => { setNewConversationOpen(false); setSelectedId(conversation.id); setMobileListOpen(false); }} />}
       {conversationToDelete && <DeleteConversationDialog conversation={conversationToDelete} pending={deleteConversation.isPending} error={deleteError} onClose={() => { if (!deleteConversation.isPending) { setConversationToDelete(null); setDeleteError(''); } }} onConfirm={confirmDeleteConversation} />}
