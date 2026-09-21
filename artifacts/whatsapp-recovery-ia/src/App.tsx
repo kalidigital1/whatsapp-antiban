@@ -254,7 +254,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
       </div>
       <nav className="rail-nav">
         <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
-        <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Templates" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Templates</span></button>
+        <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Envios" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Envios</span></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Atualizações" data-testid="rail-updates"><Wifi size={17} /><span className="rail-btn-label">Atualizações</span></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Chamadas" data-testid="rail-calls"><Phone size={17} /><span className="rail-btn-label">Chamadas</span></button>
