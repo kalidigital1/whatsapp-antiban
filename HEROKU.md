@@ -4,7 +4,28 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
 
 ## Configuração
 
-1. Crie um app no Heroku e adicione o **Heroku Postgres**.
+1. Crie um app no Heroku e adicione o **Heroku Postgres antes do primeiro deploy**:
+
+   ```bash
+   heroku create SEU_APP
+   heroku addons:create heroku-postgresql:essential-0 -a SEU_APP
+   ```
+
+   O add-on cria automaticamente a Config Var `DATABASE_URL`. Se você usar um
+   Postgres externo, configure essa variável manualmente:
+
+   ```bash
+   heroku config:set DATABASE_URL='postgresql://...' -a SEU_APP
+   ```
+
+   Confirme que a variável existe antes de fazer o push:
+
+   ```bash
+   heroku config:get DATABASE_URL -a SEU_APP
+   ```
+
+   Nunca coloque esse valor no repositório ou em arquivos versionados.
+
 2. Faça o deploy do repositório:
 
    ```bash
@@ -51,6 +72,30 @@ curl https://SEU_APP.herokuapp.com/api/healthz
 ```
 
 O health check deve responder `{"status":"ok"}`. A tela principal pode exigir login, enquanto `/api/healthz` permanece público para monitoramento.
+
+## Erro `DATABASE_URL, ensure the database is provisioned`
+
+Esse erro acontece quando o `release` foi executado sem uma Config Var
+`DATABASE_URL`. O banco é obrigatório: o backend também não inicia sem ele.
+
+No app correto, execute:
+
+```bash
+heroku addons:create heroku-postgresql:essential-0 -a SEU_APP
+heroku config:get DATABASE_URL -a SEU_APP
+git push heroku main
+```
+
+Se o Postgres já existe, verifique se ele está associado a este app e se a
+variável não foi removida:
+
+```bash
+heroku addons -a SEU_APP
+heroku config -a SEU_APP
+```
+
+Não remova a etapa `release` do `Procfile`: ela aplica o schema necessário
+antes do dyno web iniciar.
 
 ## Observações
 
