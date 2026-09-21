@@ -132,6 +132,15 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
           </button>
         </form>
         <p className="login-footnote"><ShieldCheck size={14} /> Ambiente protegido</p>
+        <a
+          className="login-terms"
+          href="https://www.whatsapp.com/legal/meta-terms-whatsapp-business?lang=pt"
+          target="_blank"
+          rel="noreferrer"
+          data-testid="link-meta-terms"
+        >
+          Termos de uso do WhatsApp Business
+        </a>
       </section>
     </main>
   );
