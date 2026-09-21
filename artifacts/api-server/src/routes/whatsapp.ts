@@ -128,6 +128,10 @@ async function restoreActiveConnection() {
       const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1);
       if (!settings?.whatsappAccessTokenEncrypted || !settings.whatsappBusinessAccountId) return;
       const accessToken = decryptWhatsAppToken(settings.whatsappAccessTokenEncrypted);
+      await subscribeWhatsAppBusinessAccount(
+        accessToken,
+        settings.whatsappBusinessAccountId,
+      );
       const phoneNumbers = await loadPhoneNumbers(accessToken, settings.whatsappBusinessAccountId);
       if (phoneNumbers.length === 0) return;
       const selected = phoneNumbers.some((phone) => phone.id === settings.whatsappSelectedPhoneNumberId)
@@ -227,6 +231,20 @@ async function graphRequest<T>(
   }
 
   return body as T;
+}
+
+async function subscribeWhatsAppBusinessAccount(
+  accessToken: string,
+  businessAccountId: string,
+) {
+  await graphRequest<{ success?: boolean }>(
+    `${encodeURIComponent(businessAccountId)}/subscribed_apps`,
+    accessToken,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 async function loadPhoneNumbers(
@@ -777,6 +795,11 @@ router.post("/connection", async (req, res) => {
       (input.phoneNumberId &&
         phoneNumbers.find((phone) => phone.id === input.phoneNumberId)?.id) ??
       phoneNumbers[0].id;
+
+    await subscribeWhatsAppBusinessAccount(
+      input.accessToken,
+      input.businessAccountId,
+    );
 
     const encryptedAccessToken = encryptWhatsAppToken(input.accessToken);
     await db
