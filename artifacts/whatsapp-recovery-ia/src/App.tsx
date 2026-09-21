@@ -556,12 +556,28 @@ function ChatPanel({
   const [profileOpen, setProfileOpen] = useState(false);
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
+  const [mediaPreviewByMessageId, setMediaPreviewByMessageId] = useState<Record<string, string>>({});
+  const [optimisticConversationId, setOptimisticConversationId] = useState<number | null>(null);
   const messagesQuery = useListConversationMessages(conversation?.id ?? 0, {
     query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 5000 },
   });
   const sendMessage = useSendConversationMessage();
   const sendMedia = useSendConversationMedia();
   const messages = messagesQuery.data ?? [];
+  const messagesWithMediaPreviews = messages.map((message) => ({
+    ...message,
+    mediaPreviewUrl: message.whatsappMessageId
+      ? mediaPreviewByMessageId[message.whatsappMessageId]
+      : undefined,
+  }));
+  const activeOptimistic = optimisticConversationId === conversation?.id ? optimistic : null;
+  const showOptimistic = Boolean(
+    activeOptimistic
+      && !messagesWithMediaPreviews.some((message) => (
+        message.id === activeOptimistic.id
+        || (message.whatsappMessageId && message.whatsappMessageId === activeOptimistic.whatsappMessageId)
+      )),
+  );
   const sending = sendMessage.isPending || sendMedia.isPending;
 
   useEffect(() => {
@@ -593,9 +609,11 @@ function ChatPanel({
       : 'text';
     const temporary: DisplayChatMessage = { id: -Date.now(), direction: 'outbound', content: mediaFile?.name || messageContent, messageType: mediaType, status: 'sending', createdAt: new Date().toISOString(), whatsappMessageId: null, mediaPreviewUrl: mediaPreviewUrl ?? undefined, mediaFileName: mediaFile?.name, mediaCaption: mediaFile ? (messageContent || undefined) : undefined };
     setOptimistic(temporary);
+    setOptimisticConversationId(conversation.id);
     setContent('');
-    const onSuccess = () => {
+    const onTextSuccess = () => {
       setOptimistic(null);
+      setOptimisticConversationId(null);
       setMediaFile(null);
       void queryClient.invalidateQueries({ queryKey: getListConversationMessagesQueryKey(conversation.id) });
       void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
@@ -603,10 +621,31 @@ function ChatPanel({
     const onError = () => setOptimistic({ ...temporary, status: 'failed' });
     if (mediaFile) {
       const fileToSend = mediaFile;
-      sendMedia.mutate({ conversationId: conversation.id, data: { file: fileToSend, ...(messageContent ? { caption: messageContent } : {}) } }, { onSuccess, onError });
+      const sentPreviewUrl = mediaPreviewUrl;
+      const onMediaSuccess = (sentMessage: ChatMessage) => {
+        if (sentMessage.messageType === 'image' && sentMessage.whatsappMessageId && sentPreviewUrl) {
+          setMediaPreviewByMessageId((current) => ({
+            ...current,
+            [sentMessage.whatsappMessageId as string]: sentPreviewUrl,
+          }));
+          setOptimistic({
+            ...sentMessage,
+            mediaPreviewUrl: sentPreviewUrl,
+            mediaFileName: fileToSend.name,
+            mediaCaption: messageContent || undefined,
+          });
+        } else {
+          setOptimistic(null);
+          setOptimisticConversationId(null);
+        }
+        setMediaFile(null);
+        void queryClient.invalidateQueries({ queryKey: getListConversationMessagesQueryKey(conversation.id) });
+        void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+      };
+      sendMedia.mutate({ conversationId: conversation.id, data: { file: fileToSend, ...(messageContent ? { caption: messageContent } : {}) } }, { onSuccess: onMediaSuccess, onError });
       return;
     }
-    sendMessage.mutate({ conversationId: conversation.id, data: { content: messageContent } }, { onSuccess, onError });
+    sendMessage.mutate({ conversationId: conversation.id, data: { content: messageContent } }, { onSuccess: onTextSuccess, onError });
   };
 
   if (!conversation) return <ChatEmpty connected={connected} onSettings={onSettings} onOpenConversations={onBack} />;
@@ -652,8 +691,8 @@ function ChatPanel({
           )}
           {messagesQuery.isError && <div className="status-note mx-auto my-5 max-w-sm justify-center text-center" data-testid="state-messages-error"><AlertCircle size={17} /> Não foi possível carregar as mensagens. A atualização automática continuará tentando.</div>}
           {!messagesQuery.isLoading && !messagesQuery.isError && messages.length === 0 && !optimistic && <div className="py-20 text-center text-xs text-[#89958f]" data-testid="state-messages-empty">Nenhuma mensagem nesta conversa.</div>}
-          {messages.map((message) => <MessageBubble key={message.id} message={message} />)}
-          {optimistic && <MessageBubble message={optimistic} />}
+          {messagesWithMediaPreviews.map((message) => <MessageBubble key={message.id} message={message} />)}
+          {showOptimistic && activeOptimistic && <MessageBubble message={activeOptimistic} />}
         </div>
       </div>
 
