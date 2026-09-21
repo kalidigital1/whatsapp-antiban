@@ -164,6 +164,18 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .quiet-scroll::-webkit-scrollbar { width:7px; height:7px; }
 .quiet-scroll::-webkit-scrollbar-thumb { background:#4b514f; border-radius:10px; }
 .modal-backdrop { position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:16px; background:rgba(0,0,0,.7); backdrop-filter:blur(4px); }
+.auth-loading { min-height:100dvh; display:grid; place-items:center; color:#69cf8b; background:#111513; }
+.login-shell { min-height:100dvh; display:grid; place-items:center; padding:24px; background:radial-gradient(circle at 50% 20%,#26382f 0%,#151b18 38%,#0f1211 100%); }
+.login-card { width:min(410px,100%); padding:34px; border:1px solid #3c4b44; border-radius:16px; background:rgba(26,31,29,.94); box-shadow:0 28px 90px rgba(0,0,0,.42); }
+.login-brand { display:flex; justify-content:center; margin-bottom:28px; }
+.login-brand img { display:block; width:min(190px,70%); height:auto; object-fit:contain; }
+.login-kicker { margin:0 0 8px; color:#68c98a; font-size:10px; font-weight:700; letter-spacing:.14em; text-align:center; text-transform:uppercase; }
+.login-card h1 { margin:0; color:#f0f4f1; font-size:26px; font-weight:500; letter-spacing:-.04em; text-align:center; }
+.login-copy { margin:9px auto 26px; max-width:300px; color:#9ca8a2; font-size:12px; line-height:1.55; text-align:center; }
+.login-form { display:grid; gap:16px; }
+.login-submit { width:100%; min-height:44px; margin-top:3px; }
+.login-error { display:flex; align-items:center; gap:7px; margin:0; color:#efaaa2; font-size:12px; line-height:1.4; }
+.login-footnote { display:flex; align-items:center; justify-content:center; gap:6px; margin:24px 0 0; color:#718079; font-size:10px; }
 .settings-card { width:min(650px,100%); max-height:min(760px,calc(100dvh - 32px)); overflow:auto; background:#202322; border:1px solid #454b48; border-radius:12px; box-shadow:0 24px 70px rgba(0,0,0,.55); }
 .settings-section { padding:20px; border-bottom:1px solid #383d3b; }
 .settings-title { margin:0; color:#f0f3f1; font-size:21px; font-weight:500; letter-spacing:-.035em; }

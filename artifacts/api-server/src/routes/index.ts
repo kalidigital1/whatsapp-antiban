@@ -1,10 +1,19 @@
 import { Router, type IRouter } from "express";
+import authRouter, { requireAuth } from "./auth";
 import healthRouter from "./health";
 import whatsappRouter from "./whatsapp";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(authRouter);
+router.use((req, res, next) => {
+  if (req.path === "/webhook") {
+    next();
+    return;
+  }
+  requireAuth(req, res, next);
+});
 router.use(whatsappRouter);
 
 export default router;

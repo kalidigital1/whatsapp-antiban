@@ -11,7 +11,9 @@ import {
   FileJson,
   FileText,
   Inbox,
+  LockKeyhole,
   Loader2,
+  LogOut,
   Menu,
   MessageCircle,
   MoreVertical,
@@ -70,6 +72,65 @@ function errorText(error: unknown) {
     return String((error as { message?: unknown }).message ?? 'Erro inesperado.');
   }
   return 'Erro inesperado. Tente novamente.';
+}
+
+function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (pending) return;
+    setError('');
+    setPending(true);
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error || 'Não foi possível entrar.');
+      setPassword('');
+      onAuthenticated();
+    } catch (loginError) {
+      setError(errorText(loginError));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <main className="login-shell">
+      <section className="login-card rise-in">
+        <div className="login-brand">
+          <img src="/assets/antiban-logo-white.png" alt="Antiban" />
+        </div>
+        <p className="login-kicker">WhatsApp Recovery IA</p>
+        <h1>Acesse sua central</h1>
+        <p className="login-copy">Entre para gerenciar suas conversas e acompanhar seus clientes.</p>
+        <form className="login-form" onSubmit={submit}>
+          <div className="field">
+            <label className="field-label" htmlFor="login-username">Usuário</label>
+            <input id="login-username" className="field-input" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="@antiban" autoComplete="username" autoFocus data-testid="input-login-username" />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="login-password">Senha</label>
+            <input id="login-password" className="field-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Digite sua senha" autoComplete="current-password" data-testid="input-login-password" />
+          </div>
+          {error && <p className="login-error" role="alert" data-testid="status-login-error"><AlertCircle size={15} />{error}</p>}
+          <button type="submit" className="btn-primary login-submit" disabled={pending || !username.trim() || !password}>
+            {pending ? <Loader2 size={17} className="animate-spin" /> : <LockKeyhole size={17} />}
+            {pending ? 'Entrando...' : 'Entrar'}
+          </button>
+        </form>
+        <p className="login-footnote"><ShieldCheck size={14} /> Ambiente protegido</p>
+      </section>
+    </main>
+  );
 }
 
 function initials(name: string) {
@@ -511,6 +572,10 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     setCopiedVerifyToken(true);
     window.setTimeout(() => setCopiedVerifyToken(false), 1800);
   };
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    window.location.reload();
+  };
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settings-title" data-testid="dialog-settings">
@@ -552,6 +617,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
           <div className="flex items-start gap-2 border-t border-[#383d3b] pt-4 text-[11px] leading-relaxed text-[#8f9b95]"><CircleHelp size={15} className="mt-0.5 shrink-0" />A conexão usa os endpoints oficiais da WhatsApp Cloud API. O servidor recebe eventos pelo webhook e mantém o histórico das conversas.</div>
+          <button type="button" className="btn-ghost w-full" onClick={() => void logout()} data-testid="button-logout"><LogOut size={16} /> Sair da conta</button>
         </div>
       </div>
     </div>
@@ -894,6 +960,32 @@ function Router() {
   );
 }
 
+function AuthGate() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((response) => {
+        if (active) setAuthenticated(response.ok);
+      })
+      .catch(() => {
+        if (active) setAuthenticated(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (authenticated === null) {
+    return <div className="auth-loading"><Loader2 size={22} className="animate-spin" /></div>;
+  }
+  if (!authenticated) {
+    return <LoginScreen onAuthenticated={() => { queryClient.clear(); setAuthenticated(true); }} />;
+  }
+  return <Router />;
+}
+
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;
@@ -904,7 +996,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
+          <AuthGate />
         </WouterRouter>
         <Toaster />
       </TooltipProvider>
