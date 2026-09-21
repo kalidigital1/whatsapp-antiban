@@ -15,4 +15,9 @@ export interface TemplateDispatchInput {
   recipients: string[];
   variables?: string[];
   componentParameters?: TemplateComponentParameter[];
+  /**
+     * @minimum 1
+     * @maximum 100
+     */
+  tps?: number;
 }

@@ -195,6 +195,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /contacts:
+    get:
+      operationId: listContacts
+      tags: [whatsapp]
+      summary: List WhatsApp leads
+      responses:
+        "200":
+          description: Saved leads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contact"
+    post:
+      operationId: createContact
+      tags: [whatsapp]
+      summary: Create or update a WhatsApp lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactInput"
+      responses:
+        "201":
+          description: Saved lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "400":
+          description: Invalid lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /templates:
     get:
       operationId: listTemplates
@@ -202,7 +239,7 @@ paths:
       summary: List manually created WhatsApp message templates
       responses:
         "200":
-          description: Imported templates
+          description: Manually created templates
           content:
             application/json:
               schema:
@@ -248,7 +285,7 @@ paths:
     post:
       operationId: dispatchTemplate
       tags: [whatsapp]
-      summary: Send an imported WhatsApp template to multiple recipients
+      summary: Send an approved WhatsApp template to multiple recipients
       parameters:
         - name: templateId
           in: path
@@ -441,6 +478,16 @@ components:
         phoneNumber:
           type: string
       required: [name, phoneNumber]
+    ContactInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        phoneNumber:
+          type: string
+          minLength: 8
+      required: [name, phoneNumber]
     Conversation:
       type: object
       properties:
@@ -631,6 +678,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TemplateComponentParameter"
+        tps:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
       required: [recipients]
     TemplateCostSummary:
       type: object

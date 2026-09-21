@@ -87,7 +87,7 @@ export const whatsappTemplates = pgTable(
     name: text("name").notNull(),
     languageCode: text("language_code").notNull(),
     category: text("category").notNull(),
-    status: text("status").notNull().default("IMPORTED"),
+    status: text("status").notNull().default("PENDING"),
     header: text("header"),
     body: text("body").notNull(),
     footer: text("footer"),

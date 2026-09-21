@@ -11,6 +11,7 @@ export * from './chatMessageDirection';
 export * from './connectionInput';
 export * from './connectionStatus';
 export * from './contact';
+export * from './contactInput';
 export * from './conversation';
 export * from './errorResponse';
 export * from './healthStatus';

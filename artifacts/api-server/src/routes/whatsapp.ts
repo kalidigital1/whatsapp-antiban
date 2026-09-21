@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import {
   ConnectWhatsAppBody,
+  CreateContactBody,
   CreateTemplateBody,
   DispatchTemplateBody,
   DispatchTemplateParams,
   GetTemplateCostsResponse,
   GetConnectionResponse,
   ListConversationsResponse,
+  ListContactsResponse,
   ListConversationMessagesParams,
   ListConversationMessagesResponse,
   ListTemplatesResponse,
@@ -458,6 +460,10 @@ async function refreshDispatchSummary(dispatchId: number) {
   return dispatch;
 }
 
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function dispatchResultResponse(dispatchId: number) {
   const [dispatch] = await db
     .select()
@@ -906,6 +912,59 @@ router.post("/conversations/start", async (req, res) => {
   }
 });
 
+router.get("/contacts", async (_req, res) => {
+  try {
+    const savedContacts = await db
+      .select()
+      .from(contacts)
+      .orderBy(asc(contacts.name), asc(contacts.phoneNumber));
+    res.json(ListContactsResponse.parse(savedContacts.map((contact) => ({
+      name: contact.name,
+      phoneNumber: contact.phoneNumber,
+    }))));
+  } catch (error) {
+    logger.error({ err: error }, "Failed to list WhatsApp leads");
+    res.status(500).json({ error: "Não foi possível carregar os leads." });
+  }
+});
+
+router.post("/contacts", async (req, res) => {
+  try {
+    const input = CreateContactBody.parse(req.body);
+    const phoneNumber = normalizePhone(input.phoneNumber);
+    if (phoneNumber.length < 8) {
+      res.status(400).json({ error: "Informe um telefone válido com DDI." });
+      return;
+    }
+    const name = input.name.trim();
+    if (!name) {
+      res.status(400).json({ error: "Informe um nome para o lead." });
+      return;
+    }
+    const [existing] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.phoneNumber, phoneNumber))
+      .limit(1);
+    const [contact] = existing
+      ? await db
+          .update(contacts)
+          .set({ name, updatedAt: new Date() })
+          .where(eq(contacts.id, existing.id))
+          .returning()
+      : await db
+          .insert(contacts)
+          .values({ name, phoneNumber })
+          .returning();
+    if (!contact) throw new MetaApiError("Não foi possível salvar o lead.");
+    res.status(201).json({ name: contact.name, phoneNumber: contact.phoneNumber });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Lead inválido.";
+    logger.warn({ message }, "WhatsApp lead creation failed");
+    res.status(400).json({ error: message });
+  }
+});
+
 router.get("/templates", async (_req, res) => {
   try {
     const templates = await db
@@ -1089,14 +1148,17 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
       .returning();
     const recipientByPhone = new Map(pendingRecipients.map((recipient) => [recipient.phoneNumber, recipient]));
     const componentParameters = (input.componentParameters ?? []) as ComponentParameterInput[];
+    const messagesPerSecond = input.tps ?? 10;
+    const intervalMs = Math.ceil(1000 / messagesPerSecond);
     const bodyVariables = componentParameters
       .filter((parameter) => parameter.component === "body" && parameter.parameterType === "text")
       .map((parameter) => parameter.value);
     const renderedVariables = bodyVariables.length ? bodyVariables : input.variables ?? [];
 
-    for (const phoneNumber of recipients) {
+    for (const [index, phoneNumber] of recipients.entries()) {
       const recipient = recipientByPhone.get(phoneNumber);
       try {
+        if (index > 0) await wait(intervalMs);
         const whatsappMessageId = await sendTemplateMessage(
           activeConnection.selectedPhoneNumberId,
           phoneNumber,

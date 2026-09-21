@@ -23,6 +23,8 @@ import type {
   ChatMessage,
   ConnectionInput,
   ConnectionStatus,
+  Contact,
+  ContactInput,
   Conversation,
   ErrorResponse,
   HealthStatus,
@@ -789,6 +791,171 @@ export const useStartConversation = <TError = ErrorType<ErrorResponse>,
       return useMutation(getStartConversationMutationOptions(options));
     }
 
+export const getListContactsUrl = () => {
+
+
+
+
+  return `/api/contacts`
+}
+
+/**
+ * @summary List WhatsApp leads
+ */
+export const listContacts = async ( options?: Parameters<typeof customFetch>[1]): Promise<Contact[]> => {
+
+  return customFetch<Contact[]>(getListContactsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListContactsQueryKey = () => {
+    return [
+    `/api/contacts`
+    ] as const;
+    }
+
+
+export const getListContactsQueryOptions = <TData = Awaited<ReturnType<typeof listContacts>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContacts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListContactsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listContacts>>> = ({ signal }) => listContacts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listContacts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListContactsQueryResult = NonNullable<Awaited<ReturnType<typeof listContacts>>>
+export type ListContactsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List WhatsApp leads
+ */
+
+export function useListContacts<TData = Awaited<ReturnType<typeof listContacts>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listContacts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListContactsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateContactUrl = () => {
+
+
+
+
+  return `/api/contacts`
+}
+
+/**
+ * @summary Create or update a WhatsApp lead
+ */
+export const createContact = async (contactInput: ContactInput, options?: Parameters<typeof customFetch>[1]): Promise<Contact> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Contact>(getCreateContactUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(contactInput)
+  }
+);}
+
+
+
+
+
+export const getCreateContactMutationKey = () => ['createContact'] as const;
+
+export const getCreateContactMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createContact>>, TError,CreateContactMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createContact>>, TError,CreateContactMutationVariables, TContext> => {
+
+const mutationKey = getCreateContactMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createContact>>, CreateContactMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createContact(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateContactMutationResult = NonNullable<Awaited<ReturnType<typeof createContact>>>
+    export type CreateContactMutationBody = BodyType<ContactInput>
+    export type CreateContactMutationError = ErrorType<ErrorResponse>
+    export type CreateContactMutationVariables = {data: BodyType<ContactInput>}
+
+    /**
+ * @summary Create or update a WhatsApp lead
+ */
+export const useCreateContact = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createContact>>, TError,CreateContactMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createContact>>,
+        TError,
+        CreateContactMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateContactMutationOptions(options));
+    }
+
 export const getListTemplatesUrl = () => {
 
 
@@ -1040,7 +1207,7 @@ export const getDispatchTemplateUrl = (templateId: number,) => {
 }
 
 /**
- * @summary Send an imported WhatsApp template to multiple recipients
+ * @summary Send an approved WhatsApp template to multiple recipients
  */
 export const dispatchTemplate = async (templateId: number,
     templateDispatchInput: TemplateDispatchInput, options?: Parameters<typeof customFetch>[1]): Promise<TemplateDispatchResult> => {
@@ -1107,7 +1274,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DispatchTemplateMutationVariables = {templateId: number;data: BodyType<TemplateDispatchInput>}
 
     /**
- * @summary Send an imported WhatsApp template to multiple recipients
+ * @summary Send an approved WhatsApp template to multiple recipients
  */
 export const useDispatchTemplate = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dispatchTemplate>>, TError,DispatchTemplateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}

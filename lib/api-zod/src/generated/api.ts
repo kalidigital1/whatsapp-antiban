@@ -200,6 +200,35 @@ export const StartConversationResponse = zod.object({
 
 
 /**
+ * @summary List WhatsApp leads
+ */
+export const ListContactsResponseItem = zod.object({
+  "name": zod.string(),
+  "phoneNumber": zod.string()
+})
+export const ListContactsResponse = zod.array(ListContactsResponseItem)
+
+
+/**
+ * @summary Create or update a WhatsApp lead
+ */
+
+export const createContactBodyPhoneNumberMin = 8;
+
+
+
+export const CreateContactBody = zod.object({
+  "name": zod.string().min(1),
+  "phoneNumber": zod.string().min(createContactBodyPhoneNumberMin)
+})
+
+export const CreateContactResponse = zod.object({
+  "name": zod.string(),
+  "phoneNumber": zod.string()
+})
+
+
+/**
  * @summary List manually created WhatsApp message templates
  */
 export const ListTemplatesResponseItem = zod.object({
@@ -305,7 +334,7 @@ export const GetTemplateCostsResponse = zod.object({
 
 
 /**
- * @summary Send an imported WhatsApp template to multiple recipients
+ * @summary Send an approved WhatsApp template to multiple recipients
  */
 export const DispatchTemplateParams = zod.object({
   "templateId": zod.coerce.number().int()
@@ -314,6 +343,9 @@ export const DispatchTemplateParams = zod.object({
 export const dispatchTemplateBodyRecipientsItemMin = 8;
 
 
+
+export const dispatchTemplateBodyTpsDefault = 10;
+export const dispatchTemplateBodyTpsMax = 100;
 
 
 
@@ -326,7 +358,8 @@ export const DispatchTemplateBody = zod.object({
   "index": zod.number().int().nullable(),
   "subType": zod.string().nullable(),
   "value": zod.string().min(1)
-})).optional()
+})).optional(),
+  "tps": zod.number().int().min(1).max(dispatchTemplateBodyTpsMax).default(dispatchTemplateBodyTpsDefault)
 })
 
 export const DispatchTemplateResponse = zod.object({

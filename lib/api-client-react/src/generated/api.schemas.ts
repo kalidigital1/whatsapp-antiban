@@ -52,6 +52,13 @@ export interface Contact {
   phoneNumber: string;
 }
 
+export interface ContactInput {
+  /** @minLength 1 */
+  name: string;
+  /** @minLength 8 */
+  phoneNumber: string;
+}
+
 export type ChatMessageDirection = typeof ChatMessageDirection[keyof typeof ChatMessageDirection];
 
 
@@ -199,6 +206,11 @@ export interface TemplateDispatchInput {
   recipients: string[];
   variables?: string[];
   componentParameters?: TemplateComponentParameter[];
+  /**
+     * @minimum 1
+     * @maximum 100
+     */
+  tps?: number;
 }
 
 export interface TemplateCostSummary {

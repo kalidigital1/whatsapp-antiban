@@ -35,10 +35,12 @@ import {
   getGetTemplateDispatchQueryKey,
   getGetTemplateCostsQueryKey,
   getListConversationMessagesQueryKey,
+  getListContactsQueryKey,
   getListConversationsQueryKey,
   getListTemplatesQueryKey,
   getListTemplateDispatchesQueryKey,
   useConnectWhatsApp,
+  useCreateContact,
   useCreateTemplate,
   useDisconnectWhatsApp,
   useDeleteConversation,
@@ -47,12 +49,14 @@ import {
   useGetTemplateDispatch,
   useGetTemplateCosts,
   useListConversationMessages,
+  useListContacts,
   useListConversations,
   useListTemplates,
   useListTemplateDispatches,
   useSendConversationMessage,
   useStartConversation,
   type ChatMessage,
+  type Contact,
   type ConnectionStatus,
   type Conversation,
   type Template,
@@ -882,25 +886,35 @@ function dispatchStatusLabel(status: string) {
 
 function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   const queryClient = useQueryClient();
+  const contactsQuery = useListContacts({ query: { queryKey: getListContactsQueryKey() } });
   const templatesQuery = useListTemplates({ query: { queryKey: getListTemplatesQueryKey() } });
   const costsQuery = useGetTemplateCosts({ query: { queryKey: getGetTemplateCostsQueryKey() } });
   const dispatchesQuery = useListTemplateDispatches({ query: { queryKey: getListTemplateDispatchesQueryKey(), refetchInterval: 5000 } });
   const [selectedDispatchId, setSelectedDispatchId] = useState<number | null>(null);
   const dispatchDetailQuery = useGetTemplateDispatch(selectedDispatchId ?? 0, { query: { queryKey: getGetTemplateDispatchQueryKey(selectedDispatchId ?? 0), enabled: selectedDispatchId !== null, refetchInterval: 5000 } });
   const createTemplate = useCreateTemplate();
+  const createContact = useCreateContact();
   const dispatchTemplate = useDispatchTemplate();
+  const contacts = useMemo(() => contactsQuery.data ?? [], [contactsQuery.data]);
   const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data]);
   const dispatches = useMemo(() => dispatchesQuery.data ?? [], [dispatchesQuery.data]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [flowStep, setFlowStep] = useState<1 | 2 | 3>(1);
   const [manualDraft, setManualDraft] = useState<ManualTemplateDraft>(() => emptyManualTemplate());
   const [manualError, setManualError] = useState('');
+  const [leadName, setLeadName] = useState('');
+  const [leadPhone, setLeadPhone] = useState('');
+  const [leadError, setLeadError] = useState('');
+  const [selectedLeadPhones, setSelectedLeadPhones] = useState<string[]>([]);
   const [recipientsText, setRecipientsText] = useState('');
+  const [tps, setTps] = useState(10);
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [dispatchError, setDispatchError] = useState('');
   const [dispatchResult, setDispatchResult] = useState<TemplateDispatchResult | null>(null);
   const selectedTemplate = useMemo(() => templates.find((template) => template.id === selectedId), [templates, selectedId]);
   const parameterSlots = useMemo(() => selectedTemplate ? templateParameterSlots(selectedTemplate) : [], [selectedTemplate]);
-  const recipients = useMemo(() => recipientsText.split(/[,\n;]+/).map((item) => item.trim()).filter(Boolean), [recipientsText]);
+  const selectedLeadRecipients = useMemo(() => contacts.filter((contact) => selectedLeadPhones.includes(contact.phoneNumber)).map((contact) => contact.phoneNumber), [contacts, selectedLeadPhones]);
+  const recipients = useMemo(() => recipientsText.trim() ? recipientsText.split(/[,\n;]+/).map((item) => item.trim()).filter(Boolean) : selectedLeadRecipients, [recipientsText, selectedLeadRecipients]);
   const cost = costsQuery.data;
   const estimatedTotal = cost ? cost.costPerMessage * recipients.length : null;
 
@@ -947,6 +961,28 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
     });
   };
 
+  const submitLead = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLeadError('');
+    if (!leadName.trim()) {
+      setLeadError('Informe o nome do lead.');
+      return;
+    }
+    if (!leadPhone.trim()) {
+      setLeadError('Informe o telefone com DDI.');
+      return;
+    }
+    createContact.mutate({ data: { name: leadName.trim(), phoneNumber: leadPhone.trim() } }, {
+      onSuccess: (contact) => {
+        void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
+        setSelectedLeadPhones((current) => current.includes(contact.phoneNumber) ? current : [...current, contact.phoneNumber]);
+        setLeadName('');
+        setLeadPhone('');
+      },
+      onError: (error) => setLeadError(errorText(error)),
+    });
+  };
+
   const dispatch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setDispatchError('');
@@ -963,7 +999,7 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
       subType: slot.subType,
       value: parameterValues[slot.key].trim(),
     }));
-    dispatchTemplate.mutate({ templateId: selectedTemplate.id, data: { recipients, componentParameters } }, {
+     dispatchTemplate.mutate({ templateId: selectedTemplate.id, data: { recipients, componentParameters, tps } }, {
       onSuccess: (result) => {
         setDispatchResult(result);
         setSelectedDispatchId(result.dispatchId);
@@ -988,8 +1024,18 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
         </div>
         <div className="templates-connection-note"><ShieldCheck size={14} /> envio oficial pela Meta</div>
       </header>
+      <nav className="flow-stepper" aria-label="Etapas dos envios">
+        {[
+          { number: 1 as const, label: 'Templates', detail: 'Cadastro e status' },
+          { number: 2 as const, label: 'Leads', detail: 'Seleção de destinatários' },
+          { number: 3 as const, label: 'Envios', detail: 'TPS e acompanhamento' },
+        ].map((step) => {
+          const available = step.number === 1 || (step.number === 2 && templates.length > 0) || (step.number === 3 && selectedLeadPhones.length > 0 && templates.some((template) => template.status.toLowerCase() === 'approved'));
+          return <button type="button" key={step.number} className="flow-step" data-active={flowStep === step.number} data-complete={flowStep > step.number} disabled={!available} onClick={() => available && setFlowStep(step.number)}><span className="flow-step-number">{flowStep > step.number ? <Check size={14} /> : step.number}</span><span><strong>{step.label}</strong><small>{step.detail}</small></span></button>;
+        })}
+      </nav>
       <div className="templates-body">
-        <section className="templates-library" aria-label="Biblioteca de templates" data-testid="template-list">
+        <section className="templates-library flow-panel" data-active={flowStep === 1} aria-label="Biblioteca de templates" data-testid="template-list">
           <div className="templates-section-label"><span>Biblioteca</span><span className="templates-count">{templates.length} {templates.length === 1 ? 'template' : 'templates'}</span></div>
           {templatesQuery.isLoading && <div className="templates-loading" data-testid="state-templates-loading"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div>}
           {templatesQuery.isError && <div className="status-note" data-testid="state-templates-error"><AlertCircle size={16} /><span>Não foi possível carregar os templates.</span></div>}
@@ -1025,8 +1071,34 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
               <button type="submit" className="btn-primary w-full" disabled={createTemplate.isPending} data-testid="button-create-template">{createTemplate.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{createTemplate.isPending ? 'Salvando...' : 'Cadastrar template'}</button>
             </form>
           </div>
+          <div className="flow-step-actions">
+            <p className="field-help">Depois que o template for aprovado pela Meta, avance para selecionar os leads.</p>
+            <button type="button" className="btn-primary" disabled={templates.length === 0} onClick={() => setFlowStep(2)} data-testid="button-next-leads">Continuar para leads <ArrowLeft size={15} className="rotate-180" /></button>
+          </div>
         </section>
-        <section className="templates-dispatch" aria-label="Envio de template">
+        <section className="leads-panel flow-panel" data-active={flowStep === 2} aria-label="Seleção de leads" data-testid="leads-panel">
+          <div className="templates-section-label"><span>Leads</span><span className="templates-count">{contacts.length} cadastrados</span></div>
+          <p className="flow-panel-copy">Cadastre os contatos e selecione quem receberá o template na próxima etapa.</p>
+          <form className="lead-form" onSubmit={submitLead}>
+            <div className="manual-template-grid">
+              <div className="field"><label className="field-label" htmlFor="lead-name">Nome do lead</label><input id="lead-name" className="field-input" value={leadName} onChange={(event) => setLeadName(event.target.value)} placeholder="ex.: Maria Silva" data-testid="input-lead-name" /></div>
+              <div className="field"><label className="field-label" htmlFor="lead-phone">Telefone com DDI</label><input id="lead-phone" className="field-input" value={leadPhone} onChange={(event) => setLeadPhone(event.target.value)} placeholder="+55 11 99999-0000" data-testid="input-lead-phone" /></div>
+            </div>
+            {leadError && <p className="template-inline-error"><AlertCircle size={15} />{leadError}</p>}
+            <button type="submit" className="btn-primary" disabled={createContact.isPending} data-testid="button-add-lead">{createContact.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{createContact.isPending ? 'Salvando...' : 'Adicionar lead'}</button>
+          </form>
+          <div className="leads-list-card">
+            <div className="leads-list-heading"><span>Leads disponíveis</span><span>{selectedLeadPhones.length} selecionado(s)</span></div>
+            {contactsQuery.isLoading && <div className="templates-loading"><div className="skeleton" /><div className="skeleton" /></div>}
+            {!contactsQuery.isLoading && contacts.length === 0 && <div className="dispatch-empty">Nenhum lead cadastrado ainda.</div>}
+            {contacts.map((contact) => <label className="lead-row" key={contact.phoneNumber}><input type="checkbox" checked={selectedLeadPhones.includes(contact.phoneNumber)} onChange={(event) => setSelectedLeadPhones((current) => event.target.checked ? [...current, contact.phoneNumber] : current.filter((phone) => phone !== contact.phoneNumber))} data-testid={`checkbox-lead-${contact.phoneNumber}`} /><span><strong>{contact.name}</strong><small>{contact.phoneNumber}</small></span></label>)}
+          </div>
+          <div className="flow-step-actions">
+            <button type="button" className="btn-ghost" onClick={() => setFlowStep(1)}><ArrowLeft size={15} /> Voltar para templates</button>
+            <button type="button" className="btn-primary" disabled={selectedLeadPhones.length === 0 || !templates.some((template) => template.status.toLowerCase() === 'approved')} onClick={() => setFlowStep(3)} data-testid="button-next-dispatch">Continuar para envios <ArrowLeft size={15} className="rotate-180" /></button>
+          </div>
+        </section>
+        <section className="templates-dispatch flow-panel" data-active={flowStep === 3} aria-label="Envio de template">
           <div className="templates-section-label"><span>Revisão e envio</span><span className="templates-count">componentes Meta</span></div>
           {selectedTemplate ? (
             <>
@@ -1044,7 +1116,8 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
                 </div>
               </div>
               <form className="template-dispatch-form" onSubmit={dispatch}>
-                <div className="field"><label className="field-label" htmlFor="template-recipients">Destinatários</label><textarea id="template-recipients" className="field-input min-h-24 resize-y" value={recipientsText} onChange={(event) => setRecipientsText(event.target.value)} placeholder="+55 11 99999-0000&#10;+55 21 98888-0000" data-testid="input-template-recipients" /><p className="field-help">Separe números por linha, vírgula ou ponto e vírgula. {recipients.length > 0 ? `${recipients.length} destinatário(s) detectado(s).` : ''}</p></div>
+                 <div className="field"><div className="field-label-row"><label className="field-label" htmlFor="template-recipients">Destinatários</label><button type="button" className="btn-ghost compact" onClick={() => setRecipientsText(selectedLeadRecipients.join('\n'))} disabled={selectedLeadRecipients.length === 0}>Usar leads selecionados</button></div><textarea id="template-recipients" className="field-input min-h-24 resize-y" value={recipientsText} onChange={(event) => setRecipientsText(event.target.value)} placeholder="+55 11 99999-0000&#10;+55 21 98888-0000" data-testid="input-template-recipients" /><p className="field-help">Separe números por linha, vírgula ou ponto e vírgula. {recipients.length > 0 ? `${recipients.length} destinatário(s) detectado(s).` : ''}</p></div>
+                 <div className="field"><label className="field-label" htmlFor="template-tps">Velocidade de envio (TPS)</label><select id="template-tps" className="field-input" value={tps} onChange={(event) => setTps(Number(event.target.value))} data-testid="select-template-tps"><option value={1}>1 TPS · mais conservador</option><option value={5}>5 TPS · equilibrado</option><option value={10}>10 TPS · recomendado</option><option value={20}>20 TPS · mais rápido</option><option value={50}>50 TPS · alto volume</option></select><p className="field-help">TPS define quantas mensagens por segundo o painel solicita ao servidor.</p></div>
                 <div className="template-parameters-card">
                   <div className="template-parameters-heading"><span>Parâmetros exigidos pelo template</span><span>{parameterSlots.length} campo(s)</span></div>
                   {parameterSlots.length === 0 && <p className="field-help">Este template não exige variáveis ou mídia adicional.</p>}
@@ -1057,6 +1130,7 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
                 </div>
                 {dispatchError && <p className="template-inline-error" data-testid="status-template-dispatch-error"><AlertCircle size={15} />{dispatchError}</p>}
                 <button type="submit" className="btn-primary w-full" disabled={dispatchTemplate.isPending || !selectedTemplate} data-testid="button-dispatch-template">{dispatchTemplate.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{dispatchTemplate.isPending ? 'Enviando pelo WhatsApp...' : 'Enviar template oficial'}</button>
+                 <button type="button" className="btn-ghost" onClick={() => setFlowStep(2)}><ArrowLeft size={15} /> Voltar para leads</button>
               </form>
               {dispatchResult && <div className="template-results-card rise-in" data-testid="template-dispatch-results"><div className="template-results-summary"><div className="template-result-stat"><span>Lote</span><strong>#{dispatchResult.dispatchId}</strong></div><div className="template-result-stat" data-tone="success"><span>Aceitos</span><strong>{dispatchResult.sentCount}</strong></div><div className="template-result-stat"><span>Pendentes</span><strong>{dispatchResult.pendingCount}</strong></div><div className="template-result-stat" data-tone="error"><span>Falhas</span><strong>{dispatchResult.failedCount}</strong></div></div></div>}
             </>
@@ -1064,7 +1138,7 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
             <div className="template-empty" data-testid="state-template-selection-empty"><FileText size={28} strokeWidth={1.5} /><div><strong>Selecione um template</strong><p>Depois de importar ou escolher um item, os componentes e parâmetros aparecem aqui.</p></div></div>
           )}
         </section>
-        <section className="dispatch-monitor" aria-label="Painel de acompanhamento de envios" data-testid="dispatch-monitor">
+        <section className="dispatch-monitor flow-panel" data-active={flowStep === 3} aria-label="Painel de acompanhamento de envios" data-testid="dispatch-monitor">
           <div className="templates-section-label"><span><BarChart3 size={15} /> Acompanhamento dos envios</span><span className="templates-count">atualização automática</span></div>
           <div className="dispatch-monitor-grid">
             <div className="dispatch-history">
