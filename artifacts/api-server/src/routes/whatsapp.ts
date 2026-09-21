@@ -847,17 +847,36 @@ function contactDisplayName(contact: typeof contacts.$inferSelect): string {
 }
 
 async function getOrCreateContact(phoneNumber: string, name?: string) {
-  const [existing] = await db
-    .select()
-    .from(contacts)
-    .where(eq(contacts.phoneNumber, phoneNumber))
-    .limit(1);
+  const normalizedPhone = normalizePhone(phoneNumber);
+  const candidatePhones = [normalizedPhone];
+  if (activeConnection) {
+    const canonicalPhone = recipientPhoneNumber(normalizedPhone, activeConnection);
+    if (!candidatePhones.includes(canonicalPhone)) candidatePhones.push(canonicalPhone);
+    if (canonicalPhone.startsWith("55") && canonicalPhone.length > 12) {
+      const localPhone = canonicalPhone.slice(2);
+      if (!candidatePhones.includes(localPhone)) candidatePhones.push(localPhone);
+    }
+  }
+
+  let existing: typeof contacts.$inferSelect | undefined;
+  for (const candidatePhone of candidatePhones) {
+    const [candidate] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.phoneNumber, candidatePhone))
+      .limit(1);
+    if (candidate) {
+      existing = candidate;
+      break;
+    }
+  }
+
   if (existing) {
     const incomingName = name?.trim();
     const nextName =
       incomingName ||
-      (isGeneratedContactName(existing.name, phoneNumber)
-        ? phoneNumber
+      (isGeneratedContactName(existing.name, existing.phoneNumber)
+        ? existing.phoneNumber
         : existing.name);
     if (nextName !== existing.name) {
       const [updated] = await db
@@ -872,7 +891,7 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
 
   const [created] = await db
     .insert(contacts)
-    .values({ phoneNumber, name: name?.trim() || phoneNumber })
+    .values({ phoneNumber: normalizedPhone, name: name?.trim() || normalizedPhone })
     .returning();
   return created;
 }
