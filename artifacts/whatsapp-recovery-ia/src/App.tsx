@@ -642,10 +642,12 @@ function ChatPanel({
         <div className="message-wall-inner">
           <div className="wall-notice">Mensagens criptografadas</div>
           {messagesQuery.isLoading && (
-            <div className="space-y-3 py-4" data-testid="state-messages-loading">
-              <div className="skeleton ml-auto h-11 w-44 rounded-lg opacity-60" />
-              <div className="skeleton h-14 w-64 rounded-lg opacity-60" />
-              <div className="skeleton ml-auto h-11 w-52 rounded-lg opacity-60" />
+            <div className="message-row inbound rise-in" data-testid="state-messages-loading" role="status" aria-label="Carregando mensagens">
+              <div className="message-loading-bubble" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
             </div>
           )}
           {messagesQuery.isError && <div className="status-note mx-auto my-5 max-w-sm justify-center text-center" data-testid="state-messages-error"><AlertCircle size={17} /> Não foi possível carregar as mensagens. A atualização automática continuará tentando.</div>}

@@ -139,6 +139,11 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .bubble { max-width:min(78%,630px); padding:7px 10px 5px; border-radius:8px; color:#26332e; box-shadow:0 1px 1px rgba(63,54,46,.18); font-size:14px; line-height:1.42; overflow-wrap:anywhere; }
 .bubble-in { background:#fff; border-top-left-radius:2px; }
 .bubble-out { background:#d9fdd3; border-top-right-radius:2px; }
+.message-loading-bubble { display:flex; align-items:center; gap:4px; min-width:48px; min-height:30px; padding:0 11px; border-radius:8px; border-top-left-radius:2px; background:#fff; box-shadow:0 1px 1px rgba(63,54,46,.18); }
+.message-loading-bubble span { width:5px; height:5px; border-radius:50%; background:#8d9d93; animation:message-dot 1.2s infinite ease-in-out; }
+.message-loading-bubble span:nth-child(2) { animation-delay:.15s; }
+.message-loading-bubble span:nth-child(3) { animation-delay:.3s; }
+@keyframes message-dot { 0%, 60%, 100% { opacity:.35; transform:translateY(0); } 30% { opacity:1; transform:translateY(-2px); } }
 .message-attachment { display:flex; align-items:center; gap:9px; min-width:155px; color:#29523c; }
 .message-attachment > svg { flex:none; color:#4b8b62; }
 .message-attachment div { min-width:0; display:grid; gap:2px; }
