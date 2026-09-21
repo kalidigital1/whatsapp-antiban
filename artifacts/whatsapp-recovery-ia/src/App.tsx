@@ -624,6 +624,7 @@ function ChatPanel({
           <button type="button" className="action-btn" onClick={() => { window.location.href = `tel:${conversation.contact.phoneNumber}`; }} data-testid="button-call-contact" aria-label="Ligar para contato"><Phone size={19} /></button>
           <button type="button" className="action-btn" onClick={() => undefined} data-testid="button-video-contact" aria-label="Iniciar chamada de vídeo"><Video size={19} /></button>
            <button type="button" className="action-btn" onClick={() => setProfileOpen((open) => !open)} data-testid="button-contact-profile" aria-label="Ver perfil do cliente"><UserRound size={19} /></button>
+          <button type="button" className="action-btn mobile-only mobile-delete-btn" onClick={onDeleteConversation} data-testid="button-delete-conversation-mobile" aria-label="Apagar conversa da inbox"><Trash2 size={19} /></button>
           <div className="relative">
             <button type="button" className="action-btn" onClick={() => setMenuOpen((open) => !open)} data-testid="button-chat-menu" aria-label="Mais opções"><MoreVertical size={20} /></button>
             {menuOpen && (

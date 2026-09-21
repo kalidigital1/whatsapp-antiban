@@ -129,6 +129,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .chat-contact-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:16px; font-weight:500; color:#eff3f1; }
 .chat-contact-status { margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#97a39e; font-size:12px; }
 .chat-header-actions { margin-left:auto; display:flex; gap:2px; }
+.mobile-delete-btn { color:#efaaa2; }
+.mobile-delete-btn:hover { color:#ffd0ca; background:#432725; }
 .message-wall { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; background-color:#efeae2; background-image:url('/assets/whatsapp-wallpaper.png'); background-position:center top; background-size:760px 1396px; background-repeat:repeat; }
 .message-wall-inner { width:100%; max-width:1000px; margin:0 auto; padding:24px clamp(14px,4vw,68px) 30px; }
 .wall-notice { width:max-content; max-width:100%; margin:0 auto 22px; padding:6px 12px; border-radius:7px; color:#dbc584; background:#514734; font-size:11px; }
