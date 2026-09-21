@@ -200,7 +200,7 @@ export const StartConversationResponse = zod.object({
 
 
 /**
- * @summary List imported WhatsApp message templates
+ * @summary List manually created WhatsApp message templates
  */
 export const ListTemplatesResponseItem = zod.object({
   "id": zod.number().int(),
@@ -232,7 +232,7 @@ export const ListTemplatesResponse = zod.array(ListTemplatesResponseItem)
 
 
 /**
- * @summary Import a WhatsApp template definition
+ * @summary Create a WhatsApp template definition for Meta review
  */
 
 export const createTemplateBodyLanguageCodeMin = 2;

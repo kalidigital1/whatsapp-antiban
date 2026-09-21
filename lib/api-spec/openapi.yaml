@@ -199,7 +199,7 @@ paths:
     get:
       operationId: listTemplates
       tags: [whatsapp]
-      summary: List imported WhatsApp message templates
+      summary: List manually created WhatsApp message templates
       responses:
         "200":
           description: Imported templates
@@ -212,7 +212,7 @@ paths:
     post:
       operationId: createTemplate
       tags: [whatsapp]
-      summary: Import a WhatsApp template definition
+      summary: Create a WhatsApp template definition for Meta review
       requestBody:
         required: true
         content:
@@ -221,7 +221,7 @@ paths:
               $ref: "#/components/schemas/TemplateInput"
       responses:
         "201":
-          description: Imported template
+          description: Created template pending Meta review
           content:
             application/json:
               schema:

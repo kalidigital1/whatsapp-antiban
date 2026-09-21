@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -9,7 +9,6 @@ import {
   CircleHelp,
   CircleDollarSign,
   Clipboard,
-  FileJson,
   FileText,
   Image as ImageIcon,
   Inbox,
@@ -26,7 +25,6 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
-  Upload,
   UserRound,
   Video,
   Wifi,
@@ -894,9 +892,8 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data]);
   const dispatches = useMemo(() => dispatchesQuery.data ?? [], [dispatchesQuery.data]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [importDraft, setImportDraft] = useState<TemplateInput | null>(null);
-  const [fileName, setFileName] = useState('');
-  const [importError, setImportError] = useState('');
+  const [manualDraft, setManualDraft] = useState<ManualTemplateDraft>(() => emptyManualTemplate());
+  const [manualError, setManualError] = useState('');
   const [recipientsText, setRecipientsText] = useState('');
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [dispatchError, setDispatchError] = useState('');
@@ -924,32 +921,29 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
     if (selectedDispatchId === null && dispatches.length > 0) setSelectedDispatchId(dispatches[0].id);
   }, [dispatches, selectedDispatchId]);
 
-  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setImportError('');
-    setImportDraft(null);
-    try {
-      const parsed: unknown = JSON.parse(await file.text());
-      setImportDraft(normalizeImportedTemplate(parsed));
-    } catch (error) {
-      setImportError(error instanceof SyntaxError ? 'O arquivo não contém um JSON válido.' : errorText(error));
+  const submitManualTemplate = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setManualError('');
+    if (!manualDraft.name.trim()) {
+      setManualError('Informe um nome para o template.');
+      return;
     }
-    event.target.value = '';
-  };
-
-  const submitImport = () => {
-    if (!importDraft || createTemplate.isPending) return;
-    createTemplate.mutate({ data: importDraft }, {
+    if (!manualDraft.body.trim()) {
+      setManualError('Informe o texto do corpo do template.');
+      return;
+    }
+    if (manualDraft.headerFormat === 'TEXT' && !manualDraft.headerText.trim()) {
+      setManualError('Informe o texto do cabeçalho.');
+      return;
+    }
+    createTemplate.mutate({ data: buildManualTemplateInput(manualDraft) }, {
       onSuccess: (created) => {
         queryClient.setQueryData<Template[]>(getListTemplatesQueryKey(), (current = []) => current.some((template) => template.id === created.id) ? current : [...current, created]);
         void queryClient.invalidateQueries({ queryKey: getListTemplatesQueryKey() });
         setSelectedId(created.id);
-        setImportDraft(null);
-        setFileName('');
+        setManualDraft(emptyManualTemplate());
       },
-      onError: (error) => setImportError(errorText(error)),
+      onError: (error) => setManualError(errorText(error)),
     });
   };
 
@@ -981,7 +975,7 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
 
   const statusLabel = (status: string) => {
     const normalized = status.toLowerCase();
-    return normalized === 'approved' ? 'Aprovado' : normalized === 'pending' ? 'Pendente' : normalized === 'rejected' ? 'Rejeitado' : status;
+    return templateStatusLabel(normalized);
   };
 
   return (
@@ -1000,7 +994,7 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
           {templatesQuery.isLoading && <div className="templates-loading" data-testid="state-templates-loading"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div>}
           {templatesQuery.isError && <div className="status-note" data-testid="state-templates-error"><AlertCircle size={16} /><span>Não foi possível carregar os templates.</span></div>}
           {!templatesQuery.isLoading && !templatesQuery.isError && templates.length === 0 && (
-            <div className="template-empty" data-testid="state-templates-empty"><FileText size={27} strokeWidth={1.5} /><div><strong>Nenhum template importado</strong><p>Importe o JSON real da Meta com HEADER, BODY, FOOTER e BUTTONS.</p></div></div>
+            <div className="template-empty" data-testid="state-templates-empty"><FileText size={27} strokeWidth={1.5} /><div><strong>Nenhum template cadastrado</strong><p>Crie manualmente o primeiro template seguindo o padrão da Meta.</p></div></div>
           )}
           {!templatesQuery.isLoading && templates.length > 0 && (
             <div className="template-list">
@@ -1012,18 +1006,27 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
               ))}
             </div>
           )}
-          <div className="template-import-card">
-            <div className="template-import-heading"><FileJson size={16} /><span>Importar definição da Meta</span></div>
-            <p className="template-import-help">Aceita exportações com componentes HEADER, BODY, FOOTER e BUTTONS, incluindo formato de mídia e exemplos.</p>
-            <label className="template-file-label" htmlFor="template-json-file"><Upload size={15} /> Escolher arquivo JSON<input id="template-json-file" type="file" accept="application/json,.json" onChange={handleFile} data-testid="input-template-file" /></label>
-            {fileName && <p className="template-file-name" data-testid="text-template-file-name">{fileName}{importDraft ? ' · pronto para importar' : ''}</p>}
-            {importDraft && (
-              <div className="mt-3 grid gap-2">
-                <p className="text-[11px] text-[#b9c8be]"><strong>{importDraft.name}</strong> · {importDraft.languageCode} · {importDraft.category} · {importDraft.components?.length ?? 0} componentes</p>
-                <button type="button" className="btn-primary w-full" onClick={submitImport} disabled={createTemplate.isPending} data-testid="button-import-template">{createTemplate.isPending ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}{createTemplate.isPending ? 'Importando...' : 'Importar template'}</button>
+          <div className="template-import-card template-create-card">
+            <div className="template-import-heading"><Plus size={16} /><span>Criar template manualmente</span></div>
+            <p className="template-import-help">Cadastre o conteúdo no padrão da Meta. Todo novo template começa com status <strong>Em análise</strong>.</p>
+            <form className="manual-template-form" onSubmit={submitManualTemplate}>
+              <div className="field"><label className="field-label" htmlFor="manual-template-name">Nome do template</label><input id="manual-template-name" className="field-input" value={manualDraft.name} onChange={(event) => setManualDraft((current) => ({ ...current, name: event.target.value }))} placeholder="ex.: confirmacao_pedido" data-testid="input-manual-template-name" /></div>
+              <div className="manual-template-grid">
+                <div className="field"><label className="field-label" htmlFor="manual-template-language">Idioma</label><input id="manual-template-language" className="field-input" value={manualDraft.languageCode} onChange={(event) => setManualDraft((current) => ({ ...current, languageCode: event.target.value }))} placeholder="pt_BR" data-testid="input-manual-template-language" /></div>
+                <div className="field"><label className="field-label" htmlFor="manual-template-category">Categoria</label><select id="manual-template-category" className="field-input" value={manualDraft.category} onChange={(event) => setManualDraft((current) => ({ ...current, category: event.target.value }))} data-testid="select-manual-template-category"><option value="UTILITY">Utilidade</option><option value="MARKETING">Marketing</option><option value="AUTHENTICATION">Autenticação</option></select></div>
               </div>
-            )}
-            {importError && <p className="template-inline-error mt-3" data-testid="status-template-import-error"><AlertCircle size={15} />{importError}</p>}
+              <div className="field"><label className="field-label" htmlFor="manual-template-header-format">Header</label><select id="manual-template-header-format" className="field-input" value={manualDraft.headerFormat} onChange={(event) => setManualDraft((current) => ({ ...current, headerFormat: event.target.value as ManualTemplateDraft['headerFormat'] }))} data-testid="select-manual-template-header"><option value="NONE">Sem header</option><option value="TEXT">Texto</option><option value="IMAGE">Imagem</option><option value="VIDEO">Vídeo</option><option value="DOCUMENT">Documento</option></select></div>
+              {manualDraft.headerFormat === 'TEXT' && <div className="field"><label className="field-label" htmlFor="manual-template-header-text">Texto do header</label><input id="manual-template-header-text" className="field-input" value={manualDraft.headerText} onChange={(event) => setManualDraft((current) => ({ ...current, headerText: event.target.value }))} placeholder="Olá, {{1}}" data-testid="input-manual-template-header-text" /></div>}
+              {manualDraft.headerFormat !== 'NONE' && manualDraft.headerFormat !== 'TEXT' && <p className="field-help">O arquivo de {manualDraft.headerFormat.toLowerCase()} será informado no momento do envio.</p>}
+              <div className="field"><label className="field-label" htmlFor="manual-template-body">Body</label><textarea id="manual-template-body" className="field-input min-h-28 resize-y" value={manualDraft.body} onChange={(event) => setManualDraft((current) => ({ ...current, body: event.target.value }))} placeholder="Olá, {{1}}! Seu pedido {{2}} foi confirmado." data-testid="input-manual-template-body" /><p className="field-help">Use variáveis numeradas no formato {'{{1}}'}, {'{{2}}'}.</p></div>
+              <div className="field"><label className="field-label" htmlFor="manual-template-footer">Footer <span className="field-optional">opcional</span></label><input id="manual-template-footer" className="field-input" value={manualDraft.footer} onChange={(event) => setManualDraft((current) => ({ ...current, footer: event.target.value }))} placeholder="Equipe Antiban" data-testid="input-manual-template-footer" /></div>
+              <div className="manual-buttons-block">
+                <div className="manual-buttons-heading"><span>Botões <small>opcional</small></span><button type="button" className="btn-ghost" onClick={() => manualDraft.buttons.length < 3 && setManualDraft((current) => ({ ...current, buttons: [...current.buttons, { type: 'QUICK_REPLY', text: '', url: '', phoneNumber: '' }] }))} disabled={manualDraft.buttons.length >= 3} data-testid="button-add-manual-template-button"><Plus size={14} /> Adicionar</button></div>
+                {manualDraft.buttons.map((button, index) => <div className="manual-button-row" key={`manual-button-${index}`}><select className="field-input" value={button.type} onChange={(event) => setManualDraft((current) => ({ ...current, buttons: current.buttons.map((item, itemIndex) => itemIndex === index ? { ...item, type: event.target.value as ManualButtonDraft['type'] } : item) }))} aria-label={`Tipo do botão ${index + 1}`}><option value="QUICK_REPLY">Resposta rápida</option><option value="URL">URL</option><option value="PHONE_NUMBER">Telefone</option></select><input className="field-input" value={button.text} onChange={(event) => setManualDraft((current) => ({ ...current, buttons: current.buttons.map((item, itemIndex) => itemIndex === index ? { ...item, text: event.target.value } : item) }))} placeholder="Texto do botão" aria-label={`Texto do botão ${index + 1}`} />{button.type === 'URL' && <input className="field-input" value={button.url} onChange={(event) => setManualDraft((current) => ({ ...current, buttons: current.buttons.map((item, itemIndex) => itemIndex === index ? { ...item, url: event.target.value } : item) }))} placeholder="https://..." aria-label={`URL do botão ${index + 1}`} />}{button.type === 'PHONE_NUMBER' && <input className="field-input" value={button.phoneNumber} onChange={(event) => setManualDraft((current) => ({ ...current, buttons: current.buttons.map((item, itemIndex) => itemIndex === index ? { ...item, phoneNumber: event.target.value } : item) }))} placeholder="+55..." aria-label={`Telefone do botão ${index + 1}`} />}<button type="button" className="action-btn" onClick={() => setManualDraft((current) => ({ ...current, buttons: current.buttons.filter((_item, itemIndex) => itemIndex !== index) }))} aria-label={`Remover botão ${index + 1}`}><X size={15} /></button></div>)}
+              </div>
+              {manualError && <p className="template-inline-error" data-testid="status-manual-template-error"><AlertCircle size={15} />{manualError}</p>}
+              <button type="submit" className="btn-primary w-full" disabled={createTemplate.isPending} data-testid="button-create-template">{createTemplate.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{createTemplate.isPending ? 'Salvando...' : 'Cadastrar template'}</button>
+            </form>
           </div>
         </section>
         <section className="templates-dispatch" aria-label="Envio de template">

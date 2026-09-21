@@ -941,7 +941,7 @@ router.post("/templates", async (req, res) => {
       name: input.name.trim(),
       languageCode: input.languageCode.trim(),
       category: input.category.trim().toUpperCase(),
-      status: input.status?.trim().toUpperCase() || "IMPORTED",
+      status: input.status?.trim().toUpperCase() || "PENDING",
       header: input.header?.trim() || null,
       body: input.body.trim(),
       footer: input.footer?.trim() || null,
@@ -961,7 +961,7 @@ router.post("/templates", async (req, res) => {
     res.status(201).json(templateResponse(template));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Template inválido.";
-    logger.warn({ message }, "WhatsApp template import failed");
+    logger.warn({ message }, "WhatsApp template creation failed");
     res.status(400).json({ error: message });
   }
 });

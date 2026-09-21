@@ -798,7 +798,7 @@ export const getListTemplatesUrl = () => {
 }
 
 /**
- * @summary List imported WhatsApp message templates
+ * @summary List manually created WhatsApp message templates
  */
 export const listTemplates = async ( options?: Parameters<typeof customFetch>[1]): Promise<Template[]> => {
 
@@ -845,7 +845,7 @@ export type ListTemplatesQueryError = ErrorType<unknown>
 
 
 /**
- * @summary List imported WhatsApp message templates
+ * @summary List manually created WhatsApp message templates
  */
 
 export function useListTemplates<TData = Awaited<ReturnType<typeof listTemplates>>, TError = ErrorType<unknown>>(
@@ -875,7 +875,7 @@ export const getCreateTemplateUrl = () => {
 }
 
 /**
- * @summary Import a WhatsApp template definition
+ * @summary Create a WhatsApp template definition for Meta review
  */
 export const createTemplate = async (templateInput: TemplateInput, options?: Parameters<typeof customFetch>[1]): Promise<Template> => {
 
@@ -941,7 +941,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateTemplateMutationVariables = {data: BodyType<TemplateInput>}
 
     /**
- * @summary Import a WhatsApp template definition
+ * @summary Create a WhatsApp template definition for Meta review
  */
 export const useCreateTemplate = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTemplate>>, TError,CreateTemplateMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
