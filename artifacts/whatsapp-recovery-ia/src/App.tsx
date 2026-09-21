@@ -61,6 +61,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import metaTermsText from '@assets/Pasted-Estamos-atualizando-nossos-Termos-da-Meta-para-a-Plataf_1789996530090.txt?raw';
+import metaBusinessPartnerBadge from '@assets/SELO_META_1789997227764.png';
 
 const queryClient = new QueryClient();
 const verifiedBadgePath = '/assets/SELO_META_VERIFIED_1789757214597.png';
@@ -249,7 +250,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
   return (
     <aside className="wa-rail" aria-label="Navegação principal">
       <div className="rail-brand" aria-label="Meta Business Partner">
-        <img src="/assets/meta-business-partner.png" alt="Meta Business Partner" />
+        <img src={metaBusinessPartnerBadge} alt="Meta Business Partner" />
       </div>
       <nav className="rail-nav">
         <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
