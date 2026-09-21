@@ -280,6 +280,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /templates/dispatches:
+    get:
+      operationId: listTemplateDispatches
+      tags: [whatsapp]
+      summary: List recent WhatsApp template dispatches
+      responses:
+        "200":
+          description: Recent dispatch summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TemplateDispatchSummary"
+  /templates/dispatches/{dispatchId}:
+    get:
+      operationId: getTemplateDispatch
+      tags: [whatsapp]
+      summary: Get a template dispatch with recipient statuses
+      parameters:
+        - name: dispatchId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Dispatch detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateDispatchResult"
+        "404":
+          description: Dispatch not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /webhook:
     get:
       operationId: verifyWebhook
@@ -487,11 +525,48 @@ components:
           type: array
           items:
             type: string
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateComponent"
         createdAt:
           type: string
         updatedAt:
           type: string
-      required: [id, name, languageCode, category, status, header, body, footer, variables, createdAt, updatedAt]
+      required: [id, name, languageCode, category, status, header, body, footer, variables, components, createdAt, updatedAt]
+    TemplateButton:
+      type: object
+      properties:
+        type:
+          type: string
+        text:
+          type: ["string", "null"]
+        url:
+          type: ["string", "null"]
+        phoneNumber:
+          type: ["string", "null"]
+        example:
+          type: ["array", "null"]
+          items:
+            type: string
+      required: [type, text, url, phoneNumber, example]
+    TemplateComponent:
+      type: object
+      properties:
+        type:
+          type: string
+        format:
+          type: ["string", "null"]
+        text:
+          type: ["string", "null"]
+        example:
+          type: ["object", "null"]
+          additionalProperties: true
+        buttons:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateButton"
+      required: [type, format, text, example, buttons]
     TemplateInput:
       type: object
       properties:
@@ -517,7 +592,28 @@ components:
           type: array
           items:
             type: string
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateComponent"
       required: [name, languageCode, category, body]
+    TemplateComponentParameter:
+      type: object
+      properties:
+        component:
+          type: string
+          enum: [header, body, button]
+        parameterType:
+          type: string
+          enum: [text, image, video, document]
+        index:
+          type: ["integer", "null"]
+        subType:
+          type: ["string", "null"]
+        value:
+          type: string
+          minLength: 1
+      required: [component, parameterType, index, subType, value]
     TemplateDispatchInput:
       type: object
       properties:
@@ -531,6 +627,10 @@ components:
           type: array
           items:
             type: string
+        componentParameters:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateComponentParameter"
       required: [recipients]
     TemplateCostSummary:
       type: object
@@ -551,20 +651,70 @@ components:
           type: string
         status:
           type: string
-          enum: [sent, failed]
+          enum: [pending, sent, delivered, read, failed]
         message:
           type: ["string", "null"]
-      required: [phoneNumber, status, message]
-    TemplateDispatchResult:
+        whatsappMessageId:
+          type: ["string", "null"]
+        updatedAt:
+          type: string
+      required: [phoneNumber, status, message, whatsappMessageId, updatedAt]
+    TemplateDispatchSummary:
       type: object
       properties:
-        template:
-          $ref: "#/components/schemas/Template"
+        id:
+          type: integer
+        templateId:
+          type: integer
+        templateName:
+          type: string
+        languageCode:
+          type: string
+        status:
+          type: string
+          enum: [pending, partial, sent, delivered, read, failed]
         recipientsCount:
           type: integer
         sentCount:
           type: integer
+        deliveredCount:
+          type: integer
+        readCount:
+          type: integer
         failedCount:
+          type: integer
+        pendingCount:
+          type: integer
+        estimatedCost:
+          type: number
+        currency:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, templateId, templateName, languageCode, status, recipientsCount, sentCount, deliveredCount, readCount, failedCount, pendingCount, estimatedCost, currency, createdAt, updatedAt]
+    TemplateDispatchResult:
+      type: object
+      properties:
+        dispatchId:
+          type: integer
+        template:
+          $ref: "#/components/schemas/Template"
+        status:
+          type: string
+          enum: [pending, partial, sent, delivered, read, failed]
+        recipientsCount:
+          type: integer
+        sentCount:
+          type: integer
+        deliveredCount:
+          type: integer
+        readCount:
+          type: integer
+        failedCount:
+          type: integer
+        pendingCount:
           type: integer
         estimatedCost:
           type: number
@@ -574,5 +724,5 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TemplateDispatchRecipient"
-      required: [template, recipientsCount, sentCount, failedCount, estimatedCost, currency, results]
+      required: [dispatchId, template, status, recipientsCount, sentCount, deliveredCount, readCount, failedCount, pendingCount, estimatedCost, currency, results]
 

@@ -98,6 +98,34 @@ export interface StartConversationResult {
 
 export interface WebhookPayload { [key: string]: unknown }
 
+export interface TemplateButton {
+  type: string;
+  /** @nullable */
+  text: string | null;
+  /** @nullable */
+  url: string | null;
+  /** @nullable */
+  phoneNumber: string | null;
+  /** @nullable */
+  example: string[] | null;
+}
+
+/**
+ * @nullable
+ */
+export type TemplateComponentExample = { [key: string]: unknown } | null;
+
+export interface TemplateComponent {
+  type: string;
+  /** @nullable */
+  format: string | null;
+  /** @nullable */
+  text: string | null;
+  /** @nullable */
+  example: TemplateComponentExample;
+  buttons: TemplateButton[];
+}
+
 export interface Template {
   id: number;
   name: string;
@@ -110,6 +138,7 @@ export interface Template {
   /** @nullable */
   footer: string | null;
   variables: string[];
+  components: TemplateComponent[];
   createdAt: string;
   updatedAt: string;
 }
@@ -129,6 +158,37 @@ export interface TemplateInput {
   /** @nullable */
   footer?: string | null;
   variables?: string[];
+  components?: TemplateComponent[];
+}
+
+export type TemplateComponentParameterComponent = typeof TemplateComponentParameterComponent[keyof typeof TemplateComponentParameterComponent];
+
+
+export const TemplateComponentParameterComponent = {
+  header: 'header',
+  body: 'body',
+  button: 'button',
+} as const;
+
+export type TemplateComponentParameterParameterType = typeof TemplateComponentParameterParameterType[keyof typeof TemplateComponentParameterParameterType];
+
+
+export const TemplateComponentParameterParameterType = {
+  text: 'text',
+  image: 'image',
+  video: 'video',
+  document: 'document',
+} as const;
+
+export interface TemplateComponentParameter {
+  component: TemplateComponentParameterComponent;
+  parameterType: TemplateComponentParameterParameterType;
+  /** @nullable */
+  index: number | null;
+  /** @nullable */
+  subType: string | null;
+  /** @minLength 1 */
+  value: string;
 }
 
 export interface TemplateDispatchInput {
@@ -138,6 +198,7 @@ export interface TemplateDispatchInput {
      */
   recipients: string[];
   variables?: string[];
+  componentParameters?: TemplateComponentParameter[];
 }
 
 export interface TemplateCostSummary {
@@ -151,7 +212,10 @@ export type TemplateDispatchRecipientStatus = typeof TemplateDispatchRecipientSt
 
 
 export const TemplateDispatchRecipientStatus = {
+  pending: 'pending',
   sent: 'sent',
+  delivered: 'delivered',
+  read: 'read',
   failed: 'failed',
 } as const;
 
@@ -160,13 +224,63 @@ export interface TemplateDispatchRecipient {
   status: TemplateDispatchRecipientStatus;
   /** @nullable */
   message: string | null;
+  /** @nullable */
+  whatsappMessageId: string | null;
+  updatedAt: string;
 }
 
-export interface TemplateDispatchResult {
-  template: Template;
+export type TemplateDispatchSummaryStatus = typeof TemplateDispatchSummaryStatus[keyof typeof TemplateDispatchSummaryStatus];
+
+
+export const TemplateDispatchSummaryStatus = {
+  pending: 'pending',
+  partial: 'partial',
+  sent: 'sent',
+  delivered: 'delivered',
+  read: 'read',
+  failed: 'failed',
+} as const;
+
+export interface TemplateDispatchSummary {
+  id: number;
+  templateId: number;
+  templateName: string;
+  languageCode: string;
+  status: TemplateDispatchSummaryStatus;
   recipientsCount: number;
   sentCount: number;
+  deliveredCount: number;
+  readCount: number;
   failedCount: number;
+  pendingCount: number;
+  estimatedCost: number;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TemplateDispatchResultStatus = typeof TemplateDispatchResultStatus[keyof typeof TemplateDispatchResultStatus];
+
+
+export const TemplateDispatchResultStatus = {
+  pending: 'pending',
+  partial: 'partial',
+  sent: 'sent',
+  delivered: 'delivered',
+  read: 'read',
+  failed: 'failed',
+} as const;
+
+export interface TemplateDispatchResult {
+  dispatchId: number;
+  template: Template;
+  status: TemplateDispatchResultStatus;
+  recipientsCount: number;
+  sentCount: number;
+  deliveredCount: number;
+  readCount: number;
+  failedCount: number;
+  pendingCount: number;
   estimatedCost: number;
   currency: string;
   results: TemplateDispatchRecipient[];

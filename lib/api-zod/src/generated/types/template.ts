@@ -5,6 +5,7 @@
  * WhatsApp Recovery IA API
  * OpenAPI spec version: 0.1.0
  */
+import type { TemplateComponent } from './templateComponent';
 
 export interface Template {
   id: number;
@@ -18,6 +19,7 @@ export interface Template {
   /** @nullable */
   footer: string | null;
   variables: string[];
+  components: TemplateComponent[];
   createdAt: string;
   updatedAt: string;
 }

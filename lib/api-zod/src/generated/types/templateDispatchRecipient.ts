@@ -12,4 +12,7 @@ export interface TemplateDispatchRecipient {
   status: TemplateDispatchRecipientStatus;
   /** @nullable */
   message: string | null;
+  /** @nullable */
+  whatsappMessageId: string | null;
+  updatedAt: string;
 }

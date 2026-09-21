@@ -212,6 +212,19 @@ export const ListTemplatesResponseItem = zod.object({
   "body": zod.string(),
   "footer": zod.string().nullable(),
   "variables": zod.array(zod.string()),
+  "components": zod.array(zod.object({
+  "type": zod.string(),
+  "format": zod.string().nullable(),
+  "text": zod.string().nullable(),
+  "example": zod.record(zod.string(), zod.unknown()).nullable(),
+  "buttons": zod.array(zod.object({
+  "type": zod.string(),
+  "text": zod.string().nullable(),
+  "url": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "example": zod.array(zod.string()).nullable()
+}))
+})),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -236,7 +249,20 @@ export const CreateTemplateBody = zod.object({
   "header": zod.string().nullish(),
   "body": zod.string().min(1),
   "footer": zod.string().nullish(),
-  "variables": zod.array(zod.string()).optional()
+  "variables": zod.array(zod.string()).optional(),
+  "components": zod.array(zod.object({
+  "type": zod.string(),
+  "format": zod.string().nullable(),
+  "text": zod.string().nullable(),
+  "example": zod.record(zod.string(), zod.unknown()).nullable(),
+  "buttons": zod.array(zod.object({
+  "type": zod.string(),
+  "text": zod.string().nullable(),
+  "url": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "example": zod.array(zod.string()).nullable()
+}))
+})).optional()
 })
 
 export const CreateTemplateResponse = zod.object({
@@ -249,6 +275,19 @@ export const CreateTemplateResponse = zod.object({
   "body": zod.string(),
   "footer": zod.string().nullable(),
   "variables": zod.array(zod.string()),
+  "components": zod.array(zod.object({
+  "type": zod.string(),
+  "format": zod.string().nullable(),
+  "text": zod.string().nullable(),
+  "example": zod.record(zod.string(), zod.unknown()).nullable(),
+  "buttons": zod.array(zod.object({
+  "type": zod.string(),
+  "text": zod.string().nullable(),
+  "url": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "example": zod.array(zod.string()).nullable()
+}))
+})),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -277,12 +316,21 @@ export const dispatchTemplateBodyRecipientsItemMin = 8;
 
 
 
+
 export const DispatchTemplateBody = zod.object({
   "recipients": zod.array(zod.string().min(dispatchTemplateBodyRecipientsItemMin)).min(1),
-  "variables": zod.array(zod.string()).optional()
+  "variables": zod.array(zod.string()).optional(),
+  "componentParameters": zod.array(zod.object({
+  "component": zod.enum(['header', 'body', 'button']),
+  "parameterType": zod.enum(['text', 'image', 'video', 'document']),
+  "index": zod.number().int().nullable(),
+  "subType": zod.string().nullable(),
+  "value": zod.string().min(1)
+})).optional()
 })
 
 export const DispatchTemplateResponse = zod.object({
+  "dispatchId": zod.number().int(),
   "template": zod.object({
   "id": zod.number().int(),
   "name": zod.string(),
@@ -293,18 +341,114 @@ export const DispatchTemplateResponse = zod.object({
   "body": zod.string(),
   "footer": zod.string().nullable(),
   "variables": zod.array(zod.string()),
+  "components": zod.array(zod.object({
+  "type": zod.string(),
+  "format": zod.string().nullable(),
+  "text": zod.string().nullable(),
+  "example": zod.record(zod.string(), zod.unknown()).nullable(),
+  "buttons": zod.array(zod.object({
+  "type": zod.string(),
+  "text": zod.string().nullable(),
+  "url": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "example": zod.array(zod.string()).nullable()
+}))
+})),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 }),
+  "status": zod.enum(['pending', 'partial', 'sent', 'delivered', 'read', 'failed']),
   "recipientsCount": zod.number().int(),
   "sentCount": zod.number().int(),
+  "deliveredCount": zod.number().int(),
+  "readCount": zod.number().int(),
   "failedCount": zod.number().int(),
+  "pendingCount": zod.number().int(),
   "estimatedCost": zod.number(),
   "currency": zod.string(),
   "results": zod.array(zod.object({
   "phoneNumber": zod.string(),
-  "status": zod.enum(['sent', 'failed']),
-  "message": zod.string().nullable()
+  "status": zod.enum(['pending', 'sent', 'delivered', 'read', 'failed']),
+  "message": zod.string().nullable(),
+  "whatsappMessageId": zod.string().nullable(),
+  "updatedAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary List recent WhatsApp template dispatches
+ */
+export const ListTemplateDispatchesResponseItem = zod.object({
+  "id": zod.number().int(),
+  "templateId": zod.number().int(),
+  "templateName": zod.string(),
+  "languageCode": zod.string(),
+  "status": zod.enum(['pending', 'partial', 'sent', 'delivered', 'read', 'failed']),
+  "recipientsCount": zod.number().int(),
+  "sentCount": zod.number().int(),
+  "deliveredCount": zod.number().int(),
+  "readCount": zod.number().int(),
+  "failedCount": zod.number().int(),
+  "pendingCount": zod.number().int(),
+  "estimatedCost": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+export const ListTemplateDispatchesResponse = zod.array(ListTemplateDispatchesResponseItem)
+
+
+/**
+ * @summary Get a template dispatch with recipient statuses
+ */
+export const GetTemplateDispatchParams = zod.object({
+  "dispatchId": zod.coerce.number().int()
+})
+
+export const GetTemplateDispatchResponse = zod.object({
+  "dispatchId": zod.number().int(),
+  "template": zod.object({
+  "id": zod.number().int(),
+  "name": zod.string(),
+  "languageCode": zod.string(),
+  "category": zod.string(),
+  "status": zod.string(),
+  "header": zod.string().nullable(),
+  "body": zod.string(),
+  "footer": zod.string().nullable(),
+  "variables": zod.array(zod.string()),
+  "components": zod.array(zod.object({
+  "type": zod.string(),
+  "format": zod.string().nullable(),
+  "text": zod.string().nullable(),
+  "example": zod.record(zod.string(), zod.unknown()).nullable(),
+  "buttons": zod.array(zod.object({
+  "type": zod.string(),
+  "text": zod.string().nullable(),
+  "url": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "example": zod.array(zod.string()).nullable()
+}))
+})),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}),
+  "status": zod.enum(['pending', 'partial', 'sent', 'delivered', 'read', 'failed']),
+  "recipientsCount": zod.number().int(),
+  "sentCount": zod.number().int(),
+  "deliveredCount": zod.number().int(),
+  "readCount": zod.number().int(),
+  "failedCount": zod.number().int(),
+  "pendingCount": zod.number().int(),
+  "estimatedCost": zod.number(),
+  "currency": zod.string(),
+  "results": zod.array(zod.object({
+  "phoneNumber": zod.string(),
+  "status": zod.enum(['pending', 'sent', 'delivered', 'read', 'failed']),
+  "message": zod.string().nullable(),
+  "whatsappMessageId": zod.string().nullable(),
+  "updatedAt": zod.string()
 }))
 })
 

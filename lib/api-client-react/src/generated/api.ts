@@ -34,6 +34,7 @@ import type {
   TemplateCostSummary,
   TemplateDispatchInput,
   TemplateDispatchResult,
+  TemplateDispatchSummary,
   TemplateInput,
   VerifyWebhookParams,
   WebhookPayload
@@ -1118,6 +1119,160 @@ export const useDispatchTemplate = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getDispatchTemplateMutationOptions(options));
     }
+
+export const getListTemplateDispatchesUrl = () => {
+
+
+
+
+  return `/api/templates/dispatches`
+}
+
+/**
+ * @summary List recent WhatsApp template dispatches
+ */
+export const listTemplateDispatches = async ( options?: Parameters<typeof customFetch>[1]): Promise<TemplateDispatchSummary[]> => {
+
+  return customFetch<TemplateDispatchSummary[]>(getListTemplateDispatchesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTemplateDispatchesQueryKey = () => {
+    return [
+    `/api/templates/dispatches`
+    ] as const;
+    }
+
+
+export const getListTemplateDispatchesQueryOptions = <TData = Awaited<ReturnType<typeof listTemplateDispatches>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTemplateDispatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTemplateDispatchesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTemplateDispatches>>> = ({ signal }) => listTemplateDispatches({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTemplateDispatches>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListTemplateDispatchesQueryResult = NonNullable<Awaited<ReturnType<typeof listTemplateDispatches>>>
+export type ListTemplateDispatchesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List recent WhatsApp template dispatches
+ */
+
+export function useListTemplateDispatches<TData = Awaited<ReturnType<typeof listTemplateDispatches>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listTemplateDispatches>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListTemplateDispatchesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetTemplateDispatchUrl = (dispatchId: number,) => {
+
+
+
+
+  return `/api/templates/dispatches/${dispatchId}`
+}
+
+/**
+ * @summary Get a template dispatch with recipient statuses
+ */
+export const getTemplateDispatch = async (dispatchId: number, options?: Parameters<typeof customFetch>[1]): Promise<TemplateDispatchResult> => {
+
+  return customFetch<TemplateDispatchResult>(getGetTemplateDispatchUrl(dispatchId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTemplateDispatchQueryKey = (dispatchId: number,) => {
+    return [
+    `/api/templates/dispatches/${dispatchId}`
+    ] as const;
+    }
+
+
+export const getGetTemplateDispatchQueryOptions = <TData = Awaited<ReturnType<typeof getTemplateDispatch>>, TError = ErrorType<ErrorResponse>>(dispatchId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTemplateDispatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTemplateDispatchQueryKey(dispatchId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTemplateDispatch>>> = ({ signal }) => getTemplateDispatch(dispatchId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: dispatchId !== null && dispatchId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTemplateDispatch>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTemplateDispatchQueryResult = NonNullable<Awaited<ReturnType<typeof getTemplateDispatch>>>
+export type GetTemplateDispatchQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get a template dispatch with recipient statuses
+ */
+
+export function useGetTemplateDispatch<TData = Awaited<ReturnType<typeof getTemplateDispatch>>, TError = ErrorType<ErrorResponse>>(
+ dispatchId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTemplateDispatch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTemplateDispatchQueryOptions(dispatchId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getVerifyWebhookUrl = (params: VerifyWebhookParams,) => {
   const normalizedParams = new URLSearchParams();

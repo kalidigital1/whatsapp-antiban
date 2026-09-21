@@ -7,12 +7,18 @@
  */
 import type { Template } from './template';
 import type { TemplateDispatchRecipient } from './templateDispatchRecipient';
+import type { TemplateDispatchResultStatus } from './templateDispatchResultStatus';
 
 export interface TemplateDispatchResult {
+  dispatchId: number;
   template: Template;
+  status: TemplateDispatchResultStatus;
   recipientsCount: number;
   sentCount: number;
+  deliveredCount: number;
+  readCount: number;
   failedCount: number;
+  pendingCount: number;
   estimatedCost: number;
   currency: string;
   results: TemplateDispatchRecipient[];

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import {
   AlertCircle,
   ArrowLeft,
+  BarChart3,
   Check,
   CheckCheck,
   CircleHelp,
@@ -10,6 +11,7 @@ import {
   Clipboard,
   FileJson,
   FileText,
+  Image as ImageIcon,
   Inbox,
   LockKeyhole,
   Loader2,
@@ -32,26 +34,32 @@ import {
 } from 'lucide-react';
 import {
   getGetConnectionQueryKey,
+  getGetTemplateDispatchQueryKey,
   getGetTemplateCostsQueryKey,
   getListConversationMessagesQueryKey,
   getListConversationsQueryKey,
   getListTemplatesQueryKey,
+  getListTemplateDispatchesQueryKey,
   useConnectWhatsApp,
   useCreateTemplate,
   useDisconnectWhatsApp,
   useDeleteConversation,
   useDispatchTemplate,
   useGetConnection,
+  useGetTemplateDispatch,
   useGetTemplateCosts,
   useListConversationMessages,
   useListConversations,
   useListTemplates,
+  useListTemplateDispatches,
   useSendConversationMessage,
   useStartConversation,
   type ChatMessage,
   type ConnectionStatus,
   type Conversation,
   type Template,
+  type TemplateComponent,
+  type TemplateComponentParameter,
   type TemplateDispatchResult,
   type TemplateInput,
 } from '@workspace/api-client-react';
@@ -255,9 +263,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
       <nav className="rail-nav">
         <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Envios" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Envios</span></button>
-        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Atualizações" data-testid="rail-updates"><Wifi size={17} /><span className="rail-btn-label">Atualizações</span></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
-        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Chamadas" data-testid="rail-calls"><Phone size={17} /><span className="rail-btn-label">Chamadas</span></button>
       </nav>
       <div className="rail-bottom">
         <button type="button" className="rail-btn" onClick={onSettings} aria-label="Configurações" data-testid="rail-settings"><Settings size={17} /><span className="rail-btn-label">Configurações</span></button>
@@ -725,16 +731,85 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
   );
 }
 
+type TemplateParameterSlot = {
+  key: string;
+  component: TemplateComponentParameter['component'];
+  parameterType: TemplateComponentParameter['parameterType'];
+  index: number | null;
+  subType: string | null;
+  label: string;
+  placeholder: string;
+};
+
+function variableNumbers(text: string | null | undefined) {
+  return Array.from(new Set((text ?? '').match(/\{\{\s*\d+\s*\}\}/g)?.map((value) => Number(value.replace(/[^\d]/g, ''))) ?? [])).sort((a, b) => a - b);
+}
+
+function templateParameterSlots(template: Template): TemplateParameterSlot[] {
+  const slots: TemplateParameterSlot[] = [];
+  const components = template.components ?? [];
+  const body = components.find((component) => component.type.toUpperCase() === 'BODY');
+  const header = components.find((component) => component.type.toUpperCase() === 'HEADER');
+  const buttons = components.find((component) => component.type.toUpperCase() === 'BUTTONS');
+
+  variableNumbers(body?.text ?? template.body).forEach((variable) => {
+    slots.push({ key: `body-${variable}`, component: 'body', parameterType: 'text', index: null, subType: null, label: `Texto · variável {{${variable}}}`, placeholder: 'Valor usado no texto' });
+  });
+  if (slots.filter((slot) => slot.component === 'body').length === 0 && template.variables.length > 0) {
+    template.variables.forEach((_value, index) => {
+      slots.push({ key: `body-${index + 1}`, component: 'body', parameterType: 'text', index: null, subType: null, label: `Texto · variável {{${index + 1}}}`, placeholder: 'Valor usado no texto' });
+    });
+  }
+
+  const headerFormat = header?.format?.toUpperCase();
+  if (headerFormat === 'TEXT') {
+    variableNumbers(header?.text).forEach((variable) => {
+      slots.push({ key: `header-${variable}`, component: 'header', parameterType: 'text', index: null, subType: null, label: `Cabeçalho · variável {{${variable}}}`, placeholder: 'Valor do cabeçalho' });
+    });
+  } else if (headerFormat && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerFormat)) {
+    slots.push({
+      key: 'header-media',
+      component: 'header',
+      parameterType: headerFormat.toLowerCase() as TemplateParameterSlot['parameterType'],
+      index: null,
+      subType: null,
+      label: `Cabeçalho · ${headerFormat.toLowerCase()}`,
+      placeholder: 'URL pública do arquivo',
+    });
+  }
+
+  (buttons?.buttons ?? []).forEach((button, index) => {
+    if (button.type.toUpperCase() !== 'URL') return;
+    variableNumbers(button.url).forEach((variable) => {
+      slots.push({ key: `button-${index}-${variable}`, component: 'button', parameterType: 'text', index, subType: 'url', label: `Botão URL ${index + 1} · variável {{${variable}}}`, placeholder: 'Valor que completa o link' });
+    });
+  });
+  return slots;
+}
+
 function normalizeImportedTemplate(value: unknown): TemplateInput {
   const root = Array.isArray(value) ? value[0] : value;
   const source = (root && typeof root === 'object' ? root : {}) as Record<string, unknown>;
   const nested = Array.isArray(source.templates) ? source.templates[0] : undefined;
   const data = (nested && typeof nested === 'object' ? nested : source) as Record<string, unknown>;
-  const components = Array.isArray(data.components) ? data.components.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : [];
-  const componentText = (type: string) => {
-    const component = components.find((item) => String(item.type ?? '').toUpperCase() === type);
-    return typeof component?.text === 'string' ? component.text : null;
-  };
+  const rawComponents = Array.isArray(data.components) ? data.components.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : [];
+  const components: TemplateComponent[] = rawComponents.map((component) => {
+    const rawButtons = Array.isArray(component.buttons) ? component.buttons.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object')) : [];
+    return {
+      type: String(component.type ?? '').toUpperCase(),
+      format: typeof component.format === 'string' ? component.format.toUpperCase() : null,
+      text: typeof component.text === 'string' ? component.text : null,
+      example: component.example && typeof component.example === 'object' && !Array.isArray(component.example) ? component.example as Record<string, unknown> : null,
+      buttons: rawButtons.map((button) => ({
+        type: String(button.type ?? '').toUpperCase(),
+        text: typeof button.text === 'string' ? button.text : null,
+        url: typeof button.url === 'string' ? button.url : null,
+        phoneNumber: typeof button.phone_number === 'string' ? button.phone_number : typeof button.phoneNumber === 'string' ? button.phoneNumber : null,
+        example: Array.isArray(button.example) ? button.example.filter((item): item is string => typeof item === 'string') : null,
+      })),
+    };
+  }).filter((component) => component.type);
+  const componentText = (type: string) => components.find((component) => component.type === type)?.text ?? null;
   const body = typeof data.body === 'string' ? data.body : componentText('BODY');
   const header = typeof data.header === 'string' ? data.header : componentText('HEADER');
   const footer = typeof data.footer === 'string' ? data.footer : componentText('FOOTER');
@@ -760,27 +835,36 @@ function normalizeImportedTemplate(value: unknown): TemplateInput {
     body: body.trim(),
     footer: footer?.trim() || null,
     variables: rawVariables,
+    components,
   };
+}
+
+function dispatchStatusLabel(status: string) {
+  return ({ pending: 'Pendente', partial: 'Parcial', sent: 'Aceito pela Meta', delivered: 'Entregue', read: 'Lido', failed: 'Falhou' } as Record<string, string>)[status] ?? status;
 }
 
 function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   const queryClient = useQueryClient();
   const templatesQuery = useListTemplates({ query: { queryKey: getListTemplatesQueryKey() } });
   const costsQuery = useGetTemplateCosts({ query: { queryKey: getGetTemplateCostsQueryKey() } });
+  const dispatchesQuery = useListTemplateDispatches({ query: { queryKey: getListTemplateDispatchesQueryKey(), refetchInterval: 5000 } });
+  const [selectedDispatchId, setSelectedDispatchId] = useState<number | null>(null);
+  const dispatchDetailQuery = useGetTemplateDispatch(selectedDispatchId ?? 0, { query: { queryKey: getGetTemplateDispatchQueryKey(selectedDispatchId ?? 0), enabled: selectedDispatchId !== null, refetchInterval: 5000 } });
   const createTemplate = useCreateTemplate();
   const dispatchTemplate = useDispatchTemplate();
   const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data]);
+  const dispatches = useMemo(() => dispatchesQuery.data ?? [], [dispatchesQuery.data]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [importDraft, setImportDraft] = useState<TemplateInput | null>(null);
   const [fileName, setFileName] = useState('');
   const [importError, setImportError] = useState('');
   const [recipientsText, setRecipientsText] = useState('');
-  const [variablesText, setVariablesText] = useState('');
+  const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [dispatchError, setDispatchError] = useState('');
   const [dispatchResult, setDispatchResult] = useState<TemplateDispatchResult | null>(null);
   const selectedTemplate = useMemo(() => templates.find((template) => template.id === selectedId), [templates, selectedId]);
+  const parameterSlots = useMemo(() => selectedTemplate ? templateParameterSlots(selectedTemplate) : [], [selectedTemplate]);
   const recipients = useMemo(() => recipientsText.split(/[,\n;]+/).map((item) => item.trim()).filter(Boolean), [recipientsText]);
-  const variables = useMemo(() => variablesText.split(/[,\n;]+/).map((item) => item.trim()).filter(Boolean), [variablesText]);
   const cost = costsQuery.data;
   const estimatedTotal = cost ? cost.costPerMessage * recipients.length : null;
 
@@ -791,8 +875,15 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   }, [templates, selectedId]);
 
   useEffect(() => {
-    if (selectedTemplate) setVariablesText(selectedTemplate.variables.join(', '));
+    if (selectedTemplate) {
+      const slots = templateParameterSlots(selectedTemplate);
+      setParameterValues(Object.fromEntries(slots.map((slot, index) => [slot.key, selectedTemplate.variables[index]?.startsWith('{{') ? '' : selectedTemplate.variables[index] ?? ''])));
+    }
   }, [selectedTemplate]);
+
+  useEffect(() => {
+    if (selectedDispatchId === null && dispatches.length > 0) setSelectedDispatchId(dispatches[0].id);
+  }, [dispatches, selectedDispatchId]);
 
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -830,8 +921,21 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
     if (!selectedTemplate) { setDispatchError('Selecione um template aprovado para continuar.'); return; }
     if (selectedTemplate.status.toLowerCase() !== 'approved') { setDispatchError('Somente templates aprovados podem ser enviados pela API oficial.'); return; }
     if (recipients.length === 0) { setDispatchError('Informe ao menos um número de telefone.'); return; }
-    dispatchTemplate.mutate({ templateId: selectedTemplate.id, data: { recipients, ...(variables.length ? { variables } : {}) } }, {
-      onSuccess: (result) => setDispatchResult(result),
+    const missing = parameterSlots.filter((slot) => !parameterValues[slot.key]?.trim());
+    if (missing.length > 0) { setDispatchError(`Preencha ${missing.length === 1 ? 'o parâmetro obrigatório' : 'os parâmetros obrigatórios'} antes de enviar.`); return; }
+    const componentParameters: TemplateComponentParameter[] = parameterSlots.map((slot) => ({
+      component: slot.component,
+      parameterType: slot.parameterType,
+      index: slot.index,
+      subType: slot.subType,
+      value: parameterValues[slot.key].trim(),
+    }));
+    dispatchTemplate.mutate({ templateId: selectedTemplate.id, data: { recipients, componentParameters } }, {
+      onSuccess: (result) => {
+        setDispatchResult(result);
+        setSelectedDispatchId(result.dispatchId);
+        void queryClient.invalidateQueries({ queryKey: getListTemplateDispatchesQueryKey() });
+      },
       onError: (error) => setDispatchError(errorText(error)),
     });
   };
@@ -847,8 +951,8 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
         <div>
           <button type="button" className="templates-mobile-back mobile-only" onClick={onBackToInbox} data-testid="button-back-to-inbox"><ArrowLeft size={16} /> Conversas</button>
           <p className="templates-kicker">WhatsApp Cloud API · operação</p>
-          <h1 className="templates-title">Templates de mensagem</h1>
-          <p className="templates-subtitle">Importe uma definição aprovada, revise e envie para sua lista.</p>
+          <h1 className="templates-title">Envios oficiais</h1>
+          <p className="templates-subtitle">Use os componentes aprovados pela Meta e acompanhe a entrega por destinatário.</p>
         </div>
         <div className="templates-connection-note"><ShieldCheck size={14} /> envio oficial pela Meta</div>
       </header>
@@ -858,7 +962,7 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
           {templatesQuery.isLoading && <div className="templates-loading" data-testid="state-templates-loading"><div className="skeleton" /><div className="skeleton" /><div className="skeleton" /></div>}
           {templatesQuery.isError && <div className="status-note" data-testid="state-templates-error"><AlertCircle size={16} /><span>Não foi possível carregar os templates.</span></div>}
           {!templatesQuery.isLoading && !templatesQuery.isError && templates.length === 0 && (
-            <div className="template-empty" data-testid="state-templates-empty"><FileText size={27} strokeWidth={1.5} /><div><strong>Nenhum template importado</strong><p>Use um JSON exportado da Meta ou a definição normalizada abaixo.</p></div></div>
+            <div className="template-empty" data-testid="state-templates-empty"><FileText size={27} strokeWidth={1.5} /><div><strong>Nenhum template importado</strong><p>Importe o JSON real da Meta com HEADER, BODY, FOOTER e BUTTONS.</p></div></div>
           )}
           {!templatesQuery.isLoading && templates.length > 0 && (
             <div className="template-list">
@@ -871,13 +975,13 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
             </div>
           )}
           <div className="template-import-card">
-            <div className="template-import-heading"><FileJson size={16} /><span>Importar arquivo JSON</span></div>
-            <p className="template-import-help">Aceita o formato normalizado e exportações da Meta com componentes BODY, HEADER e FOOTER.</p>
+            <div className="template-import-heading"><FileJson size={16} /><span>Importar definição da Meta</span></div>
+            <p className="template-import-help">Aceita exportações com componentes HEADER, BODY, FOOTER e BUTTONS, incluindo formato de mídia e exemplos.</p>
             <label className="template-file-label" htmlFor="template-json-file"><Upload size={15} /> Escolher arquivo JSON<input id="template-json-file" type="file" accept="application/json,.json" onChange={handleFile} data-testid="input-template-file" /></label>
             {fileName && <p className="template-file-name" data-testid="text-template-file-name">{fileName}{importDraft ? ' · pronto para importar' : ''}</p>}
             {importDraft && (
               <div className="mt-3 grid gap-2">
-                <p className="text-[11px] text-[#b9c8be]"><strong>{importDraft.name}</strong> · {importDraft.languageCode} · {importDraft.category}</p>
+                <p className="text-[11px] text-[#b9c8be]"><strong>{importDraft.name}</strong> · {importDraft.languageCode} · {importDraft.category} · {importDraft.components?.length ?? 0} componentes</p>
                 <button type="button" className="btn-primary w-full" onClick={submitImport} disabled={createTemplate.isPending} data-testid="button-import-template">{createTemplate.isPending ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}{createTemplate.isPending ? 'Importando...' : 'Importar template'}</button>
               </div>
             )}
@@ -885,7 +989,7 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
           </div>
         </section>
         <section className="templates-dispatch" aria-label="Envio de template">
-          <div className="templates-section-label"><span>Revisão e envio</span><span className="templates-count">API oficial</span></div>
+          <div className="templates-section-label"><span>Revisão e envio</span><span className="templates-count">componentes Meta</span></div>
           {selectedTemplate ? (
             <>
               <div className="template-preview-card" data-testid={`template-preview-${selectedTemplate.id}`}>
@@ -894,38 +998,48 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
                   <span className="template-status" data-status={selectedTemplate.status.toLowerCase()}>{statusLabel(selectedTemplate.status)}</span>
                 </div>
                 <div className="template-message-preview">
-                  {selectedTemplate.header && <div className="template-message-header">{selectedTemplate.header}</div>}
+                  {selectedTemplate.components.find((component) => component.type.toUpperCase() === 'HEADER')?.text && <div className="template-message-header">{selectedTemplate.components.find((component) => component.type.toUpperCase() === 'HEADER')?.text}</div>}
+                  {selectedTemplate.components.find((component) => component.type.toUpperCase() === 'HEADER')?.format && selectedTemplate.components.find((component) => component.type.toUpperCase() === 'HEADER')?.format !== 'TEXT' && <div className="template-media-note"><ImageIcon size={14} /> Cabeçalho de {selectedTemplate.components.find((component) => component.type.toUpperCase() === 'HEADER')?.format?.toLowerCase()}</div>}
                   <div>{selectedTemplate.body}</div>
                   {selectedTemplate.footer && <div className="template-message-footer">{selectedTemplate.footer}</div>}
+                  {selectedTemplate.components.find((component) => component.type.toUpperCase() === 'BUTTONS')?.buttons.map((button, index) => <div className="template-button-preview" key={`${button.type}-${index}`}>{button.text ?? button.type}</div>)}
                 </div>
               </div>
               <form className="template-dispatch-form" onSubmit={dispatch}>
                 <div className="field"><label className="field-label" htmlFor="template-recipients">Destinatários</label><textarea id="template-recipients" className="field-input min-h-24 resize-y" value={recipientsText} onChange={(event) => setRecipientsText(event.target.value)} placeholder="+55 11 99999-0000&#10;+55 21 98888-0000" data-testid="input-template-recipients" /><p className="field-help">Separe números por linha, vírgula ou ponto e vírgula. {recipients.length > 0 ? `${recipients.length} destinatário(s) detectado(s).` : ''}</p></div>
-                <div className="field"><label className="field-label" htmlFor="template-variables">Variáveis</label><textarea id="template-variables" className="field-input min-h-20 resize-y" value={variablesText} onChange={(event) => setVariablesText(event.target.value)} placeholder="Nome do cliente, código do pedido" data-testid="input-template-variables" /><p className="field-help">Valores na ordem dos placeholders do template. Separe por linha, vírgula ou ponto e vírgula.</p></div>
+                <div className="template-parameters-card">
+                  <div className="template-parameters-heading"><span>Parâmetros exigidos pelo template</span><span>{parameterSlots.length} campo(s)</span></div>
+                  {parameterSlots.length === 0 && <p className="field-help">Este template não exige variáveis ou mídia adicional.</p>}
+                  {parameterSlots.map((slot) => <div className="field" key={slot.key}><label className="field-label" htmlFor={`template-parameter-${slot.key}`}>{slot.label}</label><input id={`template-parameter-${slot.key}`} className="field-input" value={parameterValues[slot.key] ?? ''} onChange={(event) => setParameterValues((current) => ({ ...current, [slot.key]: event.target.value }))} placeholder={slot.placeholder} data-testid={`input-template-parameter-${slot.key}`} /></div>)}
+                  <p className="field-help">Os valores são enviados nos componentes corretos da API da Meta; a URL de mídia precisa ser pública.</p>
+                </div>
                 <div className="template-cost-card" data-testid="template-cost-summary">
                   <div><div className="template-cost-label"><CircleDollarSign size={13} className="mr-1 inline-block align-[-2px]" />Estimativa para {recipients.length || 0} destinatário(s)</div><div className="template-cost-value">{cost ? `${cost.currency} ${estimatedTotal?.toFixed(2)}` : costsQuery.isLoading ? 'Consultando tarifa...' : 'Tarifa indisponível'}</div></div>
                   <p className="template-cost-note">{cost?.disclaimer ?? (costsQuery.isError ? 'Não foi possível consultar a tarifa configurada.' : 'A estimativa será carregada pela API.')}</p>
                 </div>
                 {dispatchError && <p className="template-inline-error" data-testid="status-template-dispatch-error"><AlertCircle size={15} />{dispatchError}</p>}
-                <button type="submit" className="btn-primary w-full" disabled={dispatchTemplate.isPending || !selectedTemplate} data-testid="button-dispatch-template">{dispatchTemplate.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{dispatchTemplate.isPending ? 'Enviando pelo WhatsApp...' : 'Revisar e enviar template'}</button>
+                <button type="submit" className="btn-primary w-full" disabled={dispatchTemplate.isPending || !selectedTemplate} data-testid="button-dispatch-template">{dispatchTemplate.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{dispatchTemplate.isPending ? 'Enviando pelo WhatsApp...' : 'Enviar template oficial'}</button>
               </form>
-              {dispatchResult && (
-                <div className="template-results-card rise-in" data-testid="template-dispatch-results">
-                  <div className="template-results-summary">
-                    <div className="template-result-stat"><span>Destinatários</span><strong>{dispatchResult.recipientsCount}</strong></div>
-                    <div className="template-result-stat" data-tone="success"><span>Enviados</span><strong>{dispatchResult.sentCount}</strong></div>
-                    <div className="template-result-stat" data-tone="error"><span>Falhas</span><strong>{dispatchResult.failedCount}</strong></div>
-                    <div className="template-result-stat"><span>Estimativa</span><strong>{dispatchResult.currency} {dispatchResult.estimatedCost.toFixed(2)}</strong></div>
-                  </div>
-                  {dispatchResult.results.map((result) => (
-                    <div className="template-result-row" key={`${result.phoneNumber}-${result.status}`}><span className="template-result-phone">{result.phoneNumber}</span><span className="template-result-message">{result.message ?? ''}</span><span className="template-result-status" data-status={result.status}><span className="dot" />{result.status === 'sent' ? 'enviado' : 'falhou'}</span></div>
-                  ))}
-                </div>
-              )}
+              {dispatchResult && <div className="template-results-card rise-in" data-testid="template-dispatch-results"><div className="template-results-summary"><div className="template-result-stat"><span>Lote</span><strong>#{dispatchResult.dispatchId}</strong></div><div className="template-result-stat" data-tone="success"><span>Aceitos</span><strong>{dispatchResult.sentCount}</strong></div><div className="template-result-stat"><span>Pendentes</span><strong>{dispatchResult.pendingCount}</strong></div><div className="template-result-stat" data-tone="error"><span>Falhas</span><strong>{dispatchResult.failedCount}</strong></div></div></div>}
             </>
           ) : (
-            <div className="template-empty" data-testid="state-template-selection-empty"><FileText size={28} strokeWidth={1.5} /><div><strong>Selecione um template</strong><p>Depois de importar ou escolher um item, a revisão e o envio aparecem aqui.</p></div></div>
+            <div className="template-empty" data-testid="state-template-selection-empty"><FileText size={28} strokeWidth={1.5} /><div><strong>Selecione um template</strong><p>Depois de importar ou escolher um item, os componentes e parâmetros aparecem aqui.</p></div></div>
           )}
+        </section>
+        <section className="dispatch-monitor" aria-label="Painel de acompanhamento de envios" data-testid="dispatch-monitor">
+          <div className="templates-section-label"><span><BarChart3 size={15} /> Acompanhamento dos envios</span><span className="templates-count">atualização automática</span></div>
+          <div className="dispatch-monitor-grid">
+            <div className="dispatch-history">
+              {dispatchesQuery.isLoading && <div className="templates-loading"><div className="skeleton" /><div className="skeleton" /></div>}
+              {!dispatchesQuery.isLoading && dispatches.length === 0 && <div className="dispatch-empty">Nenhum lote enviado ainda.</div>}
+              {dispatches.map((dispatch) => <button type="button" key={dispatch.id} className="dispatch-history-row" data-active={dispatch.id === selectedDispatchId} onClick={() => setSelectedDispatchId(dispatch.id)}><span><strong>#{dispatch.id} · {dispatch.templateName}</strong><small>{new Date(dispatch.createdAt).toLocaleString('pt-BR')} · {dispatch.languageCode}</small></span><span className="dispatch-history-stats"><b>{dispatch.sentCount}/{dispatch.recipientsCount}</b><em data-status={dispatch.status}>{dispatchStatusLabel(dispatch.status)}</em></span></button>)}
+            </div>
+            <div className="dispatch-detail">
+              {!selectedDispatchId && <div className="dispatch-empty">Selecione um lote para ver os destinatários.</div>}
+              {selectedDispatchId && dispatchDetailQuery.isLoading && <div className="dispatch-empty">Carregando detalhes...</div>}
+              {selectedDispatchId && dispatchDetailQuery.data && <><div className="dispatch-detail-summary"><div><span>Status</span><strong>{dispatchStatusLabel(dispatchDetailQuery.data.status)}</strong></div><div><span>Entregues</span><strong>{dispatchDetailQuery.data.deliveredCount}</strong></div><div><span>Lidos</span><strong>{dispatchDetailQuery.data.readCount}</strong></div><div><span>Custo estimado</span><strong>{dispatchDetailQuery.data.currency} {dispatchDetailQuery.data.estimatedCost.toFixed(2)}</strong></div></div><div className="dispatch-recipient-list">{dispatchDetailQuery.data.results.map((result) => <div className="dispatch-recipient-row" key={`${result.phoneNumber}-${result.whatsappMessageId ?? result.updatedAt}`}><span className="template-result-phone">{result.phoneNumber}</span><span className="dispatch-recipient-message">{result.message ?? (result.whatsappMessageId ? 'Aguardando confirmação da Meta' : 'Aguardando envio')}</span><em data-status={result.status}><span className="dot" />{dispatchStatusLabel(result.status)}</em></div>)}</div></>}
+            </div>
+          </div>
         </section>
       </div>
     </section>

@@ -10,6 +10,9 @@ export type TemplateDispatchRecipientStatus = typeof TemplateDispatchRecipientSt
 
 
 export const TemplateDispatchRecipientStatus = {
+  pending: 'pending',
   sent: 'sent',
+  delivered: 'delivered',
+  read: 'read',
   failed: 'failed',
 } as const;

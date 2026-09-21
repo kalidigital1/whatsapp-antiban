@@ -20,6 +20,9 @@ import {
   StartConversationBody,
   StartConversationResponse,
   DispatchTemplateResponse,
+  GetTemplateDispatchParams,
+  GetTemplateDispatchResponse,
+  ListTemplateDispatchesResponse,
 } from "@workspace/api-zod";
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
@@ -27,7 +30,10 @@ import {
   contacts,
   conversations,
   db,
+  whatsappTemplateDispatchRecipients,
+  whatsappTemplateDispatches,
   whatsappTemplates,
+  type WhatsappTemplateComponent,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 
@@ -76,10 +82,12 @@ function publishConversationEvent(event: ConversationEvent) {
 
 class MetaApiError extends Error {
   status: number;
+  code?: string;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -153,7 +161,7 @@ async function graphRequest<T>(
     const message =
       stringValue(error.message) ||
       "A Meta recusou a solicitação. Verifique o token e os IDs informados.";
-    throw new MetaApiError(message, response.status);
+    throw new MetaApiError(message, response.status, stringValue(error.code));
   }
 
   return body as T;
@@ -215,6 +223,9 @@ function estimatedCostPerMessage(): number {
 }
 
 function templateResponse(template: typeof whatsappTemplates.$inferSelect) {
+  const storedComponents = Array.isArray(template.components)
+    ? template.components
+    : [];
   return ListTemplatesResponseItem.parse({
     id: template.id,
     name: template.name,
@@ -225,13 +236,137 @@ function templateResponse(template: typeof whatsappTemplates.$inferSelect) {
     body: template.body,
     footer: template.footer,
     variables: Array.isArray(template.variables) ? template.variables : [],
+    components: storedComponents.length
+      ? storedComponents.map(normalizeStoredComponent)
+      : legacyTemplateComponents(template).map(normalizeStoredComponent),
     createdAt: template.createdAt.toISOString(),
     updatedAt: template.updatedAt.toISOString(),
   });
 }
 
+function normalizeStoredComponent(component: WhatsappTemplateComponent) {
+  return {
+    type: component.type,
+    format: component.format ?? null,
+    text: component.text ?? null,
+    example: component.example ?? null,
+    buttons: (component.buttons ?? []).map((button) => ({
+      type: button.type,
+      text: button.text ?? null,
+      url: button.url ?? null,
+      phoneNumber: button.phoneNumber ?? null,
+      example: button.example ?? null,
+    })),
+  };
+}
+
+function normalizeInputComponents(
+  components: Array<{
+    type: string;
+    format: string | null;
+    text: string | null;
+    example: Record<string, unknown> | null;
+    buttons: Array<{
+      type: string;
+      text: string | null;
+      url: string | null;
+      phoneNumber: string | null;
+      example: string[] | null;
+    }>;
+  }>,
+): WhatsappTemplateComponent[] {
+  return components.map((component) => ({
+    type: component.type.toUpperCase(),
+    format: component.format?.toUpperCase() ?? null,
+    text: component.text ?? null,
+    example: component.example ?? null,
+    buttons: component.buttons.map((button) => ({
+      type: button.type.toUpperCase(),
+      text: button.text ?? null,
+      url: button.url ?? null,
+      phoneNumber: button.phoneNumber ?? null,
+      example: button.example ?? null,
+    })),
+  }));
+}
+
+function legacyTemplateComponents(input: {
+  header?: string | null;
+  body: string;
+  footer?: string | null;
+}): WhatsappTemplateComponent[] {
+  return [
+    ...(input.header
+      ? [{ type: "HEADER", format: "TEXT", text: input.header, buttons: [] }]
+      : []),
+    { type: "BODY", format: null, text: input.body, buttons: [] },
+    ...(input.footer
+      ? [{ type: "FOOTER", format: null, text: input.footer, buttons: [] }]
+      : []),
+  ];
+}
+
 function renderTemplateBody(body: string, variables: string[]) {
   return body.replace(/\{\{(\d+)\}\}/g, (_match, index: string) => variables[Number(index) - 1] ?? `{{${index}}}`);
+}
+
+type ComponentParameterInput = {
+  component: "header" | "body" | "button";
+  parameterType: "text" | "image" | "video" | "document";
+  index: number | null;
+  subType: string | null;
+  value: string;
+};
+
+function parameterValue(parameter: ComponentParameterInput) {
+  if (parameter.parameterType === "text") {
+    return { type: "text", text: parameter.value };
+  }
+
+  return {
+    type: parameter.parameterType,
+    [parameter.parameterType]: { link: parameter.value },
+  };
+}
+
+function buildMetaTemplateComponents(
+  variables: string[],
+  componentParameters: ComponentParameterInput[],
+) {
+  const supplied = componentParameters.length
+    ? componentParameters
+    : variables.map((value) => ({
+        component: "body" as const,
+        parameterType: "text" as const,
+        index: null,
+        subType: null,
+        value,
+      }));
+
+  const components: Array<Record<string, unknown>> = [];
+  for (const parameter of supplied) {
+    if (parameter.component === "button") {
+      components.push({
+        type: "button",
+        sub_type: parameter.subType || "url",
+        index: String(parameter.index ?? 0),
+        parameters: [parameterValue(parameter)],
+      });
+      continue;
+    }
+
+    const existing = components.find((item) => item.type === parameter.component);
+    if (existing) {
+      (existing.parameters as unknown[]).push(parameterValue(parameter));
+    } else {
+      components.push({
+        type: parameter.component,
+        parameters: [parameterValue(parameter)],
+      });
+    }
+  }
+
+  return components;
 }
 
 async function sendTemplateMessage(
@@ -239,16 +374,10 @@ async function sendTemplateMessage(
   to: string,
   template: typeof whatsappTemplates.$inferSelect,
   variables: string[],
+  componentParameters: ComponentParameterInput[],
   accessToken: string,
 ) {
-  const components = variables.length
-    ? [
-        {
-          type: "body",
-          parameters: variables.map((text) => ({ type: "text", text })),
-        },
-      ]
-    : undefined;
+  const components = buildMetaTemplateComponents(variables, componentParameters);
 
   const body = await graphRequest<{ messages?: Array<{ id?: string }> }>(
     `${encodeURIComponent(phoneNumberId)}/messages`,
@@ -263,7 +392,7 @@ async function sendTemplateMessage(
         template: {
           name: template.name,
           language: { code: template.languageCode },
-          ...(components ? { components } : {}),
+          ...(components.length ? { components } : {}),
         },
       }),
     },
@@ -272,6 +401,101 @@ async function sendTemplateMessage(
   const id = stringValue(body.messages?.[0]?.id);
   if (!id) throw new MetaApiError("A Meta não retornou o ID do template enviado.");
   return id;
+}
+
+function dispatchStatusFromCounts(input: {
+  total: number;
+  sent: number;
+  delivered: number;
+  read: number;
+  failed: number;
+  pending: number;
+}) {
+  if (input.total > 0 && input.failed === input.total) return "failed" as const;
+  if (input.pending > 0) {
+    return input.sent + input.delivered + input.read + input.failed > 0
+      ? ("partial" as const)
+      : ("pending" as const);
+  }
+  if (input.total > 0 && input.read === input.total) return "read" as const;
+  if (input.total > 0 && input.delivered === input.total) return "delivered" as const;
+  if (input.total > 0 && input.sent === input.total) return "sent" as const;
+  return "partial" as const;
+}
+
+async function refreshDispatchSummary(dispatchId: number) {
+  const recipients = await db
+    .select()
+    .from(whatsappTemplateDispatchRecipients)
+    .where(eq(whatsappTemplateDispatchRecipients.dispatchId, dispatchId));
+  const sent = recipients.filter((item) => ["sent", "delivered", "read"].includes(item.status)).length;
+  const delivered = recipients.filter((item) => item.status === "delivered" || item.status === "read").length;
+  const read = recipients.filter((item) => item.status === "read").length;
+  const failed = recipients.filter((item) => item.status === "failed").length;
+  const pending = recipients.filter((item) => item.status === "pending").length;
+  const status = dispatchStatusFromCounts({
+    total: recipients.length,
+    sent,
+    delivered,
+    read,
+    failed,
+    pending,
+  });
+  const [dispatch] = await db
+    .update(whatsappTemplateDispatches)
+    .set({
+      status,
+      recipientsCount: recipients.length,
+      sentCount: sent,
+      deliveredCount: delivered,
+      readCount: read,
+      failedCount: failed,
+      pendingCount: pending,
+      updatedAt: new Date(),
+    })
+    .where(eq(whatsappTemplateDispatches.id, dispatchId))
+    .returning();
+  return dispatch;
+}
+
+async function dispatchResultResponse(dispatchId: number) {
+  const [dispatch] = await db
+    .select()
+    .from(whatsappTemplateDispatches)
+    .where(eq(whatsappTemplateDispatches.id, dispatchId))
+    .limit(1);
+  if (!dispatch) return null;
+  const [template] = await db
+    .select()
+    .from(whatsappTemplates)
+    .where(eq(whatsappTemplates.id, dispatch.templateId))
+    .limit(1);
+  if (!template) return null;
+  const recipients = await db
+    .select()
+    .from(whatsappTemplateDispatchRecipients)
+    .where(eq(whatsappTemplateDispatchRecipients.dispatchId, dispatchId))
+    .orderBy(asc(whatsappTemplateDispatchRecipients.id));
+  return GetTemplateDispatchResponse.parse({
+    dispatchId: dispatch.id,
+    template: templateResponse(template),
+    status: dispatch.status,
+    recipientsCount: dispatch.recipientsCount,
+    sentCount: dispatch.sentCount,
+    deliveredCount: dispatch.deliveredCount,
+    readCount: dispatch.readCount,
+    failedCount: dispatch.failedCount,
+    pendingCount: dispatch.pendingCount,
+    estimatedCost: dispatch.estimatedCost,
+    currency: dispatch.currency,
+    results: recipients.map((recipient) => ({
+      phoneNumber: recipient.phoneNumber,
+      status: recipient.status,
+      message: recipient.message,
+      whatsappMessageId: recipient.whatsappMessageId,
+      updatedAt: recipient.updatedAt.toISOString(),
+    })),
+  });
 }
 
 function messageResponse(message: typeof chatMessages.$inferSelect) {
@@ -710,6 +934,9 @@ router.post("/templates", async (req, res) => {
       )
       .limit(1);
 
+    const components = input.components?.length
+      ? normalizeInputComponents(input.components)
+      : legacyTemplateComponents(input);
     const values = {
       name: input.name.trim(),
       languageCode: input.languageCode.trim(),
@@ -719,6 +946,7 @@ router.post("/templates", async (req, res) => {
       body: input.body.trim(),
       footer: input.footer?.trim() || null,
       variables,
+      components,
       updatedAt: new Date(),
     };
     const [template] = existing
@@ -749,6 +977,68 @@ router.get("/templates/costs", (_req, res) => {
   );
 });
 
+router.get("/templates/dispatches", async (_req, res) => {
+  try {
+    const dispatches = await db
+      .select()
+      .from(whatsappTemplateDispatches)
+      .orderBy(desc(whatsappTemplateDispatches.createdAt))
+      .limit(50);
+    const summaries = await Promise.all(
+      dispatches.map(async (dispatch) => {
+        const [template] = await db
+          .select({
+            name: whatsappTemplates.name,
+            languageCode: whatsappTemplates.languageCode,
+          })
+          .from(whatsappTemplates)
+          .where(eq(whatsappTemplates.id, dispatch.templateId))
+          .limit(1);
+        return {
+          id: dispatch.id,
+          templateId: dispatch.templateId,
+          templateName: template?.name ?? "Template removido",
+          languageCode: template?.languageCode ?? "",
+          status: dispatch.status,
+          recipientsCount: dispatch.recipientsCount,
+          sentCount: dispatch.sentCount,
+          deliveredCount: dispatch.deliveredCount,
+          readCount: dispatch.readCount,
+          failedCount: dispatch.failedCount,
+          pendingCount: dispatch.pendingCount,
+          estimatedCost: dispatch.estimatedCost,
+          currency: dispatch.currency,
+          createdAt: dispatch.createdAt.toISOString(),
+          updatedAt: dispatch.updatedAt.toISOString(),
+        };
+      }),
+    );
+    res.json(ListTemplateDispatchesResponse.parse(summaries));
+  } catch (error) {
+    logger.error({ err: error }, "Failed to list template dispatches");
+    res.status(500).json({ error: "Não foi possível carregar o painel de envios." });
+  }
+});
+
+router.get("/templates/dispatches/:dispatchId", async (req, res) => {
+  try {
+    const { dispatchId } = GetTemplateDispatchParams.parse(req.params);
+    if (!Number.isInteger(dispatchId)) {
+      res.status(400).json({ error: "Lote de envio inválido." });
+      return;
+    }
+    const result = await dispatchResultResponse(dispatchId);
+    if (!result) {
+      res.status(404).json({ error: "Lote de envio não encontrado." });
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    logger.error({ err: error }, "Failed to get template dispatch");
+    res.status(500).json({ error: "Não foi possível carregar o envio." });
+  }
+});
+
 router.post("/templates/:templateId/dispatch", async (req, res) => {
   try {
     const params = DispatchTemplateParams.parse(req.params);
@@ -774,14 +1064,45 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
       return;
     }
 
-    const results: Array<{ phoneNumber: string; status: "sent" | "failed"; message: string | null }> = [];
+    const currency = process.env.WHATSAPP_ESTIMATED_COST_CURRENCY ?? "BRL";
+    const estimatedCost = Number((recipients.length * estimatedCostPerMessage()).toFixed(4));
+    const [dispatch] = await db
+      .insert(whatsappTemplateDispatches)
+      .values({
+        templateId: template.id,
+        status: "pending",
+        recipientsCount: recipients.length,
+        pendingCount: recipients.length,
+        estimatedCost,
+        currency,
+      })
+      .returning();
+    if (!dispatch) throw new MetaApiError("Não foi possível criar o lote de envio.");
+
+    const pendingRecipients = await db
+      .insert(whatsappTemplateDispatchRecipients)
+      .values(recipients.map((phoneNumber) => ({
+        dispatchId: dispatch.id,
+        phoneNumber,
+        status: "pending",
+      })))
+      .returning();
+    const recipientByPhone = new Map(pendingRecipients.map((recipient) => [recipient.phoneNumber, recipient]));
+    const componentParameters = (input.componentParameters ?? []) as ComponentParameterInput[];
+    const bodyVariables = componentParameters
+      .filter((parameter) => parameter.component === "body" && parameter.parameterType === "text")
+      .map((parameter) => parameter.value);
+    const renderedVariables = bodyVariables.length ? bodyVariables : input.variables ?? [];
+
     for (const phoneNumber of recipients) {
+      const recipient = recipientByPhone.get(phoneNumber);
       try {
         const whatsappMessageId = await sendTemplateMessage(
           activeConnection.selectedPhoneNumberId,
           phoneNumber,
           template,
           input.variables ?? [],
+          componentParameters,
           activeConnection.accessToken,
         );
         const contact = await getOrCreateContact(phoneNumber);
@@ -794,35 +1115,42 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
           whatsappMessageId,
           direction: "outbound",
           messageType: "template",
-          content: renderTemplateBody(template.body, input.variables ?? []),
+           content: renderTemplateBody(template.body, renderedVariables),
           status: "sent",
         });
         await db
           .update(conversations)
           .set({ lastMessageAt: new Date(), updatedAt: new Date() })
           .where(eq(conversations.id, conversation.id));
-        results.push({ phoneNumber, status: "sent", message: null });
+        if (recipient) {
+          await db
+            .update(whatsappTemplateDispatchRecipients)
+            .set({
+              status: "sent",
+              whatsappMessageId,
+              updatedAt: new Date(),
+            })
+            .where(eq(whatsappTemplateDispatchRecipients.id, recipient.id));
+        }
       } catch (error) {
-        results.push({
-          phoneNumber,
-          status: "failed",
-          message: error instanceof Error ? error.message : "Falha ao enviar.",
-        });
+        if (recipient) {
+          await db
+            .update(whatsappTemplateDispatchRecipients)
+            .set({
+              status: "failed",
+              message: error instanceof Error ? error.message : "Falha ao enviar.",
+              errorCode: error instanceof MetaApiError ? error.code ?? null : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(whatsappTemplateDispatchRecipients.id, recipient.id));
+        }
       }
     }
 
-    const sentCount = results.filter((result) => result.status === "sent").length;
-    res.status(201).json(
-      DispatchTemplateResponse.parse({
-        template: templateResponse(template),
-        recipientsCount: recipients.length,
-        sentCount,
-        failedCount: recipients.length - sentCount,
-        estimatedCost: Number((recipients.length * estimatedCostPerMessage()).toFixed(4)),
-        currency: process.env.WHATSAPP_ESTIMATED_COST_CURRENCY ?? "BRL",
-        results,
-      }),
-    );
+    await refreshDispatchSummary(dispatch.id);
+    const result = await dispatchResultResponse(dispatch.id);
+    if (!result) throw new MetaApiError("Não foi possível carregar o resultado do envio.");
+    res.status(201).json(DispatchTemplateResponse.parse(result));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
     const message = error instanceof Error ? error.message : "Falha ao disparar template.";
@@ -941,6 +1269,27 @@ router.post("/webhook", async (req, res) => {
             .update(chatMessages)
             .set({ status: statusValue })
             .where(eq(chatMessages.whatsappMessageId, messageId));
+          const [dispatchRecipient] = await db
+            .select()
+            .from(whatsappTemplateDispatchRecipients)
+            .where(eq(whatsappTemplateDispatchRecipients.whatsappMessageId, messageId))
+            .limit(1);
+          if (dispatchRecipient) {
+            const statusErrors = Array.isArray(status.errors) ? asRecord(status.errors[0]) : {};
+            const normalizedStatus = ["sent", "delivered", "read", "failed"].includes(statusValue)
+              ? statusValue
+              : "pending";
+            await db
+              .update(whatsappTemplateDispatchRecipients)
+              .set({
+                status: normalizedStatus,
+                message: stringValue(statusErrors.title) || stringValue(statusErrors.message) || null,
+                errorCode: stringValue(statusErrors.code) || null,
+                updatedAt: new Date(),
+              })
+              .where(eq(whatsappTemplateDispatchRecipients.id, dispatchRecipient.id));
+            await refreshDispatchSummary(dispatchRecipient.dispatchId);
+          }
           publishConversationEvent({
             conversationId: storedMessage.conversationId,
             reason: "status",

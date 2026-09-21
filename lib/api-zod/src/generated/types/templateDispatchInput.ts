@@ -5,6 +5,7 @@
  * WhatsApp Recovery IA API
  * OpenAPI spec version: 0.1.0
  */
+import type { TemplateComponentParameter } from './templateComponentParameter';
 
 export interface TemplateDispatchInput {
   /**
@@ -13,4 +14,5 @@ export interface TemplateDispatchInput {
      */
   recipients: string[];
   variables?: string[];
+  componentParameters?: TemplateComponentParameter[];
 }

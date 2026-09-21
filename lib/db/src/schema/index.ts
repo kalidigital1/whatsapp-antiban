@@ -3,6 +3,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
@@ -91,6 +92,10 @@ export const whatsappTemplates = pgTable(
     body: text("body").notNull(),
     footer: text("footer"),
     variables: jsonb("variables").$type<string[]>().notNull().default([]),
+    components: jsonb("components")
+      .$type<WhatsappTemplateComponent[]>()
+      .notNull()
+      .default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -103,7 +108,70 @@ export const whatsappTemplates = pgTable(
   }),
 );
 
+export type WhatsappTemplateComponent = {
+  type: string;
+  format?: string | null;
+  text?: string | null;
+  example?: Record<string, unknown> | null;
+  buttons?: Array<{
+    type: string;
+    text?: string | null;
+    url?: string | null;
+    phoneNumber?: string | null;
+    example?: string[] | null;
+  }>;
+};
+
+export const whatsappTemplateDispatches = pgTable(
+  "whatsapp_template_dispatches",
+  {
+    id: serial("id").primaryKey(),
+    templateId: integer("template_id")
+      .notNull()
+      .references(() => whatsappTemplates.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    recipientsCount: integer("recipients_count").notNull().default(0),
+    sentCount: integer("sent_count").notNull().default(0),
+    deliveredCount: integer("delivered_count").notNull().default(0),
+    readCount: integer("read_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    pendingCount: integer("pending_count").notNull().default(0),
+    estimatedCost: real("estimated_cost").notNull().default(0),
+    currency: text("currency").notNull().default("BRL"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    createdAtIndex: index("whatsapp_template_dispatches_created_at_idx").on(table.createdAt),
+    templateIdIndex: index("whatsapp_template_dispatches_template_id_idx").on(table.templateId),
+  }),
+);
+
+export const whatsappTemplateDispatchRecipients = pgTable(
+  "whatsapp_template_dispatch_recipients",
+  {
+    id: serial("id").primaryKey(),
+    dispatchId: integer("dispatch_id")
+      .notNull()
+      .references(() => whatsappTemplateDispatches.id, { onDelete: "cascade" }),
+    phoneNumber: text("phone_number").notNull(),
+    status: text("status").notNull().default("pending"),
+    message: text("message"),
+    whatsappMessageId: text("whatsapp_message_id"),
+    errorCode: text("error_code"),
+    errorTitle: text("error_title"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    dispatchIdIndex: index("whatsapp_template_dispatch_recipients_dispatch_id_idx").on(table.dispatchId),
+    whatsappMessageIndex: index("whatsapp_template_dispatch_recipients_whatsapp_id_idx").on(table.whatsappMessageId),
+  }),
+);
+
 export type Contact = typeof contacts.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type WhatsappTemplate = typeof whatsappTemplates.$inferSelect;
+export type WhatsappTemplateDispatch = typeof whatsappTemplateDispatches.$inferSelect;
+export type WhatsappTemplateDispatchRecipient = typeof whatsappTemplateDispatchRecipients.$inferSelect;
