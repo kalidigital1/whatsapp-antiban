@@ -72,6 +72,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
+  /connection/phone-number:
+    patch:
+      operationId: selectPhoneNumber
+      tags: [whatsapp]
+      summary: Select the active WhatsApp phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneNumberSelectionInput"
+      responses:
+        "200":
+          description: Updated connection details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectionStatus"
+        "400":
+          description: Invalid phone number selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations:
     get:
       operationId: listConversations
@@ -491,6 +515,13 @@ components:
         phoneNumberId:
           type: string
       required: [accessToken, businessAccountId]
+    PhoneNumberSelectionInput:
+      type: object
+      properties:
+        phoneNumberId:
+          type: string
+          minLength: 1
+      required: [phoneNumberId]
     ConnectionStatus:
       type: object
       properties:

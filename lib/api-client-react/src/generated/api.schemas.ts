@@ -41,6 +41,11 @@ export interface ConnectionInput {
   phoneNumberId?: string;
 }
 
+export interface PhoneNumberSelectionInput {
+  /** @minLength 1 */
+  phoneNumberId: string;
+}
+
 export interface ConnectionStatus {
   connected: boolean;
   /** @nullable */

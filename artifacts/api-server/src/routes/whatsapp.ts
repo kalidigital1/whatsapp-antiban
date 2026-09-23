@@ -3,6 +3,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import multer from "multer";
 import {
   ConnectWhatsAppBody,
+  PhoneNumberSelectionInput,
   CreateContactBody,
   CreateTemplateBody,
   DispatchTemplateBody,
@@ -1045,6 +1046,39 @@ async function storeOutboundTemplateMessage(
 
 router.get("/connection", (req, res) => {
   res.json(GetConnectionResponse.parse(connectionStatus(req)));
+});
+
+router.patch("/connection/phone-number", async (req, res): Promise<void> => {
+  try {
+    const input = PhoneNumberSelectionInput.parse(req.body);
+    if (!activeConnection) {
+      res.status(400).json({ error: "Conecte a API Oficial antes de selecionar um número." });
+      return;
+    }
+    if (!activeConnection.phoneNumbers.some((phone) => phone.id === input.phoneNumberId)) {
+      res.status(400).json({ error: "O número selecionado não está vinculado à conta conectada." });
+      return;
+    }
+
+    activeConnection = {
+      ...activeConnection,
+      selectedPhoneNumberId: input.phoneNumberId,
+    };
+    await db
+      .update(appSettings)
+      .set({
+        whatsappSelectedPhoneNumberId: input.phoneNumberId,
+        updatedAt: new Date(),
+      })
+      .where(eq(appSettings.id, 1));
+
+    res.json(GetConnectionResponse.parse(connectionStatus(req)));
+  } catch (error) {
+    const status = error instanceof MetaApiError ? error.status : 400;
+    const message = error instanceof Error ? error.message : "Não foi possível selecionar o número.";
+    logger.warn({ status, message }, "WhatsApp phone number selection failed");
+    res.status(status).json({ error: message });
+  }
 });
 
 router.post("/connection", async (req, res) => {

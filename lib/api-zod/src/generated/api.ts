@@ -80,6 +80,35 @@ export const DisconnectWhatsAppResponse = zod.object({
 
 
 /**
+ * @summary Select the active WhatsApp phone number
+ */
+
+
+
+export const SelectPhoneNumberBody = zod.object({
+  "phoneNumberId": zod.string().min(1)
+})
+
+export const SelectPhoneNumberResponse = zod.object({
+  "connected": zod.boolean(),
+  "businessAccountId": zod.string().nullable(),
+  "phoneNumbers": zod.array(zod.object({
+  "id": zod.string(),
+  "displayPhoneNumber": zod.string(),
+  "verifiedName": zod.string(),
+  "qualityRating": zod.string(),
+  "profilePictureUrl": zod.string().nullable(),
+  "obaStatus": zod.string().describe('Current Official Business Account status returned by Meta'),
+  "obaStatusMessage": zod.string().nullable().describe('Human-readable Official Business Account status message')
+})),
+  "selectedPhoneNumberId": zod.string().nullable(),
+  "webhookUrl": zod.string(),
+  "webhookVerifyTokenConfigured": zod.boolean(),
+  "webhookVerifyToken": zod.string().nullable()
+})
+
+
+/**
  * @summary List conversations received through the webhook
  */
 export const ListConversationsResponseItem = zod.object({

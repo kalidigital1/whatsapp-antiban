@@ -30,6 +30,7 @@ import type {
   HealthStatus,
   MediaInput,
   MessageInput,
+  PhoneNumberSelectionInput,
   StartConversationInput,
   StartConversationResult,
   SuccessResponse,
@@ -385,6 +386,94 @@ export const useDisconnectWhatsApp = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDisconnectWhatsAppMutationOptions(options));
+    }
+
+export const getSelectPhoneNumberUrl = () => {
+
+
+
+
+  return `/api/connection/phone-number`
+}
+
+/**
+ * @summary Select the active WhatsApp phone number
+ */
+export const selectPhoneNumber = async (phoneNumberSelectionInput: PhoneNumberSelectionInput, options?: Parameters<typeof customFetch>[1]): Promise<ConnectionStatus> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ConnectionStatus>(getSelectPhoneNumberUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(phoneNumberSelectionInput)
+  }
+);}
+
+
+
+
+
+export const getSelectPhoneNumberMutationKey = () => ['selectPhoneNumber'] as const;
+
+export const getSelectPhoneNumberMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof selectPhoneNumber>>, TError,SelectPhoneNumberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof selectPhoneNumber>>, TError,SelectPhoneNumberMutationVariables, TContext> => {
+
+const mutationKey = getSelectPhoneNumberMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof selectPhoneNumber>>, SelectPhoneNumberMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  selectPhoneNumber(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SelectPhoneNumberMutationResult = NonNullable<Awaited<ReturnType<typeof selectPhoneNumber>>>
+    export type SelectPhoneNumberMutationBody = BodyType<PhoneNumberSelectionInput>
+    export type SelectPhoneNumberMutationError = ErrorType<ErrorResponse>
+    export type SelectPhoneNumberMutationVariables = {data: BodyType<PhoneNumberSelectionInput>}
+
+    /**
+ * @summary Select the active WhatsApp phone number
+ */
+export const useSelectPhoneNumber = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof selectPhoneNumber>>, TError,SelectPhoneNumberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof selectPhoneNumber>>,
+        TError,
+        SelectPhoneNumberMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSelectPhoneNumberMutationOptions(options));
     }
 
 export const getListConversationsUrl = () => {
