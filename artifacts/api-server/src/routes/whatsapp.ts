@@ -3,7 +3,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import multer from "multer";
 import {
   ConnectWhatsAppBody,
-  PhoneNumberSelectionInput,
+  SelectPhoneNumberBody,
   CreateContactBody,
   CreateTemplateBody,
   DispatchTemplateBody,
@@ -43,7 +43,7 @@ import {
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
-const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v23.0";
+const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v25.0";
 const metaRequestTimeoutMs = 15_000;
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
@@ -323,7 +323,7 @@ async function loadPhoneNumbers(
           status_message?: string;
           official_business_account?: Record<string, unknown>;
         }>(
-          `${encodeURIComponent(phone.id)}/official_business_account?fields=oba_status,status_message`,
+          `${encodeURIComponent(phone.id)}?fields=official_business_account`,
           accessToken,
         );
         const obaData = asRecord(oba.official_business_account) ?? oba;
@@ -1050,7 +1050,7 @@ router.get("/connection", (req, res) => {
 
 router.patch("/connection/phone-number", async (req, res): Promise<void> => {
   try {
-    const input = PhoneNumberSelectionInput.parse(req.body);
+    const input = SelectPhoneNumberBody.parse(req.body);
     if (!activeConnection) {
       res.status(400).json({ error: "Conecte a API Oficial antes de selecionar um número." });
       return;

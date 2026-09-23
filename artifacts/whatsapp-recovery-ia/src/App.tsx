@@ -54,6 +54,7 @@ import {
   useListConversations,
   useListTemplates,
   useListTemplateDispatches,
+  useSelectPhoneNumber,
   useSendConversationMessage,
   useSendConversationMedia,
   useStartConversation,
@@ -816,6 +817,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [copiedVerifyToken, setCopiedVerifyToken] = useState(false);
   const connect = useConnectWhatsApp();
   const disconnect = useDisconnectWhatsApp();
+  const selectPhoneNumber = useSelectPhoneNumber();
 
   useEffect(() => {
     if (connection?.businessAccountId) setBusinessAccountId(connection.businessAccountId);
@@ -853,6 +855,16 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const refreshConnection = () => {
     void connectionQuery.refetch();
+  };
+  const changePhoneNumber = (phoneNumberId: string) => {
+    if (!phoneNumberId || phoneNumberId === connection?.selectedPhoneNumberId || selectPhoneNumber.isPending) return;
+    selectPhoneNumber.mutate(
+      { data: { phoneNumberId } },
+      {
+        onSuccess: () => void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() }),
+        onError: (error) => setFormError(errorText(error)),
+      },
+    );
   };
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
@@ -904,6 +916,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
               </div>
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
                 <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium"><Smartphone size={16} className="text-[#65cb87]" /> Número conectado</div><span className="text-[11px] text-[#8c9993]">{connection.phoneNumbers.length} disponível(is)</span></div>
+                {connection.phoneNumbers.length > 1 && <div className="mb-4 field"><label className="field-label" htmlFor="active-phone-number">Instância / número usado nos envios</label><select id="active-phone-number" className="field-input" value={connection.selectedPhoneNumberId ?? ''} onChange={(event) => changePhoneNumber(event.target.value)} disabled={selectPhoneNumber.isPending} data-testid="select-active-phone-number"><option value="" disabled>Selecione um número</option>{connection.phoneNumbers.map((phone) => <option key={phone.id} value={phone.id}>{phone.verifiedName} · {phone.displayPhoneNumber}</option>)}</select><p className="field-help">{selectPhoneNumber.isPending ? 'Salvando número ativo...' : 'O número selecionado será usado para novas mensagens, templates e mídias.'}</p></div>}
                 {connection.phoneNumbers.length > 0 ? <div className="divide-y divide-[#303633]">{connection.phoneNumbers.map((phone) => <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0" key={phone.id}><div className="flex min-w-0 items-center gap-3"><div className="profile-photo !m-0 !h-9 !w-9 shrink-0 text-[10px]" style={phone.profilePictureUrl ? { backgroundImage: `url(${phone.profilePictureUrl})` } : undefined}>{phone.profilePictureUrl ? '' : initials(phone.verifiedName || 'WA')}</div><div className="min-w-0"><p className="flex items-center gap-1.5 truncate text-[13px] font-medium">{phone.verifiedName || 'Número comercial'} {isOBAApproved(phone.obaStatus) && <img className="verified-badge" src={verifiedBadgePath} alt="Conta oficial do WhatsApp" />}</p><p className="mt-1 truncate text-[11px] text-[#8f9b95]">{phone.displayPhoneNumber} · qualidade {phone.qualityRating}</p><p className={`mt-1 text-[10px] ${isOBAApproved(phone.obaStatus) ? 'text-[#8ed8a5]' : phone.obaStatus === 'REJECTED' ? 'text-[#e5a39a]' : 'text-[#9daba3]'}`} data-testid={`oba-status-${phone.id}`}>{obaStatusLabel(phone.obaStatus)}{phone.obaStatusMessage ? ` · ${phone.obaStatusMessage}` : ''}</p></div></div>{phone.id === connection.selectedPhoneNumberId && <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#68d18c]"><Check size={14} /> selecionado</span>}</div>)}</div> : <p className="text-xs text-[#8f9b95]">Nenhum número retornado pela conta.</p>}
               </div>
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
