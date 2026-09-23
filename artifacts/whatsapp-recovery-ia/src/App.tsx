@@ -235,6 +235,23 @@ function formatDay(value?: string) {
   return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(date);
 }
 
+function obaStatusLabel(status?: string) {
+  switch (status?.toUpperCase()) {
+    case 'APPROVED': return 'OBA aprovado';
+    case 'PENDING': return 'Solicitação pendente';
+    case 'UNDER_REVIEW': return 'Em análise';
+    case 'REJECTED': return 'Solicitação recusada';
+    case 'EXPIRED': return 'Solicitação expirada';
+    case 'CANCELLED': return 'Solicitação cancelada';
+    case 'NOT_STARTED': return 'Não solicitado';
+    default: return 'Status indisponível';
+  }
+}
+
+function isOBAApproved(status?: string) {
+  return status?.toUpperCase() === 'APPROVED';
+}
+
 function StatusIcon({ status }: { status: string }) {
   if (status === 'read') return <CheckCheck className="message-status-icon status-read" size={14} strokeWidth={2.4} aria-label="Lida" />;
   if (status === 'delivered') return <CheckCheck className="message-status-icon status-delivered" size={14} strokeWidth={2.4} aria-label="Entregue" />;
@@ -299,7 +316,7 @@ function ConnectedProfile({ connection, onSettings }: { connection?: ConnectionS
       <div className="profile-details">
         <strong data-testid="text-connected-verified-name">
           {name}
-          {connection?.connected && <img className="verified-badge" src={verifiedBadgePath} alt="Meta Verified" />}
+          {isOBAApproved(selectedPhone?.obaStatus) && <img className="verified-badge" src={verifiedBadgePath} alt="Conta oficial do WhatsApp" data-testid="badge-oba-approved" />}
         </strong>
         <p data-testid="text-connected-phone">{number}</p>
       </div>
@@ -834,6 +851,9 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     setCopiedVerifyToken(true);
     window.setTimeout(() => setCopiedVerifyToken(false), 1800);
   };
+  const refreshConnection = () => {
+    void connectionQuery.refetch();
+  };
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     window.location.reload();
@@ -864,9 +884,27 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           )}
           {isConnected && connection && (
             <div className="space-y-4">
+              <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4" data-testid="oba-status-panel">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2">
+                    <ShieldCheck size={16} className="mt-0.5 text-[#65cb87]" />
+                    <div>
+                      <p className="text-sm font-medium">Conta oficial do WhatsApp (OBA)</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-[#8f9b95]">O selo azul só aparece quando a Meta retorna o status <strong className="text-[#c9d7ce]">APPROVED</strong>.</p>
+                    </div>
+                  </div>
+                  <button type="button" className="btn-ghost shrink-0 !px-2.5 !py-1.5 text-[11px]" onClick={refreshConnection} disabled={connectionQuery.isFetching} data-testid="button-refresh-oba-status">
+                    {connectionQuery.isFetching ? <Loader2 size={13} className="animate-spin" /> : <Wifi size={13} />}
+                    Atualizar
+                  </button>
+                </div>
+                <a className="mt-3 inline-flex text-[11px] font-medium text-[#8ed8a5] underline-offset-2 hover:underline" href="https://business.facebook.com/latest/whatsapp_manager/" target="_blank" rel="noreferrer" data-testid="link-whatsapp-manager-oba">
+                  Abrir WhatsApp Manager para solicitar o OBA
+                </a>
+              </div>
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
                 <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium"><Smartphone size={16} className="text-[#65cb87]" /> Número conectado</div><span className="text-[11px] text-[#8c9993]">{connection.phoneNumbers.length} disponível(is)</span></div>
-                {connection.phoneNumbers.length > 0 ? <div className="divide-y divide-[#303633]">{connection.phoneNumbers.map((phone) => <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0" key={phone.id}><div className="flex min-w-0 items-center gap-3"><div className="profile-photo !m-0 !h-9 !w-9 shrink-0 text-[10px]" style={phone.profilePictureUrl ? { backgroundImage: `url(${phone.profilePictureUrl})` } : undefined}>{phone.profilePictureUrl ? '' : initials(phone.verifiedName || 'WA')}</div><div className="min-w-0"><p className="truncate text-[13px] font-medium">{phone.verifiedName || 'Número comercial'}</p><p className="mt-1 truncate text-[11px] text-[#8f9b95]">{phone.displayPhoneNumber} · qualidade {phone.qualityRating}</p></div></div>{phone.id === connection.selectedPhoneNumberId && <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#68d18c]"><Check size={14} /> selecionado</span>}</div>)}</div> : <p className="text-xs text-[#8f9b95]">Nenhum número retornado pela conta.</p>}
+                {connection.phoneNumbers.length > 0 ? <div className="divide-y divide-[#303633]">{connection.phoneNumbers.map((phone) => <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0" key={phone.id}><div className="flex min-w-0 items-center gap-3"><div className="profile-photo !m-0 !h-9 !w-9 shrink-0 text-[10px]" style={phone.profilePictureUrl ? { backgroundImage: `url(${phone.profilePictureUrl})` } : undefined}>{phone.profilePictureUrl ? '' : initials(phone.verifiedName || 'WA')}</div><div className="min-w-0"><p className="flex items-center gap-1.5 truncate text-[13px] font-medium">{phone.verifiedName || 'Número comercial'} {isOBAApproved(phone.obaStatus) && <img className="verified-badge" src={verifiedBadgePath} alt="Conta oficial do WhatsApp" />}</p><p className="mt-1 truncate text-[11px] text-[#8f9b95]">{phone.displayPhoneNumber} · qualidade {phone.qualityRating}</p><p className={`mt-1 text-[10px] ${isOBAApproved(phone.obaStatus) ? 'text-[#8ed8a5]' : phone.obaStatus === 'REJECTED' ? 'text-[#e5a39a]' : 'text-[#9daba3]'}`} data-testid={`oba-status-${phone.id}`}>{obaStatusLabel(phone.obaStatus)}{phone.obaStatusMessage ? ` · ${phone.obaStatusMessage}` : ''}</p></div></div>{phone.id === connection.selectedPhoneNumberId && <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#68d18c]"><Check size={14} /> selecionado</span>}</div>)}</div> : <p className="text-xs text-[#8f9b95]">Nenhum número retornado pela conta.</p>}
               </div>
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-medium"><ShieldCheck size={16} className="text-[#65cb87]" /> Callback do webhook</div>

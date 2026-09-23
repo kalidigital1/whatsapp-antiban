@@ -3,3 +3,4 @@
 - [Conversation list caching](conversation-list-cache.md) — keep WhatsApp conversation API responses no-store because the generated client treats 304 responses without a body as null.
 - [New WhatsApp conversations](new-whatsapp-conversations.md) — offer normal text first, while explaining that Meta may require an approved template outside the customer-service window.
 - [WhatsApp phone matching](whatsapp-phone-matching.md) — match local Brazilian numbers with their DDI form so inbound replies stay in the original conversation.
+- [WhatsApp OBA status](whatsapp-oba-status.md) — show the blue badge only when Meta reports the phone number as APPROVED.

@@ -28,7 +28,9 @@ export const GetConnectionResponse = zod.object({
   "displayPhoneNumber": zod.string(),
   "verifiedName": zod.string(),
   "qualityRating": zod.string(),
-  "profilePictureUrl": zod.string().nullable()
+  "profilePictureUrl": zod.string().nullable(),
+  "obaStatus": zod.string().describe('Current Official Business Account status returned by Meta'),
+  "obaStatusMessage": zod.string().nullable().describe('Human-readable Official Business Account status message')
 })),
   "selectedPhoneNumberId": zod.string().nullable(),
   "webhookUrl": zod.string(),
@@ -58,7 +60,9 @@ export const ConnectWhatsAppResponse = zod.object({
   "displayPhoneNumber": zod.string(),
   "verifiedName": zod.string(),
   "qualityRating": zod.string(),
-  "profilePictureUrl": zod.string().nullable()
+  "profilePictureUrl": zod.string().nullable(),
+  "obaStatus": zod.string().describe('Current Official Business Account status returned by Meta'),
+  "obaStatusMessage": zod.string().nullable().describe('Human-readable Official Business Account status message')
 })),
   "selectedPhoneNumberId": zod.string().nullable(),
   "webhookUrl": zod.string(),

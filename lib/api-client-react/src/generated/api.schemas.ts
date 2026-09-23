@@ -24,6 +24,13 @@ export interface PhoneNumber {
   qualityRating: string;
   /** @nullable */
   profilePictureUrl: string | null;
+  /** Current Official Business Account status returned by Meta */
+  obaStatus: string;
+  /**
+     * Human-readable Official Business Account status message
+     * @nullable
+     */
+  obaStatusMessage: string | null;
 }
 
 export interface ConnectionInput {

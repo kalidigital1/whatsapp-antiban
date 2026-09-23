@@ -472,7 +472,13 @@ components:
           type: string
         profilePictureUrl:
           type: ["string", "null"]
-      required: [id, displayPhoneNumber, verifiedName, qualityRating, profilePictureUrl]
+        obaStatus:
+          type: string
+          description: Current Official Business Account status returned by Meta
+        obaStatusMessage:
+          type: ["string", "null"]
+          description: Human-readable Official Business Account status message
+      required: [id, displayPhoneNumber, verifiedName, qualityRating, profilePictureUrl, obaStatus, obaStatusMessage]
     ConnectionInput:
       type: object
       properties:

@@ -55,6 +55,8 @@ type PhoneNumber = {
   verifiedName: string;
   qualityRating: string;
   profilePictureUrl: string | null;
+  obaStatus: string;
+  obaStatusMessage: string | null;
 };
 
 type ActiveConnection = {
@@ -305,10 +307,34 @@ async function loadPhoneNumbers(
     verifiedName: stringValue(phone.verified_name) || "WhatsApp Business",
     qualityRating: stringValue(phone.quality_rating) || "UNKNOWN",
     profilePictureUrl: null as string | null,
+    obaStatus: "UNKNOWN",
+    obaStatusMessage: null as string | null,
   }));
 
   return Promise.all(
     numbers.map(async (phone) => {
+      let obaStatus = "UNKNOWN";
+      let obaStatusMessage: string | null = null;
+      try {
+        const oba = await graphRequest<{
+          id?: string;
+          oba_status?: string;
+          status_message?: string;
+          official_business_account?: Record<string, unknown>;
+        }>(
+          `${encodeURIComponent(phone.id)}/official_business_account?fields=oba_status,status_message`,
+          accessToken,
+        );
+        const obaData = asRecord(oba.official_business_account) ?? oba;
+        obaStatus = stringValue(obaData.oba_status) || "UNKNOWN";
+        obaStatusMessage = stringValue(obaData.status_message) || null;
+      } catch (error) {
+        logger.info(
+          { phoneNumberId: phone.id, message: error instanceof Error ? error.message : "status unavailable" },
+          "WhatsApp OBA status unavailable",
+        );
+      }
+
       try {
         const profile = await graphRequest<{
           data?: Array<Record<string, unknown>> | Record<string, unknown>;
@@ -322,13 +348,15 @@ async function loadPhoneNumbers(
           : asRecord(profile.data);
         return {
           ...phone,
+          obaStatus,
+          obaStatusMessage,
           profilePictureUrl:
             stringValue(profileData.profile_picture_url) ||
             stringValue(profile.profile_picture_url) ||
             null,
         };
       } catch {
-        return phone;
+        return { ...phone, obaStatus, obaStatusMessage };
       }
     }),
   );
