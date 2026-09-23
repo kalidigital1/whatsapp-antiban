@@ -329,6 +329,10 @@ async function loadPhoneNumbers(
         const obaData = asRecord(oba.official_business_account) ?? oba;
         obaStatus = stringValue(obaData.oba_status) || "UNKNOWN";
         obaStatusMessage = stringValue(obaData.status_message) || null;
+        logger.info(
+          { phoneNumberId: phone.id, obaStatus },
+          "WhatsApp OBA status checked",
+        );
       } catch (error) {
         logger.info(
           { phoneNumberId: phone.id, message: error instanceof Error ? error.message : "status unavailable" },
