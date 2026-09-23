@@ -347,8 +347,7 @@ function recipientPhoneNumber(phoneNumber: string, connection: ActiveConnection)
   const senderIsBrazilian = senderDigits.startsWith("55");
   const looksLikeBrazilianLocalNumber =
     senderIsBrazilian &&
-    (normalized.length === 10 || normalized.length === 11) &&
-    !normalized.startsWith("1");
+    (normalized.length === 10 || normalized.length === 11);
 
   return looksLikeBrazilianLocalNumber ? `55${normalized}` : normalized;
 }
@@ -1533,6 +1532,7 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
       res.status(400).json({ error: "Conecte a API Oficial antes de disparar templates." });
       return;
     }
+    const connection = activeConnection;
 
     const [template] = await db
       .select()
@@ -1544,7 +1544,14 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
       return;
     }
 
-    const recipients = [...new Set(input.recipients.map(normalizePhone).filter((phone) => phone.length >= 8))];
+    const recipients = [
+      ...new Set(
+        input.recipients
+          .map(normalizePhone)
+          .map((phone) => recipientPhoneNumber(phone, connection))
+          .filter((phone) => phone.length >= 8),
+      ),
+    ];
     if (recipients.length === 0) {
       res.status(400).json({ error: "Informe pelo menos um telefone válido com DDI." });
       return;
@@ -1587,12 +1594,12 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
       try {
         if (index > 0) await wait(intervalMs);
         const whatsappMessageId = await sendTemplateMessage(
-          activeConnection.selectedPhoneNumberId,
+          connection.selectedPhoneNumberId,
           phoneNumber,
           template,
           input.variables ?? [],
           componentParameters,
-          activeConnection.accessToken,
+          connection.accessToken,
         );
         const contact = await getOrCreateContact(phoneNumber);
         const conversation = await getOrCreateConversation(
@@ -1622,6 +1629,15 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
             .where(eq(whatsappTemplateDispatchRecipients.id, recipient.id));
         }
       } catch (error) {
+        logger.warn(
+          {
+            err: error,
+            dispatchId: dispatch.id,
+            templateId: template.id,
+            recipientSuffix: phoneNumber.slice(-4),
+          },
+          "WhatsApp template recipient failed",
+        );
         if (recipient) {
           await db
             .update(whatsappTemplateDispatchRecipients)
@@ -1639,6 +1655,13 @@ router.post("/templates/:templateId/dispatch", async (req, res) => {
     await refreshDispatchSummary(dispatch.id);
     const result = await dispatchResultResponse(dispatch.id);
     if (!result) throw new MetaApiError("Não foi possível carregar o resultado do envio.");
+    if (result.recipientsCount > 0 && result.failedCount === result.recipientsCount) {
+      throw new MetaApiError(
+        "A Meta recusou todos os destinatários. Verifique os números, o template aprovado e os parâmetros informados.",
+        502,
+        "META_TEMPLATE_ALL_FAILED",
+      );
+    }
     res.status(201).json(DispatchTemplateResponse.parse(result));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;

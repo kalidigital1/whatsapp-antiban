@@ -7,4 +7,4 @@ Brazilian contacts may be stored without `55` when a user starts a conversation,
 
 **Why:** Without this compatibility lookup, a customer's reply is treated as a different contact and creates a second conversation, causing the operator's current chat to appear to change.
 
-**How to apply:** When resolving a contact for outbound starts or inbound webhooks, compare the normalized number, its Brazilian DDI form, and the corresponding local form before creating a contact or conversation.
+**How to apply:** For outbound starts and template batches, canonicalize Brazilian local numbers to the DDI form before calling Meta; for contacts and inbound webhooks, compare both forms before creating a contact or conversation.
