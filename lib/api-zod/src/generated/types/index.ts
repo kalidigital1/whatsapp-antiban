@@ -18,7 +18,6 @@ export * from './healthStatus';
 export * from './mediaInput';
 export * from './messageInput';
 export * from './phoneNumber';
-export * from './phoneNumberSelectionInput';
 export * from './startConversationInput';
 export * from './startConversationResult';
 export * from './successResponse';

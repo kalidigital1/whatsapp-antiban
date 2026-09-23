@@ -3,7 +3,6 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import multer from "multer";
 import {
   ConnectWhatsAppBody,
-  SelectPhoneNumberBody,
   CreateContactBody,
   CreateTemplateBody,
   DispatchTemplateBody,
@@ -43,7 +42,7 @@ import {
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
-const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v25.0";
+const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v23.0";
 const metaRequestTimeoutMs = 15_000;
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
@@ -56,8 +55,6 @@ type PhoneNumber = {
   verifiedName: string;
   qualityRating: string;
   profilePictureUrl: string | null;
-  obaStatus: string;
-  obaStatusMessage: string | null;
 };
 
 type ActiveConnection = {
@@ -308,38 +305,10 @@ async function loadPhoneNumbers(
     verifiedName: stringValue(phone.verified_name) || "WhatsApp Business",
     qualityRating: stringValue(phone.quality_rating) || "UNKNOWN",
     profilePictureUrl: null as string | null,
-    obaStatus: "UNKNOWN",
-    obaStatusMessage: null as string | null,
   }));
 
   return Promise.all(
     numbers.map(async (phone) => {
-      let obaStatus = "UNKNOWN";
-      let obaStatusMessage: string | null = null;
-      try {
-        const oba = await graphRequest<{
-          id?: string;
-          oba_status?: string;
-          status_message?: string;
-          official_business_account?: Record<string, unknown>;
-        }>(
-          `${encodeURIComponent(phone.id)}?fields=official_business_account`,
-          accessToken,
-        );
-        const obaData = asRecord(oba.official_business_account) ?? oba;
-        obaStatus = stringValue(obaData.oba_status) || "UNKNOWN";
-        obaStatusMessage = stringValue(obaData.status_message) || null;
-        logger.info(
-          { phoneNumberId: phone.id, obaStatus },
-          "WhatsApp OBA status checked",
-        );
-      } catch (error) {
-        logger.info(
-          { phoneNumberId: phone.id, message: error instanceof Error ? error.message : "status unavailable" },
-          "WhatsApp OBA status unavailable",
-        );
-      }
-
       try {
         const profile = await graphRequest<{
           data?: Array<Record<string, unknown>> | Record<string, unknown>;
@@ -353,15 +322,13 @@ async function loadPhoneNumbers(
           : asRecord(profile.data);
         return {
           ...phone,
-          obaStatus,
-          obaStatusMessage,
           profilePictureUrl:
             stringValue(profileData.profile_picture_url) ||
             stringValue(profile.profile_picture_url) ||
             null,
         };
       } catch {
-        return { ...phone, obaStatus, obaStatusMessage };
+        return phone;
       }
     }),
   );
@@ -1050,39 +1017,6 @@ async function storeOutboundTemplateMessage(
 
 router.get("/connection", (req, res) => {
   res.json(GetConnectionResponse.parse(connectionStatus(req)));
-});
-
-router.patch("/connection/phone-number", async (req, res): Promise<void> => {
-  try {
-    const input = SelectPhoneNumberBody.parse(req.body);
-    if (!activeConnection) {
-      res.status(400).json({ error: "Conecte a API Oficial antes de selecionar um número." });
-      return;
-    }
-    if (!activeConnection.phoneNumbers.some((phone) => phone.id === input.phoneNumberId)) {
-      res.status(400).json({ error: "O número selecionado não está vinculado à conta conectada." });
-      return;
-    }
-
-    activeConnection = {
-      ...activeConnection,
-      selectedPhoneNumberId: input.phoneNumberId,
-    };
-    await db
-      .update(appSettings)
-      .set({
-        whatsappSelectedPhoneNumberId: input.phoneNumberId,
-        updatedAt: new Date(),
-      })
-      .where(eq(appSettings.id, 1));
-
-    res.json(GetConnectionResponse.parse(connectionStatus(req)));
-  } catch (error) {
-    const status = error instanceof MetaApiError ? error.status : 400;
-    const message = error instanceof Error ? error.message : "Não foi possível selecionar o número.";
-    logger.warn({ status, message }, "WhatsApp phone number selection failed");
-    res.status(status).json({ error: message });
-  }
 });
 
 router.post("/connection", async (req, res) => {
