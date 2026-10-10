@@ -463,10 +463,39 @@ async function evolutionRequest<T>(
       headers,
       signal: controller.signal,
     });
-    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const rawBody = await response.text();
+    let body: Record<string, unknown> = {};
+    if (rawBody) {
+      try {
+        const parsed: unknown = JSON.parse(rawBody);
+        body = asRecord(parsed);
+        if (typeof parsed === "string") body.message = parsed;
+      } catch {
+        body.message = rawBody;
+      }
+    }
     if (!response.ok) {
-      const message = stringValue(body.message)
-        || stringValue(body.error)
+      const nestedResponse = asRecord(body.response);
+      const nestedData = asRecord(body.data);
+      const candidates = [
+        nestedResponse.message,
+        nestedData.message,
+        body.message,
+        nestedResponse.error,
+        nestedData.error,
+        body.error,
+      ].flatMap((value) => {
+        if (typeof value === "string") return [value.trim()].filter(Boolean);
+        if (Array.isArray(value)) {
+          return value.flatMap((item) =>
+            typeof item === "string" ? [item.trim()].filter(Boolean) : [],
+          );
+        }
+        return [];
+      });
+      const message =
+        candidates.find((candidate) => !/^(bad request|error)$/i.test(candidate))
+        || candidates[0]
         || `Evolution API respondeu com HTTP ${response.status}.`;
       throw new MetaApiError(message, response.status);
     }
