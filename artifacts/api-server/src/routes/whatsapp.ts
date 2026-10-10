@@ -97,6 +97,10 @@ let activeProvider: "none" | "cloud" | "evolution" = "none";
 let connectionsRestored = false;
 let connectionRestorePromise: Promise<void> | null = null;
 const eventClients = new Set<Response>();
+const evolutionMessageSyncTimestamps = new Map<string, number>();
+const evolutionMessageSyncRequests = new Map<string, Promise<void>>();
+const evolutionMessageSyncErrorLogAt = new Map<string, number>();
+const evolutionMessageSyncLogAt = new Map<string, number>();
 
 router.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
@@ -1775,6 +1779,237 @@ function evolutionRecipient(
   return evolutionPhoneNumber(contactPhone);
 }
 
+async function syncEvolutionRecentMessages(session: EvolutionSession): Promise<void> {
+  const syncKey = session.instanceName;
+  const pending = evolutionMessageSyncRequests.get(syncKey);
+  if (pending) {
+    await pending;
+    return;
+  }
+  const lastSyncAt = evolutionMessageSyncTimestamps.get(syncKey) ?? 0;
+  if (Date.now() - lastSyncAt < 8_000) return;
+
+  const request = (async () => {
+    const response = await evolutionRequest<unknown>(
+      session,
+      `/chat/findMessages/${encodeURIComponent(session.instanceName)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          where: {},
+          take: 100,
+          skip: 0,
+          orderBy: { messageTimestamp: "desc" },
+        }),
+      },
+      8_000,
+    );
+    const result = asRecord(response);
+    const messagePage = asRecord(result.messages);
+    const records = Array.isArray(messagePage.records)
+      ? messagePage.records.map(asRecord)
+      : Array.isArray(result.records)
+        ? result.records.map(asRecord)
+        : [];
+    const changed = new Map<number, {
+      unreadCount: number;
+      unreadDelta: number;
+      lastMessageAt: Date | null;
+    }>();
+    let syncedMessageCount = 0;
+    const markChanged = (
+      targetConversation: typeof conversations.$inferSelect,
+      createdAt: Date,
+      incoming: boolean,
+    ) => {
+      const state = changed.get(targetConversation.id) ?? {
+        unreadCount: targetConversation.unreadCount,
+        unreadDelta: 0,
+        lastMessageAt: targetConversation.lastMessageAt,
+      };
+      if (incoming) state.unreadDelta += 1;
+      if (!state.lastMessageAt || createdAt > state.lastMessageAt) {
+        state.lastMessageAt = createdAt;
+      }
+      changed.set(targetConversation.id, state);
+    };
+
+    for (const item of [...records].reverse()) {
+      const key = asRecord(item.key);
+      const rawId = stringValue(key.id) || stringValue(item.id);
+      const itemRemoteJid = stringValue(key.remoteJid) || stringValue(item.remoteJid);
+      const alternateRemoteJid = stringValue(key.remoteJidAlt);
+      const remoteJid = itemRemoteJid || alternateRemoteJid;
+      if (!rawId || !remoteJid.includes("@")) continue;
+
+      const messageId = `evolution:${session.instanceName}:${rawId}`;
+      const [stored] = await db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(eq(chatMessages.whatsappMessageId, messageId))
+        .limit(1);
+      if (stored) continue;
+
+      const fromMe = key.fromMe === true || item.fromMe === true;
+      const details = evolutionMessageDetails(item);
+      if (details.messageType === "reaction" && fromMe && !details.reactionEmoji) continue;
+      const contactName =
+        stringValue(item.pushName)
+        || stringValue(item.notifyName)
+        || stringValue(item.verifiedName)
+        || undefined;
+      const syncedConversation = await getOrCreateEvolutionConversation(
+        remoteJid,
+        remoteJid.endsWith("@g.us")
+          ? stringValue(item.subject) || stringValue(item.groupName) || undefined
+          : contactName,
+        session,
+      );
+
+      const rawTimestamp = Number(item.messageTimestamp ?? item.timestamp);
+      const createdAt = Number.isFinite(rawTimestamp) && rawTimestamp > 0
+        ? new Date(rawTimestamp * 1000)
+        : new Date();
+      const status = evolutionMessageStatus(item.status, fromMe);
+      if (fromMe) {
+        const pendingRows = await db
+          .select()
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.conversationId, syncedConversation.id),
+              eq(chatMessages.direction, "outbound"),
+              eq(chatMessages.status, "pending"),
+            ),
+          )
+          .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
+          .limit(5);
+        const pendingMessage = pendingRows.find((candidate) => {
+          const ageMs = Math.abs(createdAt.getTime() - candidate.createdAt.getTime());
+          const sameType = candidate.messageType === details.messageType;
+          const sameText = candidate.content === details.content;
+          const isMedia = ["image", "video", "audio", "document", "sticker"].includes(details.messageType);
+          return ageMs < 120_000 && sameType && (sameText || isMedia);
+        });
+        if (pendingMessage) {
+          await db
+            .update(chatMessages)
+            .set({
+              whatsappMessageId: messageId,
+              status,
+              providerPayload: details.providerPayload,
+              mediaMimeType: details.mediaMimeType,
+              mediaFileName: details.mediaFileName,
+              mediaCaption: details.mediaCaption,
+            })
+            .where(eq(chatMessages.id, pendingMessage.id));
+          markChanged(syncedConversation, createdAt, false);
+          syncedMessageCount += 1;
+          continue;
+        }
+      }
+      const targetRawId = details.messageType === "reaction"
+        ? details.reactionTargetId
+        : details.replyTargetId;
+      let replyToMessageId: number | null = null;
+      if (targetRawId) {
+        const [target] = await db
+          .select({ id: chatMessages.id })
+          .from(chatMessages)
+          .where(
+            and(
+              eq(chatMessages.conversationId, syncedConversation.id),
+              eq(
+                chatMessages.whatsappMessageId,
+                `evolution:${session.instanceName}:${targetRawId}`,
+              ),
+            ),
+          )
+          .limit(1);
+        replyToMessageId = target?.id ?? null;
+      }
+
+      const [inserted] = await db
+        .insert(chatMessages)
+        .values({
+          conversationId: syncedConversation.id,
+          whatsappMessageId: messageId,
+          direction: fromMe ? "outbound" : "inbound",
+          messageType: details.messageType,
+          content: details.content,
+          status,
+          providerPayload: details.providerPayload,
+          mediaMimeType: details.mediaMimeType,
+          mediaFileName: details.mediaFileName,
+          mediaCaption: details.mediaCaption,
+          replyToMessageId,
+          reactionEmoji: details.messageType === "reaction" ? details.reactionEmoji : null,
+          createdAt,
+        })
+        .onConflictDoNothing({ target: chatMessages.whatsappMessageId })
+        .returning({ id: chatMessages.id });
+      if (!inserted) continue;
+      markChanged(
+        syncedConversation,
+        createdAt,
+        !fromMe && createdAt.getTime() >= Date.now() - 5 * 60_000,
+      );
+      syncedMessageCount += 1;
+    }
+
+    for (const [conversationId, state] of changed) {
+      await db
+        .update(conversations)
+        .set({
+          ...(state.unreadDelta > 0
+            ? { unreadCount: state.unreadCount + state.unreadDelta }
+            : {}),
+          ...(state.lastMessageAt
+            ? { lastMessageAt: state.lastMessageAt, updatedAt: state.lastMessageAt }
+            : {}),
+        })
+        .where(eq(conversations.id, conversationId));
+      publishConversationEvent({ conversationId, reason: "message" });
+    }
+    const lastLogAt = evolutionMessageSyncLogAt.get(session.instanceName) ?? 0;
+    if (changed.size > 0 || Date.now() - lastLogAt >= 60_000) {
+      evolutionMessageSyncLogAt.set(session.instanceName, Date.now());
+      logger.info(
+        {
+          fetchedRecords: records.length,
+          syncedMessages: syncedMessageCount,
+        },
+        "QR Code chat messages synchronized",
+      );
+    }
+    evolutionMessageSyncTimestamps.set(syncKey, Date.now());
+  })();
+  evolutionMessageSyncRequests.set(syncKey, request);
+  try {
+    await request;
+  } catch (error) {
+    evolutionMessageSyncTimestamps.set(syncKey, Date.now());
+    throw error;
+  } finally {
+    if (evolutionMessageSyncRequests.get(syncKey) === request) {
+      evolutionMessageSyncRequests.delete(syncKey);
+    }
+  }
+}
+
+function scheduleEvolutionMessageSync(session: EvolutionSession): void {
+  void syncEvolutionRecentMessages(session).catch((error) => {
+    const lastWarningAt = evolutionMessageSyncErrorLogAt.get(session.instanceName) ?? 0;
+    if (Date.now() - lastWarningAt >= 30_000) {
+      evolutionMessageSyncErrorLogAt.set(session.instanceName, Date.now());
+      logger.warn(
+        { err: error, instanceName: session.instanceName },
+        "Could not sync messages from the QR Code connection",
+      );
+    }
+  });
+}
+
 async function storeOutboundMessage(
   conversation: typeof conversations.$inferSelect,
   content: string,
@@ -2257,6 +2492,9 @@ router.get("/events", (req, res) => {
 
 router.get("/conversations", async (_req, res) => {
   try {
+    if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
+      scheduleEvolutionMessageSync(activeEvolutionSession);
+    }
     const rows = await db
       .select({ conversation: conversations, contact: contacts })
       .from(conversations)
@@ -2490,6 +2728,10 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
     if (!conversation) {
       res.status(404).json({ error: "Conversa não encontrada." });
       return;
+    }
+
+    if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
+      scheduleEvolutionMessageSync(activeEvolutionSession);
     }
 
     const messages = await db
