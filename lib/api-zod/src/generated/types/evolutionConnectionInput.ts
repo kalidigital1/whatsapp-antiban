@@ -7,10 +7,8 @@
  */
 
 export interface EvolutionConnectionInput {
-  /** @minLength 1 */
-  serverUrl: string;
-  /** @minLength 1 */
-  apiKey: string;
+  serverUrl?: string;
+  apiKey?: string;
   /**
      * @minLength 2
      * @maxLength 64

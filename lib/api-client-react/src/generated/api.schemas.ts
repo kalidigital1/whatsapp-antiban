@@ -48,10 +48,8 @@ export interface ConnectionStatus {
 }
 
 export interface EvolutionConnectionInput {
-  /** @minLength 1 */
-  serverUrl: string;
-  /** @minLength 1 */
-  apiKey: string;
+  serverUrl?: string;
+  apiKey?: string;
   /**
      * @minLength 2
      * @maxLength 64
@@ -73,6 +71,8 @@ export interface EvolutionConnectionStatus {
   profileName: string | null;
   /** @nullable */
   qrCode: string | null;
+  defaultServerUrlConfigured: boolean;
+  defaultApiKeyConfigured: boolean;
 }
 
 export interface Contact {

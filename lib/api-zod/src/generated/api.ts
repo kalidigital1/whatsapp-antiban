@@ -86,23 +86,23 @@ export const GetEvolutionConnectionResponse = zod.object({
   "instanceName": zod.string().nullable(),
   "phoneNumber": zod.string().nullable(),
   "profileName": zod.string().nullable(),
-  "qrCode": zod.string().nullable()
+  "qrCode": zod.string().nullable(),
+  "defaultServerUrlConfigured": zod.boolean(),
+  "defaultApiKeyConfigured": zod.boolean()
 })
 
 
 /**
  * @summary Create or connect an Evolution API WhatsApp instance
  */
-
-
 export const connectEvolutionWhatsAppBodyInstanceNameMin = 2;
 export const connectEvolutionWhatsAppBodyInstanceNameMax = 64;
 
 
 
 export const ConnectEvolutionWhatsAppBody = zod.object({
-  "serverUrl": zod.string().url().min(1),
-  "apiKey": zod.string().min(1),
+  "serverUrl": zod.string().url().optional(),
+  "apiKey": zod.string().optional(),
   "instanceName": zod.string().min(connectEvolutionWhatsAppBodyInstanceNameMin).max(connectEvolutionWhatsAppBodyInstanceNameMax)
 })
 
@@ -114,7 +114,9 @@ export const ConnectEvolutionWhatsAppResponse = zod.object({
   "instanceName": zod.string().nullable(),
   "phoneNumber": zod.string().nullable(),
   "profileName": zod.string().nullable(),
-  "qrCode": zod.string().nullable()
+  "qrCode": zod.string().nullable(),
+  "defaultServerUrlConfigured": zod.boolean(),
+  "defaultApiKeyConfigured": zod.boolean()
 })
 
 
@@ -137,7 +139,9 @@ export const RefreshEvolutionQrResponse = zod.object({
   "instanceName": zod.string().nullable(),
   "phoneNumber": zod.string().nullable(),
   "profileName": zod.string().nullable(),
-  "qrCode": zod.string().nullable()
+  "qrCode": zod.string().nullable(),
+  "defaultServerUrlConfigured": zod.boolean(),
+  "defaultApiKeyConfigured": zod.boolean()
 })
 
 

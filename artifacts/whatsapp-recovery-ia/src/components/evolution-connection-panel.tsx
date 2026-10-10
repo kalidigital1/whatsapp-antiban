@@ -81,13 +81,23 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
     const cleanServerUrl = serverUrl.trim();
     const cleanApiKey = apiKey.trim();
     const cleanInstanceName = instanceName.trim();
-    if (!cleanServerUrl || !cleanApiKey || cleanInstanceName.length < 2) {
-      setFormError("Informe a URL do servidor, a chave de API e um nome de instância com pelo menos 2 caracteres.");
+    if (
+      (!cleanServerUrl && !connection?.defaultServerUrlConfigured)
+      || (!cleanApiKey && !connection?.defaultApiKeyConfigured)
+      || cleanInstanceName.length < 2
+    ) {
+      setFormError("Informe a URL e a chave ou configure os valores padrão nos Secrets do Replit. O nome da instância deve ter pelo menos 2 caracteres.");
       return;
     }
 
+    const data: { serverUrl?: string; apiKey?: string; instanceName: string } = {
+      instanceName: cleanInstanceName,
+    };
+    if (cleanServerUrl) data.serverUrl = cleanServerUrl;
+    if (cleanApiKey) data.apiKey = cleanApiKey;
+
     connect.mutate(
-      { data: { serverUrl: cleanServerUrl, apiKey: cleanApiKey, instanceName: cleanInstanceName } },
+      { data },
       {
         onSuccess: () => {
           setApiKey("");
@@ -173,18 +183,35 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
               </div>
             </div>
 
+            {(connection?.defaultServerUrlConfigured || connection?.defaultApiKeyConfigured) && (
+              <div className="evolution-defaults-note" role="note">
+                <LockKeyhole size={15} aria-hidden="true" />
+                <span>
+                  {connection.defaultServerUrlConfigured && connection.defaultApiKeyConfigured
+                    ? "URL e chave padrão guardadas nos Secrets do Replit. Os campos abaixo são opcionais."
+                    : connection.defaultServerUrlConfigured
+                      ? "A URL padrão está guardada nos Secrets do Replit. Informe a chave abaixo ou configure-a como Secret."
+                      : "A chave padrão está guardada nos Secrets do Replit. Informe a URL abaixo."}
+                </span>
+              </div>
+            )}
+
+            {!connection?.defaultServerUrlConfigured && (
             <label className="evolution-field" htmlFor="evolution-server-url">
               <span>URL do servidor</span>
               <input id="evolution-server-url" type="url" inputMode="url" autoComplete="url" value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="https://evolution.suaempresa.com" required data-testid="input-evolution-server-url" />
             </label>
-            <label className="evolution-field" htmlFor="evolution-api-key">
+            )}
+            {!connection?.defaultApiKeyConfigured && (
+              <label className="evolution-field" htmlFor="evolution-api-key">
               <span>Chave de API</span>
               <div className="evolution-secret-input">
                 <LockKeyhole size={15} aria-hidden="true" />
                 <input id="evolution-api-key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Cole sua chave de API" required data-testid="input-evolution-api-key" />
               </div>
-              <small>A chave não é salva neste navegador e será removida do campo após conectar.</small>
+              <small>A chave nunca é devolvida ao navegador e o campo é limpo após conectar.</small>
             </label>
+            )}
             <label className="evolution-field" htmlFor="evolution-instance-name">
               <span>Nome da instância</span>
               <input id="evolution-instance-name" type="text" autoComplete="off" minLength={2} maxLength={64} value={instanceName} onChange={(event) => setInstanceName(event.target.value)} placeholder="Ex.: atendimento-loja" required data-testid="input-evolution-instance-name" />

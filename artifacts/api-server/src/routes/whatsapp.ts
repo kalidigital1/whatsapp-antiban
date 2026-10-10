@@ -418,6 +418,8 @@ function evolutionConnectionResponse(session: EvolutionSession | null): Evolutio
     phoneNumber: session?.phoneNumber ?? null,
     profileName: session?.profileName ?? null,
     qrCode: session?.qrCode ?? null,
+    defaultServerUrlConfigured: Boolean(process.env.EVOLUTION_API_URL?.trim()),
+    defaultApiKeyConfigured: Boolean(process.env.EVOLUTION_API_KEY?.trim()),
   });
 }
 
@@ -1413,10 +1415,18 @@ router.post("/evolution/connection", async (req, res) => {
       res.status(500).json({ error: "SESSION_SECRET não está configurado para proteger a conexão Evolution." });
       return;
     }
+    const serverUrl = input.serverUrl?.trim() || process.env.EVOLUTION_API_URL?.trim() || "";
+    const apiKey = input.apiKey?.trim() || process.env.EVOLUTION_API_KEY?.trim() || "";
+    if (!serverUrl || !apiKey) {
+      res.status(400).json({
+        error: "Configure EVOLUTION_API_URL e EVOLUTION_API_KEY nos Secrets do Replit ou preencha os campos desta tela.",
+      });
+      return;
+    }
 
     const session: EvolutionSession = {
-      serverUrl: normalizeEvolutionUrl(input.serverUrl),
-      apiKey: input.apiKey.trim(),
+      serverUrl: normalizeEvolutionUrl(serverUrl),
+      apiKey,
       instanceName,
       connected: false,
       state: "connecting",

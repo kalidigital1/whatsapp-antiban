@@ -295,6 +295,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .is-online .evolution-live-pulse { background:#62c980; box-shadow:0 0 0 3px rgba(98,201,128,.12); }
 .evolution-setup-form, .evolution-qr-section { display:grid; gap:13px; padding-top:20px; }
 .evolution-section-intro { display:flex; align-items:flex-start; gap:10px; margin-bottom:1px; }
+.evolution-defaults-note { display:flex; align-items:flex-start; gap:8px; border:1px solid #354b3b; border-radius:7px; padding:9px 10px; color:#a8cdb1; background:#1b2920; font-size:10px; line-height:1.45; }
+.evolution-defaults-note svg { flex:0 0 auto; margin-top:1px; color:#82c695; }
 .evolution-step { width:25px; height:25px; flex:none; display:grid; place-items:center; border:1px solid #42664c; border-radius:7px; color:#8bdaa0; background:#203227; font-family:var(--app-font-mono); font-size:10px; }
 .evolution-section-intro h3, .evolution-awaiting-card h3 { margin:1px 0 0; color:#edf3ef; font-size:13px; font-weight:600; }
 .evolution-section-intro p { margin:4px 0 0; color:#89978f; font-size:10px; line-height:1.45; }

@@ -576,15 +576,13 @@ components:
         serverUrl:
           type: string
           format: uri
-          minLength: 1
         apiKey:
           type: string
-          minLength: 1
         instanceName:
           type: string
           minLength: 2
           maxLength: 64
-      required: [serverUrl, apiKey, instanceName]
+      required: [instanceName]
     EvolutionConnectionStatus:
       type: object
       properties:
@@ -604,7 +602,11 @@ components:
           type: ["string", "null"]
         qrCode:
           type: ["string", "null"]
-      required: [configured, connected, active, state, instanceName, phoneNumber, profileName, qrCode]
+        defaultServerUrlConfigured:
+          type: boolean
+        defaultApiKeyConfigured:
+          type: boolean
+      required: [configured, connected, active, state, instanceName, phoneNumber, profileName, qrCode, defaultServerUrlConfigured, defaultApiKeyConfigured]
     Contact:
       type: object
       properties:
