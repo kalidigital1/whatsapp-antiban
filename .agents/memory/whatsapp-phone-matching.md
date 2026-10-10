@@ -3,8 +3,8 @@ name: WhatsApp phone matching
 description: Matching local and DDI-form phone numbers across outbound starts and inbound webhooks
 ---
 
-Brazilian contacts may be stored without `55` when a user starts a conversation, while Meta webhook payloads normally include `55`. Contact lookup must consider both representations.
+Brazilian contacts may be stored without `55` when a user starts a conversation, while Meta webhook payloads normally include `55`. New conversations default to Brazil (+55), but users can choose another country; keep explicitly international numbers distinguishable from local Brazilian numbers.
 
-**Why:** Without this compatibility lookup, a customer's reply is treated as a different contact and creates a second conversation, causing the operator's current chat to appear to change.
+**Why:** Without matching local and DDI forms, a customer's reply can create a second conversation. Also, an international number such as a US +1 number can have 11 digits and must not be mistaken for a Brazilian local number.
 
-**How to apply:** For outbound starts and template batches, canonicalize Brazilian local numbers to the DDI form before calling Meta; for contacts and inbound webhooks, compare both forms before creating a contact or conversation.
+**How to apply:** Default the new-conversation country selector to Brazil (+55) and parse its local number into E.164 before sending. Preserve the `+` marker for explicitly international contact numbers so outbound Meta/Evolution sends do not add `55` to them; match stored `+digits` and digits-only forms for inbound replies. Continue canonicalizing Brazilian local numbers to `55` + digits, and preserve group/LID JIDs.

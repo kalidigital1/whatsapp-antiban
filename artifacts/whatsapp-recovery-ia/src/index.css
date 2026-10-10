@@ -632,8 +632,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 /* Dashboard workspace — glass graphite, Belem green and instrument-panel typography. */
 .sidebar-brand-actions { display:flex; min-width:0; align-items:center; gap:9px; }
 .sidebar-brand-actions .brand-logo { width:114px; }
-.sidebar-dashboard-button { display:inline-flex; align-items:center; gap:5px; min-height:30px; border:1px solid #3d5547; border-radius:7px; padding:0 8px; color:#c9e7d1; background:#203128; font-size:10px; font-weight:650; white-space:nowrap; transition:background .16s ease,border-color .16s ease; }
-.sidebar-dashboard-button:hover { background:#2a4032; border-color:#5b8866; }
+.sidebar-dashboard-button { display:inline-flex; align-items:center; min-height:30px; border:0; border-radius:3px; padding:0 2px; color:inherit; background:transparent; font-size:12px; font-weight:500; white-space:nowrap; transition:opacity .16s ease; }
+.sidebar-dashboard-button:hover { background:transparent; opacity:.75; }
+.sidebar-dashboard-button:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
 .dashboard-shell { grid-template-columns:76px minmax(0,1fr); }
 .dashboard-workspace { --dash-bg:#141b18; --dash-panel:rgba(32,42,37,.82); --dash-panel-strong:rgba(37,49,43,.94); --dash-line:rgba(193,218,201,.12); --dash-ink:#e9f0eb; --dash-muted:#96a69c; --dash-soft:#6e8175; --dash-green:#79d392; --dash-field:rgba(8,15,11,.28); position:relative; isolation:isolate; min-width:0; height:100%; overflow:auto; padding:clamp(18px,3vw,38px) clamp(16px,3.4vw,48px) 24px; color:var(--dash-ink); background:radial-gradient(ellipse at 79% 4%,rgba(54,106,71,.2),transparent 36%),radial-gradient(ellipse at 5% 37%,rgba(52,82,67,.12),transparent 33%),linear-gradient(145deg,#151d19,#111714 64%,#17211b); }
 .dashboard-workspace::before { position:fixed; z-index:-1; inset:0; pointer-events:none; content:""; opacity:.12; background-image:radial-gradient(rgba(226,243,230,.46) .55px,transparent .7px); background-size:15px 15px; mask-image:linear-gradient(130deg,#000,transparent 55%); }

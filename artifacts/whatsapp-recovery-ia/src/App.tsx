@@ -81,6 +81,26 @@ import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import metaTermsText from '@assets/Pasted-Estamos-atualizando-nossos-Termos-da-Meta-para-a-Plataf_1789996530090.txt?raw';
 import metaBusinessPartnerBadge from '@assets/SELO_META_1789997227764.png';
+import {
+  getCountries,
+  getCountryCallingCode,
+  parsePhoneNumberFromString,
+  type CountryCode,
+} from 'libphonenumber-js';
+
+const phoneCountryNames = new Intl.DisplayNames(['pt-BR'], { type: 'region' });
+const phoneCountryOptions = getCountries()
+  .map((country) => ({
+    country,
+    name: phoneCountryNames.of(country) ?? country,
+    callingCode: getCountryCallingCode(country),
+  }))
+  .sort((left, right) => {
+    if (left.country === right.country) return 0;
+    if (left.country === 'BR') return -1;
+    if (right.country === 'BR') return 1;
+    return left.name.localeCompare(right.name, 'pt-BR');
+  });
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5 * 60 * 1000, refetchOnWindowFocus: false } },
@@ -365,7 +385,7 @@ function Sidebar({
       <header className="sidebar-header">
         <div className="sidebar-brand-actions">
           <img className="brand-logo" src="/assets/antiban-logo-white.png" alt="Antiban" />
-          <button type="button" className="sidebar-dashboard-button" onClick={onDashboard} data-testid="button-open-dashboard"><LayoutDashboard size={14} /><span>Dashboard</span></button>
+          <button type="button" className="sidebar-dashboard-button" onClick={onDashboard} data-testid="button-open-dashboard"><span>Acessar Central</span></button>
         </div>
         <div className="flex items-center gap-1">
           <button type="button" className="action-btn" onClick={onNewConversation} data-testid="button-new-conversation" aria-label="Nova conversa"><Plus size={21} /></button>
@@ -1033,6 +1053,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
   const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 10000, queryKey: getGetEvolutionConnectionQueryKey() } });
   const evolutionMode = Boolean(evolutionConnectionQuery.data?.active);
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneCountry, setPhoneCountry] = useState<CountryCode>('BR');
   const [sendMode, setSendMode] = useState<'text' | 'template'>('text');
   const [content, setContent] = useState('');
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -1082,10 +1103,12 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError('');
-    if (phoneNumber.trim().length < 8) {
-      setFormError('Informe um telefone válido com DDI.');
+    const parsedPhoneNumber = parsePhoneNumberFromString(phoneNumber.trim(), phoneCountry);
+    if (!parsedPhoneNumber || !parsedPhoneNumber.isPossible()) {
+      setFormError('Informe um telefone válido para o país selecionado.');
       return;
     }
+    const internationalPhoneNumber = parsedPhoneNumber.number;
     if (sendMode === 'text') {
       if (!content.trim()) {
         setFormError('Digite a mensagem inicial.');
@@ -1093,7 +1116,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
       }
       startConversation.mutate({
         data: {
-          phoneNumber: phoneNumber.trim(),
+          phoneNumber: internationalPhoneNumber,
           content: content.trim(),
         },
       }, {
@@ -1123,7 +1146,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
       .map((slot) => parameterValues[slot.key]?.trim() ?? '');
     startConversation.mutate({
       data: {
-        phoneNumber: phoneNumber.trim(),
+        phoneNumber: internationalPhoneNumber,
         templateId: selectedTemplate.id,
         variables,
         componentParameters,
@@ -1138,7 +1161,11 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
       <div className="settings-card rise-in">
         <div className="settings-section flex items-start justify-between"><div><p className="mb-2 text-[11px] font-bold uppercase tracking-[.12em] text-[#68c98a]">Novo contato</p><h2 id="new-conversation-title" className="settings-title">Iniciar conversa</h2><p className="settings-copy">Envie uma mensagem normal ou use um template aprovado.</p></div><button type="button" className="action-btn" onClick={onClose} data-testid="button-close-new-conversation" aria-label="Fechar nova conversa"><X size={20} /></button></div>
         <form className="space-y-4 p-5" onSubmit={submit}>
-          <div className="field"><label className="field-label" htmlFor="new-phone-number">Telefone com DDI</label><input id="new-phone-number" className="field-input" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+55 11 99999-0000" data-testid="input-new-phone-number" /><p className="field-help">Use o mesmo formato cadastrado no WhatsApp.</p></div>
+          <div className="grid grid-cols-[1.15fr_1fr] gap-3">
+            <div className="field"><label className="field-label" htmlFor="new-phone-country">País / DDI</label><select id="new-phone-country" className="field-input" value={phoneCountry} onChange={(event) => setPhoneCountry(event.target.value as CountryCode)} data-testid="select-new-phone-country">{phoneCountryOptions.map((country) => <option key={country.country} value={country.country}>{country.name} (+{country.callingCode})</option>)}</select></div>
+            <div className="field"><label className="field-label" htmlFor="new-phone-number">Telefone</label><input id="new-phone-number" type="tel" inputMode="tel" className="field-input" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder={phoneCountry === 'BR' ? 'DDD e número' : 'Número local'} data-testid="input-new-phone-number" /></div>
+          </div>
+          <p className="field-help -mt-2">O DDI selecionado será aplicado automaticamente. Você também pode colar um número completo com DDI.</p>
           <div className="field"><label className="field-label" htmlFor="new-message-mode">Tipo de mensagem</label><select id="new-message-mode" className="field-input" value={sendMode} onChange={(event) => setSendMode(event.target.value as 'text' | 'template')} data-testid="select-new-message-mode"><option value="text">Mensagem normal</option><option value="template" disabled={evolutionMode || approvedTemplates.length === 0}>{evolutionMode ? 'Template disponível apenas na API Oficial' : `Template aprovado${approvedTemplates.length === 0 ? ' (nenhum disponível)' : ''}`}</option></select>{evolutionMode && <p className="field-help">Templates oficiais exigem conexão ativa com a API Oficial da Meta.</p>}</div>
           {sendMode === 'text' && <div className="field"><label className="field-label" htmlFor="new-message">Mensagem inicial</label><textarea id="new-message" className="field-input min-h-28 resize-y" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Olá, como podemos ajudar?" data-testid="input-new-message" /><p className="field-help">A Meta pode bloquear texto normal quando o contato ainda não iniciou uma conversa ou não há janela de atendimento ativa.</p></div>}
           {templatesQuery.isLoading && <div className="status-note"><Loader2 size={16} className="animate-spin" /> Carregando templates aprovados...</div>}

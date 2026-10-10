@@ -754,6 +754,7 @@ function normalizePhone(value: string): string {
 
 function recipientPhoneNumber(phoneNumber: string, connection: ActiveConnection): string {
   const normalized = normalizePhone(phoneNumber);
+  if (phoneNumber.trim().startsWith("+")) return normalized;
   const selectedPhone = connection.phoneNumbers.find(
     (phone) => phone.id === connection.selectedPhoneNumberId,
   );
@@ -1381,10 +1382,14 @@ function contactDisplayName(contact: typeof contacts.$inferSelect): string {
 
 async function getOrCreateContact(phoneNumber: string, name?: string) {
   const normalizedPhone = normalizePhone(phoneNumber);
+  const explicitlyInternational = phoneNumber.trim().startsWith("+");
+  const storedPhoneNumber = explicitlyInternational ? `+${normalizedPhone}` : normalizedPhone;
   const candidatePhones: string[] = [];
+  if (explicitlyInternational) candidatePhones.push(storedPhoneNumber);
+  candidatePhones.push(normalizedPhone, `+${normalizedPhone}`);
   if (activeConnection || activeEvolutionSession) {
     const countryAwarePhone = activeConnection
-      ? recipientPhoneNumber(normalizedPhone, activeConnection)
+      ? recipientPhoneNumber(phoneNumber, activeConnection)
       : normalizedPhone;
     const brazilPhone = countryAwarePhone.startsWith("55") && countryAwarePhone.length > 12
       ? countryAwarePhone
@@ -1394,10 +1399,9 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
     }
     candidatePhones.push(countryAwarePhone);
   }
-  candidatePhones.push(normalizedPhone);
 
   let existing: typeof contacts.$inferSelect | undefined;
-  for (const candidatePhone of candidatePhones) {
+  for (const candidatePhone of new Set(candidatePhones)) {
     const [candidate] = await db
       .select()
       .from(contacts)
@@ -1416,10 +1420,11 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
       (isGeneratedContactName(existing.name, existing.phoneNumber)
         ? existing.phoneNumber
         : existing.name);
-    if (nextName !== existing.name) {
+    const nextPhoneNumber = explicitlyInternational ? storedPhoneNumber : existing.phoneNumber;
+    if (nextName !== existing.name || nextPhoneNumber !== existing.phoneNumber) {
       const [updated] = await db
         .update(contacts)
-        .set({ name: nextName, updatedAt: new Date() })
+        .set({ name: nextName, phoneNumber: nextPhoneNumber, updatedAt: new Date() })
         .where(eq(contacts.id, existing.id))
         .returning();
       return updated ?? existing;
@@ -1429,7 +1434,7 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
 
   const [created] = await db
     .insert(contacts)
-    .values({ phoneNumber: normalizedPhone, name: name?.trim() || normalizedPhone })
+    .values({ phoneNumber: storedPhoneNumber, name: name?.trim() || storedPhoneNumber })
     .returning();
   return created;
 }
@@ -1644,9 +1649,11 @@ async function storeOutboundMessage(
 }
 
 function evolutionPhoneNumber(phoneNumber: string): string {
-  const isDirectJid = /@(?:s\.whatsapp\.net|c\.us)$/i.test(phoneNumber);
-  if (phoneNumber.includes("@") && !isDirectJid) return phoneNumber;
-  const normalized = normalizePhone(phoneNumber);
+  const trimmedPhoneNumber = phoneNumber.trim();
+  const isDirectJid = /@(?:s\.whatsapp\.net|c\.us)$/i.test(trimmedPhoneNumber);
+  if (trimmedPhoneNumber.startsWith("+")) return normalizePhone(trimmedPhoneNumber);
+  if (trimmedPhoneNumber.includes("@") && !isDirectJid) return trimmedPhoneNumber;
+  const normalized = normalizePhone(trimmedPhoneNumber);
   if (normalized.length === 10 || normalized.length === 11) {
     return `55${normalized}`;
   }
@@ -2411,7 +2418,7 @@ router.post("/conversations/start", async (req, res) => {
       res.status(400).json({ error: "Informe um telefone válido com DDI." });
       return;
     }
-    const contact = await getOrCreateContact(phoneNumber);
+    const contact = await getOrCreateContact(input.phoneNumber);
     const conversation = await getOrCreateConversation(
       contact.id,
       usingEvolution ? "unknown" : activeConnection!.selectedPhoneNumberId,
