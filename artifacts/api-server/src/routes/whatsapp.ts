@@ -451,13 +451,14 @@ function webhookUrl(req: Request): string {
 }
 
 function evolutionWebhookUrl(req: Request, session: EvolutionSession): string {
-  const protocol = req.header("x-forwarded-proto")?.split(",")[0] ?? req.protocol;
+  const protocol = req.header("x-forwarded-proto")?.split(",")[0]?.trim() || req.protocol;
+  const host = req.header("x-forwarded-host")?.split(",")[0]?.trim() || req.get("host") || "localhost";
   const secret = process.env.SESSION_SECRET;
   if (!secret) throw new Error("SESSION_SECRET is required to secure Evolution API webhooks.");
   const token = createHash("sha256")
     .update(`${secret}:evolution-webhook:${session.instanceName}`)
     .digest("hex");
-  return `${protocol}://${req.get("host") ?? "localhost"}/api/evolution/webhook?token=${token}`;
+  return `${protocol}://${host}/api/evolution/webhook?token=${token}`;
 }
 
 function normalizeEvolutionUrl(rawUrl: string): string {
@@ -756,6 +757,10 @@ async function setEvolutionWebhook(session: EvolutionSession, req: Request) {
     },
   );
   session.webhookUrlConfigured = url;
+  req.log.info(
+    { webhookHost: new URL(url).host },
+    "QR webhook endpoint configured",
+  );
 }
 
 async function ensureEvolutionWebhook(session: EvolutionSession, req: Request): Promise<void> {
