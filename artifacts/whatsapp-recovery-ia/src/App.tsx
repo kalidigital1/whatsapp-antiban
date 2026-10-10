@@ -24,6 +24,7 @@ import {
   Search,
   Send,
   Settings,
+  LayoutDashboard,
   ShieldCheck,
   Smartphone,
   Trash2,
@@ -59,6 +60,7 @@ import {
   useListTemplateDispatches,
   useSendConversationMessage,
   useSendConversationMedia,
+  useSendConversationMessageReaction,
   useStartConversation,
   type ChatMessage,
   type Contact,
@@ -71,6 +73,7 @@ import {
   type TemplateInput,
 } from '@workspace/api-client-react';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { DashboardWorkspace } from '@/components/dashboard-workspace';
 import { EvolutionConnectionPanel } from '@/components/evolution-connection-panel';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -79,7 +82,9 @@ import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import metaTermsText from '@assets/Pasted-Estamos-atualizando-nossos-Termos-da-Meta-para-a-Plataf_1789996530090.txt?raw';
 import metaBusinessPartnerBadge from '@assets/SELO_META_1789997227764.png';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 5 * 60 * 1000, refetchOnWindowFocus: false } },
+});
 const verifiedBadgePath = '/assets/SELO_META_VERIFIED_1789757214597.png';
 
 function errorText(error: unknown) {
@@ -262,7 +267,7 @@ function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'la
   );
 }
 
-function NavigationRail({ onSettings, connected, profilePictureUrl, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; activeSection: 'inbox' | 'templates'; onSectionChange: (section: 'inbox' | 'templates') => void }) {
+function NavigationRail({ onSettings, connected, profilePictureUrl, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; activeSection: 'inbox' | 'templates' | 'dashboard'; onSectionChange: (section: 'inbox' | 'templates' | 'dashboard') => void }) {
   return (
     <aside className="wa-rail" aria-label="Navegação principal">
       <div className="rail-brand" aria-label="Meta Business Partner">
@@ -270,6 +275,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
       </div>
       <nav className="rail-nav">
         <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
+        <button type="button" className="rail-btn" data-active={activeSection === 'dashboard'} onClick={() => onSectionChange('dashboard')} aria-label="Dashboard" data-testid="rail-dashboard"><LayoutDashboard size={17} /><span className="rail-btn-label">Dashboard</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Envios" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Envios</span></button>
         <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
       </nav>
@@ -323,6 +329,7 @@ function Sidebar({
   onSettings,
   onNewConversation,
   onTemplates,
+  onDashboard,
   mobileOpen,
   onCloseMobile,
   connectionLabel,
@@ -337,6 +344,7 @@ function Sidebar({
   onSettings: () => void;
   onNewConversation: () => void;
   onTemplates: () => void;
+  onDashboard: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
   connectionLabel: string;
@@ -355,7 +363,10 @@ function Sidebar({
   return (
     <aside className="sidebar-panel" data-open={mobileOpen}>
       <header className="sidebar-header">
-        <img className="brand-logo" src="/assets/antiban-logo-white.png" alt="Antiban" />
+        <div className="sidebar-brand-actions">
+          <img className="brand-logo" src="/assets/antiban-logo-white.png" alt="Antiban" />
+          <button type="button" className="sidebar-dashboard-button" onClick={onDashboard} data-testid="button-open-dashboard"><LayoutDashboard size={14} /><span>Dashboard</span></button>
+        </div>
         <div className="flex items-center gap-1">
           <button type="button" className="action-btn" onClick={onNewConversation} data-testid="button-new-conversation" aria-label="Nova conversa"><Plus size={21} /></button>
           <button type="button" className="action-btn mobile-only" onClick={onTemplates} data-testid="button-open-templates" aria-label="Abrir templates"><FileText size={18} /></button>
@@ -452,8 +463,8 @@ function ChatEmpty({ connected, onSettings, onOpenConversations }: { connected: 
 
 type DisplayChatMessage = ChatMessage & {
   mediaPreviewUrl?: string;
-  mediaFileName?: string;
-  mediaCaption?: string;
+  mediaFileName?: string | null;
+  mediaCaption?: string | null;
 };
 
 function formatFileSize(bytes: number) {
@@ -462,34 +473,109 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function MessageBubble({ message }: { message: DisplayChatMessage }) {
+function MessageBubble({
+  message,
+  reactions = [],
+  replyPreview,
+  onReact,
+}: {
+  message: DisplayChatMessage;
+  reactions?: ChatMessage[];
+  replyPreview?: string;
+  onReact?: (messageId: number, emoji: string) => void;
+}) {
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const outbound = message.direction === 'outbound';
-  const isMedia = message.messageType !== 'text';
+  const isMedia = ['image', 'video', 'audio', 'document', 'sticker'].includes(message.messageType);
+  const reactionCounts = reactions.reduce<Array<{ emoji: string; count: number; mine: boolean }>>((groups, reaction) => {
+    if (!reaction.reactionEmoji) return groups;
+    const current = groups.find((group) => group.emoji === reaction.reactionEmoji);
+    if (current) {
+      current.count += 1;
+      current.mine ||= reaction.direction === 'outbound';
+    } else {
+      groups.push({
+        emoji: reaction.reactionEmoji,
+        count: 1,
+        mine: reaction.direction === 'outbound',
+      });
+    }
+    return groups;
+  }, []);
+  const emojiOptions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
   return (
     <div className={`message-row ${outbound ? 'outbound' : 'inbound'} rise-in`} data-testid={`message-${message.id}`}>
       <div className={`bubble ${outbound ? 'bubble-out' : 'bubble-in'} ${message.status === 'failed' ? 'border border-[#8d4942]' : ''}`}>
+        {replyPreview && <div className="mb-1 border-l-2 border-[#62a477] pl-2 text-xs text-[#61736a] line-clamp-2">{replyPreview}</div>}
         {isMedia ? (
           <div className="message-media">
-            {message.mediaPreviewUrl && message.messageType === 'image' && <img src={message.mediaPreviewUrl} alt={message.content || 'Imagem enviada'} />}
-            {message.mediaPreviewUrl && message.messageType === 'video' && <video src={message.mediaPreviewUrl} controls muted preload="metadata" />}
-            {message.mediaPreviewUrl && message.messageType === 'audio' && <audio src={message.mediaPreviewUrl} controls preload="metadata" />}
-            {(!message.mediaPreviewUrl || message.messageType === 'document') && (
+            {(message.mediaPreviewUrl || message.mediaUrl) && message.messageType === 'image' && <img src={message.mediaPreviewUrl || message.mediaUrl || undefined} alt={message.content || 'Imagem do WhatsApp'} />}
+            {(message.mediaPreviewUrl || message.mediaUrl) && message.messageType === 'video' && <video src={message.mediaPreviewUrl || message.mediaUrl || undefined} controls muted preload="metadata" />}
+            {(message.mediaPreviewUrl || message.mediaUrl) && message.messageType === 'audio' && <audio src={message.mediaPreviewUrl || message.mediaUrl || undefined} controls preload="metadata" />}
+            {(!message.mediaPreviewUrl && !message.mediaUrl || message.messageType === 'document' || message.messageType === 'sticker') && (
               <div className="message-attachment">
-                <Paperclip size={16} />
-                <div>
-                  <strong>{message.mediaFileName || message.content || 'Arquivo'}</strong>
-                  <span>{message.messageType === 'document' ? 'Documento' : message.messageType}</span>
-                </div>
+                {message.mediaUrl && message.messageType === 'document'
+                  ? <a href={message.mediaUrl} className="flex min-w-0 items-center gap-2" download={message.mediaFileName || undefined}><Paperclip size={16} /><span className="min-w-0"><strong className="block truncate">{message.mediaFileName || message.content || 'Arquivo'}</strong><span>Baixar documento</span></span></a>
+                  : <><Paperclip size={16} /><div><strong>{message.mediaFileName || message.content || 'Arquivo'}</strong><span>{message.messageType === 'document' ? 'Documento' : message.messageType}</span></div></>}
               </div>
             )}
             {message.mediaCaption && <p className="message-media-caption">{message.mediaCaption}</p>}
+          </div>
+        ) : message.messageType === 'location' ? (
+          <div className="min-w-44">
+            <strong className="block text-xs text-[#61736a]">Localização compartilhada</strong>
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            {message.mediaUrl && <a className="mt-1 inline-block text-xs font-semibold text-[#16885c] underline" href={message.mediaUrl} target="_blank" rel="noreferrer">Abrir no mapa</a>}
+          </div>
+        ) : message.messageType === 'contact' ? (
+          <div className="flex min-w-44 items-start gap-2">
+            <UserRound size={17} className="mt-0.5 shrink-0 text-[#4c8067]" />
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          </div>
+        ) : message.messageType === 'poll' ? (
+          <div className="min-w-44">
+            <strong className="block text-xs text-[#61736a]">Enquete</strong>
+            <p className="whitespace-pre-wrap break-words">{message.content}</p>
           </div>
         ) : <div className="whitespace-pre-wrap break-words">{message.content}</div>}
         {message.status === 'failed' && <div className="message-failure-note">Não foi possível confirmar o envio</div>}
         <div className="bubble-meta">
           {formatClock(message.createdAt)}
           {outbound && <StatusIcon status={message.status} />}
+          {onReact && (
+            <button
+              type="button"
+              className="ml-1 rounded px-1 text-[#597365] hover:bg-black/5"
+              onClick={() => setReactionPickerOpen((open) => !open)}
+              aria-label="Reagir à mensagem"
+              title="Reagir"
+            >
+              <MessageCircle size={13} />
+            </button>
+          )}
         </div>
+        {reactionCounts.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1" aria-label="Reações">
+            {reactionCounts.map((reaction) => (
+              <button
+                type="button"
+                key={reaction.emoji}
+                className={`rounded-full border px-1.5 py-0.5 text-[11px] ${reaction.mine ? 'border-[#68b37c] bg-[#d8f8d4]' : 'border-[#d5ddd8] bg-white/80'}`}
+                onClick={() => onReact?.(message.id, reaction.mine ? '' : reaction.emoji)}
+                title={reaction.mine ? 'Remover sua reação' : `Reagir com ${reaction.emoji}`}
+              >
+                {reaction.emoji} {reaction.count > 1 && reaction.count}
+              </button>
+            ))}
+          </div>
+        )}
+        {reactionPickerOpen && onReact && (
+          <div className="mt-1 flex gap-1 rounded-full border border-[#ccd7d0] bg-white px-2 py-1 shadow-md" role="group" aria-label="Escolher reação">
+            {emojiOptions.map((emoji) => (
+              <button type="button" key={emoji} className="rounded p-1 text-lg hover:bg-[#eef5ef]" onClick={() => { onReact(message.id, emoji); setReactionPickerOpen(false); }} aria-label={`Reagir com ${emoji}`}>{emoji}</button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -506,12 +592,14 @@ function ContactProfilePanel({
 }) {
   const inboundCount = messages.filter((message) => message.direction === 'inbound').length;
   const outboundCount = messages.filter((message) => message.direction === 'outbound').length;
+  const groupConversation = conversation.conversationType === 'group';
+  const phoneAvailable = !groupConversation && !conversation.contact.phoneNumber.includes('@');
   return (
     <aside className="contact-profile-panel rise-in" aria-label="Perfil do cliente" data-testid="contact-profile-panel">
       <header className="contact-profile-header">
         <div>
-          <p className="contact-profile-kicker">Cliente</p>
-          <h3>Dados do contato</h3>
+          <p className="contact-profile-kicker">{conversation.conversationType === 'group' ? 'Grupo' : 'Cliente'}</p>
+          <h3>{conversation.conversationType === 'group' ? 'Dados do grupo' : 'Dados do contato'}</h3>
         </div>
         <button type="button" className="action-btn" onClick={onClose} aria-label="Fechar perfil do cliente" data-testid="button-close-contact-profile"><X size={19} /></button>
       </header>
@@ -519,11 +607,15 @@ function ContactProfilePanel({
         <div className="contact-profile-hero">
           <Avatar name={conversation.contact.name} size="large" />
           <strong>{conversation.contact.name}</strong>
-          <span>{conversation.contact.phoneNumber}</span>
+          <span>{groupConversation ? 'Grupo do WhatsApp' : phoneAvailable ? conversation.contact.phoneNumber : 'Telefone não disponibilizado'}</span>
         </div>
         <div className="contact-profile-section">
-          <span className="contact-profile-label">Contato</span>
-          <a href={`tel:${conversation.contact.phoneNumber}`} className="contact-profile-phone"><Phone size={15} /> {conversation.contact.phoneNumber}</a>
+          <span className="contact-profile-label">{groupConversation ? 'Identificador do grupo' : 'Contato'}</span>
+          {groupConversation
+            ? <span className="contact-profile-phone">{conversation.remoteJid || 'Grupo do WhatsApp'}</span>
+            : phoneAvailable
+              ? <a href={`tel:${conversation.contact.phoneNumber}`} className="contact-profile-phone"><Phone size={15} /> {conversation.contact.phoneNumber}</a>
+              : <span className="contact-profile-phone">Telefone não disponibilizado pela conexão.</span>}
         </div>
         <div className="contact-profile-section">
           <span className="contact-profile-label">Resumo da conversa</span>
@@ -535,7 +627,7 @@ function ContactProfilePanel({
         </div>
         <div className="contact-profile-note">
           <UserRound size={16} />
-          <p>A Meta informa o nome e o telefone do cliente no webhook. A foto pessoal do contato não é disponibilizada pela API oficial, então usamos as iniciais como identificação.</p>
+          <p>{conversation.conversationType === 'group' ? 'O nome e o identificador do grupo são sincronizados pela Evolution API; a foto do grupo pode não estar disponível.' : 'O nome e o telefone são sincronizados pela conexão do WhatsApp; quando não há foto disponível, usamos as iniciais.'}</p>
         </div>
       </div>
     </aside>
@@ -545,12 +637,14 @@ function ContactProfilePanel({
 function ChatPanel({
   conversation,
   connected,
+  evolutionMode,
   onBack,
   onSettings,
   onDeleteConversation,
 }: {
   conversation: Conversation | undefined;
   connected: boolean;
+  evolutionMode: boolean;
   onBack: () => void;
   onSettings: () => void;
   onDeleteConversation: () => void;
@@ -564,18 +658,45 @@ function ChatPanel({
   const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
   const [mediaPreviewByMessageId, setMediaPreviewByMessageId] = useState<Record<string, string>>({});
   const [optimisticConversationId, setOptimisticConversationId] = useState<number | null>(null);
+  const [reactionError, setReactionError] = useState('');
   const messagesQuery = useListConversationMessages(conversation?.id ?? 0, {
     query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 5000 },
   });
   const sendMessage = useSendConversationMessage();
   const sendMedia = useSendConversationMedia();
+  const sendReaction = useSendConversationMessageReaction();
   const messages = messagesQuery.data ?? [];
   const messagesWithMediaPreviews = messages.map((message) => ({
     ...message,
     mediaPreviewUrl: message.whatsappMessageId
-      ? mediaPreviewByMessageId[message.whatsappMessageId]
-      : undefined,
+      ? mediaPreviewByMessageId[message.whatsappMessageId] || message.mediaUrl || undefined
+      : message.mediaUrl || undefined,
+    mediaFileName: message.mediaFileName || null,
+    mediaCaption: message.mediaCaption || null,
   }));
+  const reactionsByMessage = useMemo(() => {
+    const result = new Map<number, ChatMessage[]>();
+    for (const message of messages) {
+      if (message.messageType !== 'reaction' || !message.replyToMessageId || !message.reactionEmoji) continue;
+      result.set(message.replyToMessageId, [...(result.get(message.replyToMessageId) ?? []), message]);
+    }
+    return result;
+  }, [messages]);
+  const messagesById = useMemo(
+    () => new Map(messages.map((message) => [message.id, message])),
+    [messages],
+  );
+  const reactToMessage = (messageId: number, emoji: string) => {
+    if (!conversation) return;
+    setReactionError('');
+    sendReaction.mutate({ conversationId: conversation.id, messageId, data: { emoji } }, {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getListConversationMessagesQueryKey(conversation.id) });
+        void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+      },
+      onError: (error) => setReactionError(errorText(error)),
+    });
+  };
   const activeOptimistic = optimisticConversationId === conversation?.id ? optimistic : null;
   const showOptimistic = Boolean(
     activeOptimistic
@@ -613,7 +734,7 @@ function ChatPanel({
     const mediaType = mediaFile
       ? (mediaFile.type.startsWith('image/') ? 'image' : mediaFile.type.startsWith('video/') ? 'video' : mediaFile.type.startsWith('audio/') ? 'audio' : 'document')
       : 'text';
-    const temporary: DisplayChatMessage = { id: -Date.now(), direction: 'outbound', content: mediaFile?.name || messageContent, messageType: mediaType, status: 'sending', createdAt: new Date().toISOString(), whatsappMessageId: null, mediaPreviewUrl: mediaPreviewUrl ?? undefined, mediaFileName: mediaFile?.name, mediaCaption: mediaFile ? (messageContent || undefined) : undefined };
+    const temporary: DisplayChatMessage = { id: -Date.now(), direction: 'outbound', content: mediaFile?.name || messageContent, messageType: mediaType, status: 'sending', createdAt: new Date().toISOString(), whatsappMessageId: null, mediaUrl: null, mediaMimeType: mediaFile?.type || null, mediaCaption: mediaFile ? (messageContent || null) : null, mediaFileName: mediaFile?.name || null, replyToMessageId: null, reactionEmoji: null, mediaPreviewUrl: mediaPreviewUrl ?? undefined };
     setOptimistic(temporary);
     setOptimisticConversationId(conversation.id);
     setContent('');
@@ -638,7 +759,7 @@ function ChatPanel({
             ...sentMessage,
             mediaPreviewUrl: sentPreviewUrl,
             mediaFileName: fileToSend.name,
-            mediaCaption: messageContent || undefined,
+            mediaCaption: messageContent || null,
           });
         } else {
           setOptimistic(null);
@@ -663,11 +784,13 @@ function ChatPanel({
         <Avatar name={conversation.contact.name} size="large" />
         <div className="chat-contact-meta">
           <h2 className="chat-contact-name" data-testid={`text-contact-name-${conversation.id}`}>{conversation.contact.name}</h2>
-          <p className="chat-contact-status">{conversation.contact.phoneNumber}</p>
+          <p className="chat-contact-status">{conversation.conversationType === 'group' ? 'Grupo do WhatsApp' : conversation.contact.phoneNumber}</p>
         </div>
         <div className="chat-header-actions">
-          <button type="button" className="action-btn" onClick={() => { window.location.href = `tel:${conversation.contact.phoneNumber}`; }} data-testid="button-call-contact" aria-label="Ligar para contato"><Phone size={19} /></button>
-          <button type="button" className="action-btn" onClick={() => undefined} data-testid="button-video-contact" aria-label="Iniciar chamada de vídeo"><Video size={19} /></button>
+          {conversation.conversationType !== 'group' && !conversation.contact.phoneNumber.includes('@') && <>
+            <button type="button" className="action-btn" onClick={() => { window.location.href = `tel:${conversation.contact.phoneNumber}`; }} data-testid="button-call-contact" aria-label="Ligar para contato"><Phone size={19} /></button>
+            <button type="button" className="action-btn" onClick={() => undefined} data-testid="button-video-contact" aria-label="Iniciar chamada de vídeo"><Video size={19} /></button>
+          </>}
            <button type="button" className="action-btn" onClick={() => setProfileOpen((open) => !open)} data-testid="button-contact-profile" aria-label="Ver perfil do cliente"><UserRound size={19} /></button>
           <button type="button" className="action-btn mobile-only mobile-delete-btn" onClick={onDeleteConversation} data-testid="button-delete-conversation-mobile" aria-label="Apagar conversa da inbox"><Trash2 size={19} /></button>
           <div className="relative">
@@ -696,8 +819,9 @@ function ChatPanel({
             </div>
           )}
           {messagesQuery.isError && <div className="status-note mx-auto my-5 max-w-sm justify-center text-center" data-testid="state-messages-error"><AlertCircle size={17} /> Não foi possível carregar as mensagens. A atualização automática continuará tentando.</div>}
+          {reactionError && <div className="status-note mx-auto my-3 max-w-sm justify-center text-center" role="alert"><AlertCircle size={15} />{reactionError}</div>}
           {!messagesQuery.isLoading && !messagesQuery.isError && messages.length === 0 && !optimistic && <div className="py-20 text-center text-xs text-[#89958f]" data-testid="state-messages-empty">Nenhuma mensagem nesta conversa.</div>}
-          {messagesWithMediaPreviews.map((message) => <MessageBubble key={message.id} message={message} />)}
+          {messagesWithMediaPreviews.filter((message) => message.messageType !== 'reaction').map((message) => <MessageBubble key={message.id} message={message} reactions={reactionsByMessage.get(message.id) ?? []} replyPreview={message.replyToMessageId ? messagesById.get(message.replyToMessageId)?.content : undefined} onReact={evolutionMode ? reactToMessage : undefined} />)}
           {showOptimistic && activeOptimistic && <MessageBubble message={activeOptimistic} />}
         </div>
       </div>
@@ -1486,7 +1610,7 @@ function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [mobileListOpen, setMobileListOpen] = useState(true);
-  const [activeSection, setActiveSection] = useState<'inbox' | 'templates'>('inbox');
+  const [activeSection, setActiveSection] = useState<'inbox' | 'templates' | 'dashboard'>('inbox');
   const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
   const [deleteError, setDeleteError] = useState('');
   const deleteConversation = useDeleteConversation();
@@ -1542,7 +1666,7 @@ function Home() {
 
   return (
     <main className="app-frame">
-      <div className="inbox-shell" data-mobile-list-open={activeSection === 'inbox' ? mobileListOpen : undefined}>
+      <div className={`inbox-shell ${activeSection === 'dashboard' ? 'dashboard-shell' : ''}`} data-mobile-list-open={activeSection === 'inbox' ? mobileListOpen : undefined}>
         <NavigationRail
           onSettings={() => setSettingsOpen(true)}
           connected={chatConnected}
@@ -1550,11 +1674,11 @@ function Home() {
           activeSection={activeSection}
           onSectionChange={setActiveSection}
         />
-        {activeSection === 'templates' ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} /> : (
+        {activeSection === 'dashboard' ? <DashboardWorkspace onBackToInbox={() => setActiveSection('inbox')} /> : activeSection === 'templates' ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} /> : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} connectionLabel={evolutionMode ? 'Evolution API · QR' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} connectionLabel={evolutionMode ? 'Evolution API · QR' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
-            <ChatPanel conversation={selectedConversation} connected={chatConnected} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
+            <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>
         )}
       </div>

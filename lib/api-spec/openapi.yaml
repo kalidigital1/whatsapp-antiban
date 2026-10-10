@@ -150,6 +150,64 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Conversation"
+  /dashboard:
+    get:
+      operationId: getDashboardReport
+      tags: [whatsapp]
+      summary: Get WhatsApp conversation and campaign analytics
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [7d, 30d, 90d]
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        "200":
+          description: Dashboard metrics and paginated activity report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardReportResponse"
+        "400":
+          description: Invalid period or page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /dashboard/export.csv:
+    get:
+      operationId: exportDashboardReportCsv
+      tags: [whatsapp]
+      summary: Export all WhatsApp activity and template dispatches for a period
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [7d, 30d, 90d]
+      responses:
+        "200":
+          description: Complete activity report in CSV format
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid period
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations/{conversationId}/messages:
     get:
       operationId: listConversationMessages
@@ -207,6 +265,67 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /conversations/{conversationId}/messages/{messageId}/media:
+    get:
+      operationId: getConversationMessageMedia
+      tags: [whatsapp]
+      summary: Load media attached to a WhatsApp message through its provider
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Message media
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Message media not found
+  /conversations/{conversationId}/messages/{messageId}/reaction:
+    post:
+      operationId: sendConversationMessageReaction
+      tags: [whatsapp]
+      summary: Add or remove a reaction on a WhatsApp message
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: messageId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageReactionInput"
+      responses:
+        "200":
+          description: Reaction sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "400":
+          description: Reaction could not be sent
           content:
             application/json:
               schema:
@@ -625,11 +744,187 @@ components:
           type: string
           minLength: 8
       required: [name, phoneNumber]
+    DashboardReportResponse:
+      type: object
+      properties:
+        period:
+          type: string
+          enum: [7d, 30d, 90d]
+        rangeStart:
+          type: string
+          format: date-time
+        rangeEnd:
+          type: string
+          format: date-time
+        generatedAt:
+          type: string
+          format: date-time
+        summary:
+          $ref: "#/components/schemas/DashboardSummary"
+        trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardTrendDay"
+        topContacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardTopContact"
+        recentDispatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardTemplateDispatch"
+        activity:
+          $ref: "#/components/schemas/DashboardActivityPage"
+      required: [period, rangeStart, rangeEnd, generatedAt, summary, trend, topContacts, recentDispatches, activity]
+    DashboardSummary:
+      type: object
+      properties:
+        totalMessages:
+          type: integer
+        inboundMessages:
+          type: integer
+        outboundMessages:
+          type: integer
+        pendingOutboundMessages:
+          type: integer
+        failedOutboundMessages:
+          type: integer
+        answeredInboundMessages:
+          type: integer
+        unansweredInboundMessages:
+          type: integer
+        responseRatePercent:
+          type: number
+        averageResponseTimeMinutes:
+          type: ["number", "null"]
+        activeConversations:
+          type: integer
+        waitingForTeam:
+          type: integer
+        waitingForCustomer:
+          type: integer
+        unreadConversations:
+          type: integer
+        templateDispatchCount:
+          type: integer
+        templateRecipientsCount:
+          type: integer
+        templateSentCount:
+          type: integer
+        templateDeliveredCount:
+          type: integer
+        templateReadCount:
+          type: integer
+        templateFailedCount:
+          type: integer
+        templatePendingCount:
+          type: integer
+      required: [totalMessages, inboundMessages, outboundMessages, pendingOutboundMessages, failedOutboundMessages, answeredInboundMessages, unansweredInboundMessages, responseRatePercent, averageResponseTimeMinutes, activeConversations, waitingForTeam, waitingForCustomer, unreadConversations, templateDispatchCount, templateRecipientsCount, templateSentCount, templateDeliveredCount, templateReadCount, templateFailedCount, templatePendingCount]
+    DashboardTrendDay:
+      type: object
+      properties:
+        date:
+          type: string
+        inbound:
+          type: integer
+        outbound:
+          type: integer
+      required: [date, inbound, outbound]
+    DashboardTopContact:
+      type: object
+      properties:
+        contactName:
+          type: string
+        phoneNumber:
+          type: string
+        messageCount:
+          type: integer
+        lastMessageAt:
+          type: string
+          format: date-time
+      required: [contactName, phoneNumber, messageCount, lastMessageAt]
+    DashboardTemplateDispatch:
+      type: object
+      properties:
+        id:
+          type: integer
+        templateName:
+          type: string
+        status:
+          type: string
+        recipientsCount:
+          type: integer
+        sentCount:
+          type: integer
+        deliveredCount:
+          type: integer
+        readCount:
+          type: integer
+        failedCount:
+          type: integer
+        pendingCount:
+          type: integer
+        estimatedCost:
+          type: number
+        currency:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, templateName, status, recipientsCount, sentCount, deliveredCount, readCount, failedCount, pendingCount, estimatedCost, currency, createdAt]
+    DashboardActivityPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardActivity"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+      required: [items, page, pageSize, total, totalPages]
+    DashboardActivity:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        contactName:
+          type: string
+        phoneNumber:
+          type: string
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        content:
+          type: string
+        messageType:
+          type: string
+        status:
+          type: string
+        conversationType:
+          type: string
+          enum: [direct, group]
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, conversationId, contactName, phoneNumber, direction, content, messageType, status, conversationType, createdAt]
     Conversation:
       type: object
       properties:
         id:
           type: integer
+        conversationType:
+          type: string
+          enum: [direct, group]
+        remoteJid:
+          type: ["string", "null"]
         contact:
           $ref: "#/components/schemas/Contact"
         lastMessage:
@@ -638,7 +933,7 @@ components:
           type: integer
         updatedAt:
           type: string
-      required: [id, contact, lastMessage, unreadCount, updatedAt]
+      required: [id, conversationType, remoteJid, contact, lastMessage, unreadCount, updatedAt]
     ChatMessage:
       type: object
       properties:
@@ -657,7 +952,27 @@ components:
           type: string
         whatsappMessageId:
           type: ["string", "null"]
-      required: [id, direction, content, messageType, status, createdAt, whatsappMessageId]
+        mediaUrl:
+          type: ["string", "null"]
+        mediaMimeType:
+          type: ["string", "null"]
+        mediaFileName:
+          type: ["string", "null"]
+        mediaCaption:
+          type: ["string", "null"]
+        replyToMessageId:
+          type: ["integer", "null"]
+        reactionEmoji:
+          type: ["string", "null"]
+      required: [id, direction, content, messageType, status, createdAt, whatsappMessageId, mediaUrl, mediaMimeType, mediaFileName, mediaCaption, replyToMessageId, reactionEmoji]
+    MessageReactionInput:
+      type: object
+      properties:
+        emoji:
+          type: string
+          maxLength: 8
+          description: Emoji to apply, or an empty string to remove your reaction.
+      required: [emoji]
     MessageInput:
       type: object
       properties:

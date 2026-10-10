@@ -34,6 +34,8 @@ export const conversations = pgTable(
       .notNull()
       .references(() => contacts.id, { onDelete: "cascade" }),
     phoneNumberId: text("phone_number_id").notNull(),
+    remoteJid: text("remote_jid"),
+    conversationType: text("conversation_type").notNull().default("direct"),
     unreadCount: integer("unread_count").notNull().default(0),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -61,6 +63,12 @@ export const chatMessages = pgTable(
     messageType: text("message_type").notNull().default("text"),
     content: text("content").notNull(),
     status: text("status").notNull().default("received"),
+    providerPayload: jsonb("provider_payload").$type<Record<string, unknown> | null>(),
+    mediaMimeType: text("media_mime_type"),
+    mediaFileName: text("media_file_name"),
+    mediaCaption: text("media_caption"),
+    replyToMessageId: integer("reply_to_message_id"),
+    reactionEmoji: text("reaction_emoji"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({

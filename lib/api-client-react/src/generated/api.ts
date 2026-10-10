@@ -26,12 +26,16 @@ import type {
   Contact,
   ContactInput,
   Conversation,
+  DashboardReportResponse,
   ErrorResponse,
   EvolutionConnectionInput,
   EvolutionConnectionStatus,
+  ExportDashboardReportCsvParams,
+  GetDashboardReportParams,
   HealthStatus,
   MediaInput,
   MessageInput,
+  MessageReactionInput,
   StartConversationInput,
   StartConversationResult,
   SuccessResponse,
@@ -779,6 +783,174 @@ export function useListConversations<TData = Awaited<ReturnType<typeof listConve
 
 
 
+export const getGetDashboardReportUrl = (params: GetDashboardReportParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/dashboard?${stringifiedParams}` : `/api/dashboard`
+}
+
+/**
+ * @summary Get WhatsApp conversation and campaign analytics
+ */
+export const getDashboardReport = async (params: GetDashboardReportParams, options?: Parameters<typeof customFetch>[1]): Promise<DashboardReportResponse> => {
+
+  return customFetch<DashboardReportResponse>(getGetDashboardReportUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDashboardReportQueryKey = (params?: GetDashboardReportParams,) => {
+    return [
+    `/api/dashboard`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetDashboardReportQueryOptions = <TData = Awaited<ReturnType<typeof getDashboardReport>>, TError = ErrorType<ErrorResponse>>(params: GetDashboardReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDashboardReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDashboardReportQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDashboardReport>>> = ({ signal }) => getDashboardReport(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDashboardReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDashboardReportQueryResult = NonNullable<Awaited<ReturnType<typeof getDashboardReport>>>
+export type GetDashboardReportQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get WhatsApp conversation and campaign analytics
+ */
+
+export function useGetDashboardReport<TData = Awaited<ReturnType<typeof getDashboardReport>>, TError = ErrorType<ErrorResponse>>(
+ params: GetDashboardReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDashboardReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDashboardReportQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportDashboardReportCsvUrl = (params: ExportDashboardReportCsvParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/dashboard/export.csv?${stringifiedParams}` : `/api/dashboard/export.csv`
+}
+
+/**
+ * @summary Export all WhatsApp activity and template dispatches for a period
+ */
+export const exportDashboardReportCsv = async (params: ExportDashboardReportCsvParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportDashboardReportCsvUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportDashboardReportCsvQueryKey = (params?: ExportDashboardReportCsvParams,) => {
+    return [
+    `/api/dashboard/export.csv`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportDashboardReportCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportDashboardReportCsv>>, TError = ErrorType<ErrorResponse>>(params: ExportDashboardReportCsvParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportDashboardReportCsv>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportDashboardReportCsvQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportDashboardReportCsv>>> = ({ signal }) => exportDashboardReportCsv(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportDashboardReportCsv>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportDashboardReportCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportDashboardReportCsv>>>
+export type ExportDashboardReportCsvQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Export all WhatsApp activity and template dispatches for a period
+ */
+
+export function useExportDashboardReportCsv<TData = Awaited<ReturnType<typeof exportDashboardReportCsv>>, TError = ErrorType<ErrorResponse>>(
+ params: ExportDashboardReportCsvParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportDashboardReportCsv>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportDashboardReportCsvQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getListConversationMessagesUrl = (conversationId: number,) => {
 
 
@@ -943,6 +1115,179 @@ export const useSendConversationMessage = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getSendConversationMessageMutationOptions(options));
+    }
+
+export const getGetConversationMessageMediaUrl = (conversationId: number,
+    messageId: number,) => {
+
+
+
+
+  return `/api/conversations/${conversationId}/messages/${messageId}/media`
+}
+
+/**
+ * @summary Load media attached to a WhatsApp message through its provider
+ */
+export const getConversationMessageMedia = async (conversationId: number,
+    messageId: number, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getGetConversationMessageMediaUrl(conversationId,messageId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConversationMessageMediaQueryKey = (conversationId: number,
+    messageId: number,) => {
+    return [
+    `/api/conversations/${conversationId}/messages/${messageId}/media`
+    ] as const;
+    }
+
+
+export const getGetConversationMessageMediaQueryOptions = <TData = Awaited<ReturnType<typeof getConversationMessageMedia>>, TError = ErrorType<void>>(conversationId: number,
+    messageId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationMessageMedia>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConversationMessageMediaQueryKey(conversationId,messageId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationMessageMedia>>> = ({ signal }) => getConversationMessageMedia(conversationId,messageId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: conversationId !== null && conversationId !== undefined && messageId !== null && messageId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversationMessageMedia>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConversationMessageMediaQueryResult = NonNullable<Awaited<ReturnType<typeof getConversationMessageMedia>>>
+export type GetConversationMessageMediaQueryError = ErrorType<void>
+
+
+/**
+ * @summary Load media attached to a WhatsApp message through its provider
+ */
+
+export function useGetConversationMessageMedia<TData = Awaited<ReturnType<typeof getConversationMessageMedia>>, TError = ErrorType<void>>(
+ conversationId: number,
+    messageId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationMessageMedia>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConversationMessageMediaQueryOptions(conversationId,messageId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSendConversationMessageReactionUrl = (conversationId: number,
+    messageId: number,) => {
+
+
+
+
+  return `/api/conversations/${conversationId}/messages/${messageId}/reaction`
+}
+
+/**
+ * @summary Add or remove a reaction on a WhatsApp message
+ */
+export const sendConversationMessageReaction = async (conversationId: number,
+    messageId: number,
+    messageReactionInput: MessageReactionInput, options?: Parameters<typeof customFetch>[1]): Promise<ChatMessage> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ChatMessage>(getSendConversationMessageReactionUrl(conversationId,messageId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(messageReactionInput)
+  }
+);}
+
+
+
+
+
+export const getSendConversationMessageReactionMutationKey = () => ['sendConversationMessageReaction'] as const;
+
+export const getSendConversationMessageReactionMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendConversationMessageReaction>>, TError,SendConversationMessageReactionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendConversationMessageReaction>>, TError,SendConversationMessageReactionMutationVariables, TContext> => {
+
+const mutationKey = getSendConversationMessageReactionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendConversationMessageReaction>>, SendConversationMessageReactionMutationVariables> = (props) => {
+          const {conversationId,messageId,data} = props ?? {};
+
+          return  sendConversationMessageReaction(conversationId,messageId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendConversationMessageReactionMutationResult = NonNullable<Awaited<ReturnType<typeof sendConversationMessageReaction>>>
+    export type SendConversationMessageReactionMutationBody = BodyType<MessageReactionInput>
+    export type SendConversationMessageReactionMutationError = ErrorType<ErrorResponse>
+    export type SendConversationMessageReactionMutationVariables = {conversationId: number;messageId: number;data: BodyType<MessageReactionInput>}
+
+    /**
+ * @summary Add or remove a reaction on a WhatsApp message
+ */
+export const useSendConversationMessageReaction = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendConversationMessageReaction>>, TError,SendConversationMessageReactionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendConversationMessageReaction>>,
+        TError,
+        SendConversationMessageReactionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSendConversationMessageReactionMutationOptions(options));
     }
 
 export const getDeleteConversationUrl = (conversationId: number,) => {

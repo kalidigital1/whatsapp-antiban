@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import authRouter, { requireAuth } from "./auth";
+import dashboardRouter from "./dashboard";
 import healthRouter from "./health";
 import whatsappRouter from "./whatsapp";
 
@@ -14,6 +15,7 @@ router.use((req, res, next) => {
   }
   requireAuth(req, res, next);
 });
+router.use(dashboardRouter);
 router.use(whatsappRouter);
 
 export default router;

@@ -150,6 +150,8 @@ export const RefreshEvolutionQrResponse = zod.object({
  */
 export const ListConversationsResponseItem = zod.object({
   "id": zod.number().int(),
+  "conversationType": zod.enum(['direct', 'group']),
+  "remoteJid": zod.string().nullable(),
   "contact": zod.object({
   "name": zod.string(),
   "phoneNumber": zod.string()
@@ -161,12 +163,113 @@ export const ListConversationsResponseItem = zod.object({
   "messageType": zod.string(),
   "status": zod.string(),
   "createdAt": zod.string(),
-  "whatsappMessageId": zod.string().nullable()
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
 }),
   "unreadCount": zod.number().int(),
   "updatedAt": zod.string()
 })
 export const ListConversationsResponse = zod.array(ListConversationsResponseItem)
+
+
+/**
+ * @summary Get WhatsApp conversation and campaign analytics
+ */
+export const getDashboardReportQueryPageDefault = 1;
+
+
+
+export const GetDashboardReportQueryParams = zod.object({
+  "period": zod.enum(['7d', '30d', '90d']),
+  "page": zod.coerce.number().int().min(1).default(getDashboardReportQueryPageDefault)
+})
+
+export const GetDashboardReportResponse = zod.object({
+  "period": zod.enum(['7d', '30d', '90d']),
+  "rangeStart": zod.coerce.date(),
+  "rangeEnd": zod.coerce.date(),
+  "generatedAt": zod.coerce.date(),
+  "summary": zod.object({
+  "totalMessages": zod.number().int(),
+  "inboundMessages": zod.number().int(),
+  "outboundMessages": zod.number().int(),
+  "pendingOutboundMessages": zod.number().int(),
+  "failedOutboundMessages": zod.number().int(),
+  "answeredInboundMessages": zod.number().int(),
+  "unansweredInboundMessages": zod.number().int(),
+  "responseRatePercent": zod.number(),
+  "averageResponseTimeMinutes": zod.number().nullable(),
+  "activeConversations": zod.number().int(),
+  "waitingForTeam": zod.number().int(),
+  "waitingForCustomer": zod.number().int(),
+  "unreadConversations": zod.number().int(),
+  "templateDispatchCount": zod.number().int(),
+  "templateRecipientsCount": zod.number().int(),
+  "templateSentCount": zod.number().int(),
+  "templateDeliveredCount": zod.number().int(),
+  "templateReadCount": zod.number().int(),
+  "templateFailedCount": zod.number().int(),
+  "templatePendingCount": zod.number().int()
+}),
+  "trend": zod.array(zod.object({
+  "date": zod.string(),
+  "inbound": zod.number().int(),
+  "outbound": zod.number().int()
+})),
+  "topContacts": zod.array(zod.object({
+  "contactName": zod.string(),
+  "phoneNumber": zod.string(),
+  "messageCount": zod.number().int(),
+  "lastMessageAt": zod.coerce.date()
+})),
+  "recentDispatches": zod.array(zod.object({
+  "id": zod.number().int(),
+  "templateName": zod.string(),
+  "status": zod.string(),
+  "recipientsCount": zod.number().int(),
+  "sentCount": zod.number().int(),
+  "deliveredCount": zod.number().int(),
+  "readCount": zod.number().int(),
+  "failedCount": zod.number().int(),
+  "pendingCount": zod.number().int(),
+  "estimatedCost": zod.number(),
+  "currency": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "activity": zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.number().int(),
+  "conversationId": zod.number().int(),
+  "contactName": zod.string(),
+  "phoneNumber": zod.string(),
+  "direction": zod.enum(['inbound', 'outbound']),
+  "content": zod.string(),
+  "messageType": zod.string(),
+  "status": zod.string(),
+  "conversationType": zod.enum(['direct', 'group']),
+  "createdAt": zod.coerce.date()
+})),
+  "page": zod.number().int(),
+  "pageSize": zod.number().int(),
+  "total": zod.number().int(),
+  "totalPages": zod.number().int()
+})
+})
+
+
+/**
+ * @summary Export all WhatsApp activity and template dispatches for a period
+ */
+export const ExportDashboardReportCsvQueryParams = zod.object({
+  "period": zod.enum(['7d', '30d', '90d'])
+})
+
+export const ExportDashboardReportCsvResponse = zod.unknown()
 
 
 /**
@@ -183,7 +286,13 @@ export const ListConversationMessagesResponseItem = zod.object({
   "messageType": zod.string(),
   "status": zod.string(),
   "createdAt": zod.string(),
-  "whatsappMessageId": zod.string().nullable()
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
 })
 export const ListConversationMessagesResponse = zod.array(ListConversationMessagesResponseItem)
 
@@ -209,7 +318,57 @@ export const SendConversationMessageResponse = zod.object({
   "messageType": zod.string(),
   "status": zod.string(),
   "createdAt": zod.string(),
-  "whatsappMessageId": zod.string().nullable()
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
+})
+
+
+/**
+ * @summary Load media attached to a WhatsApp message through its provider
+ */
+export const GetConversationMessageMediaParams = zod.object({
+  "conversationId": zod.coerce.number().int(),
+  "messageId": zod.coerce.number().int()
+})
+
+export const GetConversationMessageMediaResponse = zod.unknown()
+
+
+/**
+ * @summary Add or remove a reaction on a WhatsApp message
+ */
+export const SendConversationMessageReactionParams = zod.object({
+  "conversationId": zod.coerce.number().int(),
+  "messageId": zod.coerce.number().int()
+})
+
+export const sendConversationMessageReactionBodyEmojiMax = 8;
+
+
+
+export const SendConversationMessageReactionBody = zod.object({
+  "emoji": zod.string().max(sendConversationMessageReactionBodyEmojiMax).describe('Emoji to apply, or an empty string to remove your reaction.')
+})
+
+export const SendConversationMessageReactionResponse = zod.object({
+  "id": zod.number().int(),
+  "direction": zod.enum(['inbound', 'outbound']),
+  "content": zod.string(),
+  "messageType": zod.string(),
+  "status": zod.string(),
+  "createdAt": zod.string(),
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
 })
 
 
@@ -244,7 +403,13 @@ export const SendConversationMediaResponse = zod.object({
   "messageType": zod.string(),
   "status": zod.string(),
   "createdAt": zod.string(),
-  "whatsappMessageId": zod.string().nullable()
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
 })
 
 
@@ -274,6 +439,8 @@ export const StartConversationBody = zod.object({
 export const StartConversationResponse = zod.object({
   "conversation": zod.object({
   "id": zod.number().int(),
+  "conversationType": zod.enum(['direct', 'group']),
+  "remoteJid": zod.string().nullable(),
   "contact": zod.object({
   "name": zod.string(),
   "phoneNumber": zod.string()
@@ -285,7 +452,13 @@ export const StartConversationResponse = zod.object({
   "messageType": zod.string(),
   "status": zod.string(),
   "createdAt": zod.string(),
-  "whatsappMessageId": zod.string().nullable()
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
 }),
   "unreadCount": zod.number().int(),
   "updatedAt": zod.string()
@@ -297,7 +470,13 @@ export const StartConversationResponse = zod.object({
   "messageType": zod.string(),
   "status": zod.string(),
   "createdAt": zod.string(),
-  "whatsappMessageId": zod.string().nullable()
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
 })
 })
 

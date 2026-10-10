@@ -16,4 +16,16 @@ export interface ChatMessage {
   createdAt: string;
   /** @nullable */
   whatsappMessageId: string | null;
+  /** @nullable */
+  mediaUrl: string | null;
+  /** @nullable */
+  mediaMimeType: string | null;
+  /** @nullable */
+  mediaFileName: string | null;
+  /** @nullable */
+  mediaCaption: string | null;
+  /** @nullable */
+  replyToMessageId: number | null;
+  /** @nullable */
+  reactionEmoji: string | null;
 }

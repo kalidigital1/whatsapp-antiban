@@ -1,0 +1,387 @@
+Build this as my initial prototype
+
+Copy-paste this component to /components/ui folder:
+```tsx
+pricing-card.tsx
+import React from 'react';
+import { cn } from '@/lib/utils';
+
+function Card({ className, ...props }: React.ComponentProps<'div'>) {
+	return (
+		<div
+			className={cn(
+				'bg-card relative w-full max-w-xs rounded-xl dark:bg-transparent',
+				'p-1.5 shadow-xl backdrop-blur-xl',
+				'dark:border-border/80 border',
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+function Header({
+	className,
+	children,
+	glassEffect = true,
+	...props
+}: React.ComponentProps<'div'> & {
+	glassEffect?: boolean;
+}) {
+	return (
+		<div
+			className={cn(
+				'bg-muted/80 dark:bg-muted/50 relative mb-4 rounded-xl border p-4',
+				className,
+			)}
+			{...props}
+		>
+			{/* Top glass gradient */}
+			{glassEffect && (
+				<div
+					aria-hidden="true"
+					className="absolute inset-x-0 top-0 h-48 rounded-[inherit]"
+					style={{
+						background:
+							'linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.03) 40%, rgba(0,0,0,0) 100%)',
+					}}
+				/>
+			)}
+			{children}
+		</div>
+	);
+}
+
+function Plan({ className, ...props }: React.ComponentProps<'div'>) {
+	return (
+		<div
+			className={cn('mb-8 flex items-center justify-between', className)}
+			{...props}
+		/>
+	);
+}
+
+function Description({ className, ...props }: React.ComponentProps<'p'>) {
+	return (
+		<p className={cn('text-muted-foreground text-xs', className)} {...props} />
+	);
+}
+
+function PlanName({ className, ...props }: React.ComponentProps<'div'>) {
+	return (
+		<div
+			className={cn(
+				"text-muted-foreground flex items-center gap-2 text-sm font-medium [&_svg:not([class*='size-'])]:size-4",
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+function Badge({ className, ...props }: React.ComponentProps<'span'>) {
+	return (
+		<span
+			className={cn(
+				'border-foreground/20 text-foreground/80 rounded-full border px-2 py-0.5 text-xs',
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+function Price({ className, ...props }: React.ComponentProps<'div'>) {
+	return (
+		<div className={cn('mb-3 flex items-end gap-1', className)} {...props} />
+	);
+}
+
+function MainPrice({ className, ...props }: React.ComponentProps<'span'>) {
+	return (
+		<span
+			className={cn('text-3xl font-extrabold tracking-tight', className)}
+			{...props}
+		/>
+	);
+}
+
+function Period({ className, ...props }: React.ComponentProps<'span'>) {
+	return (
+		<span
+			className={cn('text-foreground/80 pb-1 text-sm', className)}
+			{...props}
+		/>
+	);
+}
+
+function OriginalPrice({ className, ...props }: React.ComponentProps<'span'>) {
+	return (
+		<span
+			className={cn(
+				'text-muted-foreground mr-1 ml-auto text-lg line-through',
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+function Body({ className, ...props }: React.ComponentProps<'div'>) {
+	return <div className={cn('space-y-6 p-3', className)} {...props} />;
+}
+
+function List({ className, ...props }: React.ComponentProps<'ul'>) {
+	return <ul className={cn('space-y-3', className)} {...props} />;
+}
+
+function ListItem({ className, ...props }: React.ComponentProps<'li'>) {
+	return (
+		<li
+			className={cn(
+				'text-muted-foreground flex items-start gap-3 text-sm',
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
+function Separator({
+	children = 'Upgrade to access',
+	className,
+	...props
+}: React.ComponentProps<'div'> & {
+	children?: string;
+	className?: string;
+}) {
+	return (
+		<div
+			className={cn(
+				'text-muted-foreground flex items-center gap-3 text-sm',
+				className,
+			)}
+			{...props}
+		>
+			<span className="bg-muted-foreground/40 h-[1px] flex-1" />
+			<span className="text-muted-foreground shrink-0">{children}</span>
+			<span className="bg-muted-foreground/40 h-[1px] flex-1" />
+		</div>
+	);
+}
+
+export {
+	Card,
+	Header,
+	Description,
+	Plan,
+	PlanName,
+	Badge,
+	Price,
+	MainPrice,
+	Period,
+	OriginalPrice,
+	Body,
+	List,
+	ListItem,
+	Separator,
+};
+
+
+demo.tsx
+'use client';
+
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import * as PricingCard from '@/components/ui/pricing-card';
+import {
+	CheckCircle2,
+	XCircleIcon,
+	Users,
+} from 'lucide-react';
+
+
+function Default() {
+	const handleClick = (plan: string) => {
+		alert(`Selected ${plan} plan!`);
+	};
+
+	const features = [
+		'Up to 3 projects',
+		'Basic templates',
+		'Community support',
+		'1GB storage',
+	];
+
+	const lockedFeatures = [
+		'Unlimited projects',
+		'Premium templates',
+		'Priority support',
+	];
+
+	return (
+		<PricingCard.Card>
+			<PricingCard.Header>
+				<PricingCard.Plan>
+					<PricingCard.PlanName>
+						<Users aria-hidden="true" />
+						<span className="text-muted-foreground">Starter</span>
+					</PricingCard.PlanName>
+					<PricingCard.Badge>For Individuals</PricingCard.Badge>
+				</PricingCard.Plan>
+				<PricingCard.Price>
+					<PricingCard.MainPrice>$10</PricingCard.MainPrice>
+					<PricingCard.Period>/ month</PricingCard.Period>
+					<PricingCard.OriginalPrice className="ml-auto">
+						$12
+					</PricingCard.OriginalPrice>
+				</PricingCard.Price>
+				<Button
+					className={cn(
+						'w-full font-semibold text-white',
+						'bg-gradient-to-b from-orange-500 to-orange-600 shadow-[0_10px_25px_rgba(255,115,0,0.3)]',
+					)}
+					onClick={() => handleClick('Starter')}
+				>
+					Get Started
+				</Button>
+			</PricingCard.Header>
+			<PricingCard.Body>
+				<PricingCard.List>
+					{features.map((item) => (
+						<PricingCard.ListItem>
+							<span className="mt-0.5">
+								<CheckCircle2
+									className="h-4 w-4 text-green-500"
+									aria-hidden="true"
+								/>
+							</span>
+							<span>{item}</span>
+						</PricingCard.ListItem>
+					))}
+				</PricingCard.List>
+				<PricingCard.Separator>Pro features</PricingCard.Separator>
+				<PricingCard.List>
+					{lockedFeatures.map((item) => (
+						<PricingCard.ListItem className="opacity-75">
+							<span className="mt-0.5">
+								<XCircleIcon
+									className="text-destructive h-4 w-4"
+									aria-hidden="true"
+								/>
+							</span>
+							<span>{item}</span>
+						</PricingCard.ListItem>
+					))}
+				</PricingCard.List>
+			</PricingCard.Body>
+		</PricingCard.Card>
+	);
+}
+
+
+export default function Page() {
+	return (
+		<main
+			className={cn(
+				'relative min-h-svh w-full overflow-hidden',
+				'flex items-center justify-center p-4',
+			)}
+		>
+    
+      {/* Subtle dotted grid */}
+			<div
+				aria-hidden="true"
+				className="pointer-events-none absolute inset-0"
+				style={{
+					backgroundImage:
+						'radial-gradient(rgba(255,255,255,0.08) 0.8px, transparent 0.8px)',
+					backgroundSize: '14px 14px',
+					maskImage:
+						'radial-gradient( circle at 50% 10%, rgba(0,0,0,1), rgba(0,0,0,0.2) 40%, rgba(0,0,0,0) 70% )',
+				}}
+			/>
+
+			{/* Radial spotlight */}
+			<div
+				aria-hidden="true"
+				className={cn(
+					'pointer-events-none absolute -top-1/2 left-1/2 h-[120vmin] w-[120vmin] -translate-x-1/2 rounded-full',
+					'bg-[radial-gradient(ellipse_at_center,--theme(--color-foreground/.1),transparent_50%)]',
+					'blur-[30px]',
+				)}
+			/>
+			<Default />
+		</main>
+	);
+}
+
+
+```
+
+Copy-paste these files for dependencies:
+```tsx
+shadcn/button
+import * as React from "react"
+import { Slot } from "@radix-ui/react-slot"
+import { cva, type VariantProps } from "class-variance-authority"
+
+import { cn } from "@/lib/utils"
+
+const buttonVariants = cva(
+  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive:
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        outline:
+          "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        secondary:
+          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-9 rounded-md px-3",
+        lg: "h-11 rounded-md px-8",
+        icon: "h-10 w-10",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  },
+)
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean
+}
+
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button"
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        {...props}
+      />
+    )
+  },
+)
+Button.displayName = "Button"
+
+export { Button, buttonVariants }
+
+```
+
+Install these NPM dependencies:
+```bash
+@radix-ui/react-slot, class-variance-authority
+```

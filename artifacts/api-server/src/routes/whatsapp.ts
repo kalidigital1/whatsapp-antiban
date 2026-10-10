@@ -18,6 +18,7 @@ import {
   ListTemplatesResponse,
   ListTemplatesResponseItem,
   ListConversationMessagesResponseItem,
+  SendConversationMessageReactionBody,
   MessageInput,
   ReceiveWebhookBody,
   SendConversationMessageBody,
@@ -255,6 +256,145 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function withoutEvolutionBinary(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutEvolutionBinary);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key.toLowerCase() !== "base64")
+      .map(([key, nested]) => [key, withoutEvolutionBinary(nested)]),
+  );
+}
+
+function evolutionEventItems(data: unknown, collectionKey: string): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data.map(asRecord);
+  const record = asRecord(data);
+  const nested = asRecord(record.data);
+  const candidates = [
+    record[collectionKey],
+    nested[collectionKey],
+    record.records,
+    nested.records,
+  ];
+  const collection = candidates.find(Array.isArray);
+  if (Array.isArray(collection)) return collection.map(asRecord);
+  return Object.keys(record).length ? [record] : [];
+}
+
+function unwrapEvolutionMessage(value: unknown): Record<string, unknown> {
+  let message = asRecord(value);
+  for (let depth = 0; depth < 4; depth += 1) {
+    const wrapper = [
+      "ephemeralMessage",
+      "viewOnceMessage",
+      "viewOnceMessageV2",
+      "viewOnceMessageV2Extension",
+      "documentWithCaptionMessage",
+    ].map((key) => asRecord(message[key])).find((item) => Object.keys(item).length > 0);
+    if (!wrapper || !Object.keys(asRecord(wrapper.message)).length) break;
+    message = asRecord(wrapper.message);
+  }
+  return message;
+}
+
+function evolutionMessageDetails(item: Record<string, unknown>) {
+  const message = unwrapEvolutionMessage(item.message);
+  const mediaTypes = [
+    ["image", message.imageMessage],
+    ["video", message.videoMessage],
+    ["document", message.documentMessage],
+    ["audio", message.audioMessage],
+    ["sticker", message.stickerMessage],
+  ] as const;
+  const media = mediaTypes.find(([, value]) => Object.keys(asRecord(value)).length > 0);
+  const mediaPayload = asRecord(media?.[1]);
+  const reaction = asRecord(message.reactionMessage);
+  const reactionKey = asRecord(reaction.key);
+  const reactionEmoji = stringValue(reaction.text);
+  let messageType = "text";
+  let content = "";
+
+  if (typeof message.conversation === "string") {
+    content = message.conversation;
+  } else if (typeof asRecord(message.extendedTextMessage).text === "string") {
+    content = stringValue(asRecord(message.extendedTextMessage).text);
+  } else if (media) {
+    messageType = media[0];
+    content = stringValue(mediaPayload.caption)
+      || `[${media[0] === "audio" ? "Áudio" : media[0] === "sticker" ? "Figurinha" : "Arquivo"} recebido]`;
+  } else if (Object.keys(reaction).length > 0) {
+    messageType = "reaction";
+    content = reactionEmoji;
+  } else {
+    const location = asRecord(message.locationMessage);
+    const contactCard = asRecord(message.contactMessage);
+    const poll = asRecord(message.pollCreationMessageV3 ?? message.pollCreationMessage);
+    const interactive = asRecord(message.listResponseMessage);
+    if (Object.keys(location).length) {
+      messageType = "location";
+      content = stringValue(location.name) || stringValue(location.address) || "Localização compartilhada";
+    } else if (Object.keys(contactCard).length) {
+      messageType = "contact";
+      const vcard = stringValue(contactCard.vcard);
+      const phone = vcard.match(/TEL[^:]*:(?:tel:)?([^\r\n]+)/i)?.[1]?.trim();
+      content = [
+        stringValue(contactCard.displayName) || "Contato compartilhado",
+        phone ? normalizePhone(phone) : "",
+      ].filter(Boolean).join("\n");
+    } else if (Object.keys(poll).length) {
+      messageType = "poll";
+      const options = Array.isArray(poll.options)
+        ? poll.options.map((option) => stringValue(asRecord(option).optionName)).filter(Boolean)
+        : [];
+      content = [
+        stringValue(poll.name) || "Enquete",
+        ...options.map((option) => `• ${option}`),
+      ].join("\n");
+    } else if (Object.keys(asRecord(message.pollUpdateMessage)).length) {
+      messageType = "poll";
+      content = "Voto em enquete";
+    } else if (Object.keys(interactive).length) {
+      messageType = "text";
+      content = stringValue(asRecord(interactive.singleSelectReply).title)
+        || stringValue(interactive.title)
+        || "Resposta interativa";
+    } else {
+      messageType = stringValue(item.messageType).replace(/Message$/, "").toLowerCase() || "text";
+      content = "[Mensagem recebida]";
+    }
+  }
+
+  const replyKey = asRecord(asRecord(message.extendedTextMessage).contextInfo);
+  const mediaCaption = stringValue(mediaPayload.caption) || null;
+  const payload = withoutEvolutionBinary({
+    key: item.key,
+    message: item.message,
+    messageType: item.messageType,
+    messageTimestamp: item.messageTimestamp,
+  }) as Record<string, unknown>;
+
+  return {
+    messageType,
+    content,
+    mediaMimeType: stringValue(mediaPayload.mimetype) || null,
+    mediaFileName:
+      stringValue(mediaPayload.fileName) || stringValue(mediaPayload.filename) || null,
+    mediaCaption,
+    providerPayload: payload,
+    reactionEmoji: reactionEmoji || null,
+    reactionTargetId: stringValue(reactionKey.id),
+    replyTargetId: stringValue(asRecord(asRecord(replyKey.quotedMessage).key).id),
+  };
+}
+
+function evolutionMessageStatus(value: unknown, fromMe: boolean): string {
+  const normalized = String(value ?? "").toLowerCase();
+  if (normalized.includes("read") || normalized === "4") return "read";
+  if (normalized.includes("deliver") || normalized === "3") return "delivered";
+  if (normalized.includes("sent") || normalized === "2") return "sent";
+  return fromMe ? "sent" : "received";
+}
+
 function webhookVerifyToken(): string {
   if (process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
     return process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
@@ -308,9 +448,10 @@ async function evolutionRequest<T>(
   session: EvolutionConfig,
   endpoint: string,
   init: RequestInit = {},
+  timeoutMs = metaRequestTimeoutMs,
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), metaRequestTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const headers = new Headers(init.headers);
   headers.set("apikey", session.apiKey);
   if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
@@ -401,7 +542,22 @@ async function setEvolutionWebhook(session: EvolutionSession, req: Request) {
           enabled: true,
           webhookByEvents: false,
           webhookBase64: false,
-          events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"],
+          events: [
+            "MESSAGES_SET",
+            "MESSAGES_UPSERT",
+            "MESSAGES_UPDATE",
+            "MESSAGES_DELETE",
+            "CONTACTS_SET",
+            "CONTACTS_UPSERT",
+            "CONTACTS_UPDATE",
+            "CHATS_SET",
+            "CHATS_UPSERT",
+            "CHATS_UPDATE",
+            "GROUPS_UPSERT",
+            "GROUP_UPDATE",
+            "GROUP_PARTICIPANTS_UPDATE",
+            "CONNECTION_UPDATE",
+          ],
         },
       }),
     },
@@ -861,7 +1017,22 @@ async function dispatchResultResponse(dispatchId: number) {
   });
 }
 
-function messageResponse(message: typeof chatMessages.$inferSelect) {
+function messageResponse(
+  message: typeof chatMessages.$inferSelect,
+  conversationId?: number,
+) {
+  const hasMedia = ["image", "video", "audio", "document", "sticker"].includes(
+    message.messageType,
+  );
+  const rawMessage = asRecord(asRecord(message.providerPayload).message);
+  const location = asRecord(unwrapEvolutionMessage(rawMessage).locationMessage);
+  const latitude = Number(location.degreesLatitude);
+  const longitude = Number(location.degreesLongitude);
+  const locationUrl = message.messageType === "location"
+    && Number.isFinite(latitude)
+    && Number.isFinite(longitude)
+    ? `https://www.google.com/maps?q=${latitude},${longitude}`
+    : null;
   return ListConversationMessagesResponseItem.parse({
     id: message.id,
     direction: message.direction,
@@ -870,6 +1041,16 @@ function messageResponse(message: typeof chatMessages.$inferSelect) {
     status: message.status,
     createdAt: message.createdAt.toISOString(),
     whatsappMessageId: message.whatsappMessageId,
+    mediaUrl: locationUrl || (
+      hasMedia && message.providerPayload && conversationId
+        ? `/api/conversations/${conversationId}/messages/${message.id}/media`
+        : null
+    ),
+    mediaMimeType: message.mediaMimeType,
+    mediaFileName: message.mediaFileName,
+    mediaCaption: message.mediaCaption,
+    replyToMessageId: message.replyToMessageId,
+    reactionEmoji: message.reactionEmoji,
   });
 }
 
@@ -892,15 +1073,23 @@ async function conversationResponse(
     status: "received",
     createdAt: conversation.updatedAt.toISOString(),
     whatsappMessageId: null,
+    mediaUrl: null,
+    mediaMimeType: null,
+    mediaFileName: null,
+    mediaCaption: null,
+    replyToMessageId: null,
+    reactionEmoji: null,
   } as const;
 
   return {
     id: conversation.id,
+    conversationType: conversation.conversationType === "group" ? "group" : "direct",
+    remoteJid: conversation.remoteJid,
     contact: {
       name: contactDisplayName(contact),
       phoneNumber: contact.phoneNumber,
     },
-    lastMessage: lastMessage ? messageResponse(lastMessage) : fallback,
+    lastMessage: lastMessage ? messageResponse(lastMessage, conversation.id) : fallback,
     unreadCount: conversation.unreadCount,
     updatedAt: conversation.updatedAt.toISOString(),
   };
@@ -1037,7 +1226,7 @@ async function storeOutboundEvolutionMediaMessage(
       {
         method: "POST",
         body: JSON.stringify({
-          number: evolutionPhoneNumber(contact.phoneNumber, session),
+           number: evolutionRecipient(contact.phoneNumber, conversation, session),
           mediatype: type,
           mimetype: file.mimetype,
           caption,
@@ -1051,9 +1240,31 @@ async function storeOutboundEvolutionMediaMessage(
     const rawId = stringValue(key.id) || stringValue(topKey.id) || stringValue(body.keyId);
     if (!rawId) throw new MetaApiError("A Evolution API não retornou o ID da mídia enviada.");
     const whatsappMessageId = `evolution:${session.instanceName}:${rawId}`;
+    const mediaData = asRecord(body.data);
+    const providerPayload = withoutEvolutionBinary({
+      key: Object.keys(key).length ? key : topKey,
+      message: mediaData.message ?? body.message,
+      messageType: type,
+      messageTimestamp: mediaData.messageTimestamp ?? body.messageTimestamp,
+    }) as Record<string, unknown>;
+    const [latestPending] = await db
+      .select({ status: chatMessages.status })
+      .from(chatMessages)
+      .where(eq(chatMessages.id, pending.id))
+      .limit(1);
+    const finalStatus = ["delivered", "read", "failed"].includes(latestPending?.status ?? "")
+      ? latestPending!.status
+      : "sent";
     const [sent] = await db
       .update(chatMessages)
-      .set({ status: "sent", whatsappMessageId })
+      .set({
+        status: finalStatus,
+        whatsappMessageId,
+        providerPayload,
+        mediaMimeType: file.mimetype,
+        mediaFileName: file.originalname,
+        mediaCaption: caption || null,
+      })
       .where(eq(chatMessages.id, pending.id))
       .returning();
     await db
@@ -1219,6 +1430,137 @@ async function getOrCreateConversation(contactId: number, phoneNumberId: string)
   return created;
 }
 
+async function getOrCreateEvolutionConversation(
+  remoteJid: string,
+  name: string | undefined,
+  session: EvolutionSession,
+) {
+  const isGroup = remoteJid.endsWith("@g.us");
+  const rawPhone = remoteJid.split("@")[0];
+  let contact: typeof contacts.$inferSelect;
+
+  if (isGroup) {
+    const [existing] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.phoneNumber, remoteJid))
+      .limit(1);
+    const groupName = name?.trim() || existing?.name || "Grupo do WhatsApp";
+    if (existing) {
+      if (existing.name !== groupName) {
+        const [updated] = await db
+          .update(contacts)
+          .set({ name: groupName, updatedAt: new Date() })
+          .where(eq(contacts.id, existing.id))
+          .returning();
+        contact = updated ?? existing;
+      } else {
+        contact = existing;
+      }
+    } else {
+      const [created] = await db
+        .insert(contacts)
+        .values({ phoneNumber: remoteJid, name: groupName })
+        .returning();
+      contact = created;
+    }
+  } else {
+    const phoneNumber = normalizePhone(rawPhone);
+    if (/^\d{8,15}$/.test(phoneNumber)) {
+      contact = await getOrCreateContact(phoneNumber, name);
+    } else {
+      const [existing] = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.phoneNumber, remoteJid))
+        .limit(1);
+      if (existing) {
+        const nextName = name?.trim() || existing.name;
+        if (nextName !== existing.name) {
+          const [updated] = await db
+            .update(contacts)
+            .set({ name: nextName, updatedAt: new Date() })
+            .where(eq(contacts.id, existing.id))
+            .returning();
+          contact = updated ?? existing;
+        } else {
+          contact = existing;
+        }
+      } else {
+        const [created] = await db
+          .insert(contacts)
+          .values({
+            phoneNumber: remoteJid,
+            name: name?.trim() || "Contato do WhatsApp",
+          })
+          .returning();
+        contact = created;
+      }
+    }
+  }
+
+  const providerPhoneNumberId = `evolution:${session.instanceName}`;
+  let [conversation] = await db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.contactId, contact.id),
+        eq(conversations.phoneNumberId, providerPhoneNumberId),
+      ),
+    )
+    .limit(1);
+  if (!conversation) {
+    [conversation] = await db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.contactId, contact.id),
+          eq(conversations.phoneNumberId, "unknown"),
+        ),
+      )
+      .limit(1);
+    if (conversation) {
+      const [migrated] = await db
+        .update(conversations)
+        .set({ phoneNumberId: providerPhoneNumberId })
+        .where(eq(conversations.id, conversation.id))
+        .returning();
+      conversation = migrated ?? conversation;
+    }
+  }
+  if (!conversation) {
+    const [created] = await db
+      .insert(conversations)
+      .values({ contactId: contact.id, phoneNumberId: providerPhoneNumberId })
+      .returning();
+    conversation = created;
+  }
+
+  const [updated] = await db
+    .update(conversations)
+    .set({
+      remoteJid,
+      conversationType: isGroup ? "group" : "direct",
+    })
+    .where(eq(conversations.id, conversation.id))
+    .returning();
+  return updated ?? conversation;
+}
+
+function evolutionRecipient(
+  contactPhone: string,
+  conversation: typeof conversations.$inferSelect,
+  session: EvolutionSession,
+): string {
+  if (conversation.conversationType === "group" && conversation.remoteJid?.endsWith("@g.us")) {
+    return conversation.remoteJid;
+  }
+  if (conversation.remoteJid?.endsWith("@lid")) return conversation.remoteJid;
+  return evolutionPhoneNumber(contactPhone, session);
+}
+
 async function storeOutboundMessage(
   conversation: typeof conversations.$inferSelect,
   content: string,
@@ -1269,6 +1611,7 @@ async function storeOutboundMessage(
 }
 
 function evolutionPhoneNumber(phoneNumber: string, session: EvolutionSession): string {
+  if (phoneNumber.includes("@")) return phoneNumber;
   const normalized = normalizePhone(phoneNumber);
   const senderDigits = normalizePhone(session.phoneNumber ?? "");
   if (senderDigits.startsWith("55") && (normalized.length === 10 || normalized.length === 11)) {
@@ -1320,10 +1663,22 @@ async function storeOutboundEvolutionMessage(
     })
     .returning();
   try {
-    const whatsappMessageId = await sendEvolutionTextMessage(session, contact.phoneNumber, content);
+    const whatsappMessageId = await sendEvolutionTextMessage(
+      session,
+      evolutionRecipient(contact.phoneNumber, conversation, session),
+      content,
+    );
+    const [latestPending] = await db
+      .select({ status: chatMessages.status })
+      .from(chatMessages)
+      .where(eq(chatMessages.id, pending.id))
+      .limit(1);
+    const finalStatus = ["delivered", "read", "failed"].includes(latestPending?.status ?? "")
+      ? latestPending!.status
+      : "sent";
     const [sent] = await db
       .update(chatMessages)
-      .set({ status: "sent", whatsappMessageId })
+      .set({ status: finalStatus, whatsappMessageId })
       .where(eq(chatMessages.id, pending.id))
       .returning();
     await db
@@ -1700,12 +2055,218 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
       .update(conversations)
       .set({ unreadCount: 0 })
       .where(eq(conversations.id, conversation.id));
-    res.json(ListConversationMessagesResponse.parse(messages.map(messageResponse)));
+    res.json(
+      ListConversationMessagesResponse.parse(
+        messages.map((message) => messageResponse(message, conversation.id)),
+      ),
+    );
   } catch (error) {
     logger.error({ err: error }, "Failed to list WhatsApp messages");
     res.status(400).json({ error: "Não foi possível carregar as mensagens." });
   }
 });
+
+router.get(
+  "/conversations/:conversationId/messages/:messageId/media",
+  async (req, res) => {
+    try {
+      const conversationId = Number(req.params.conversationId);
+      const messageId = Number(req.params.messageId);
+      if (!Number.isInteger(conversationId) || !Number.isInteger(messageId)) {
+        res.status(404).json({ error: "Mídia não encontrada." });
+        return;
+      }
+      const [message] = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.id, messageId),
+            eq(chatMessages.conversationId, conversationId),
+          ),
+        )
+        .limit(1);
+      const payload = asRecord(message?.providerPayload);
+      if (!message || !Object.keys(payload).length) {
+        res.status(404).json({ error: "A mídia desta mensagem não está disponível." });
+        return;
+      }
+      const session = activeEvolutionSession;
+      if (!session) {
+        res.status(503).json({ error: "A sessão Evolution não está disponível para carregar a mídia." });
+        return;
+      }
+      const mediaResponse = await evolutionRequest<Record<string, unknown>>(
+        session,
+        `/chat/getBase64FromMediaMessage/${encodeURIComponent(session.instanceName)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ message: payload, convertToMp4: false }),
+        },
+        60_000,
+      );
+      const mediaData = asRecord(mediaResponse.data);
+      const encoded =
+        stringValue(mediaResponse.base64)
+        || stringValue(mediaData.base64)
+        || stringValue(mediaResponse.mediaBase64)
+        || stringValue(mediaData.mediaBase64);
+      const base64 = encoded.replace(/^data:[^;,]+;base64,/, "");
+      if (!base64) {
+        res.status(502).json({ error: "A Evolution API não retornou o conteúdo da mídia." });
+        return;
+      }
+      const bytes = Buffer.from(base64, "base64");
+      if (!bytes.length) {
+        res.status(502).json({ error: "O arquivo retornado pela Evolution API está vazio." });
+        return;
+      }
+      const mimeType =
+        stringValue(mediaResponse.mimetype)
+        || stringValue(mediaData.mimetype)
+        || message.mediaMimeType
+        || "application/octet-stream";
+      const fileName =
+        stringValue(mediaResponse.fileName)
+        || stringValue(mediaData.fileName)
+        || message.mediaFileName
+        || "arquivo";
+      const safeFileName = fileName.replace(/[\r\n"]/g, "_");
+      const inline = /^(image|audio|video)\//i.test(mimeType);
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader(
+        "Content-Disposition",
+        `${inline ? "inline" : "attachment"}; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      );
+      res.setHeader("Content-Length", bytes.length);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.send(bytes);
+    } catch (error) {
+      const status = error instanceof MetaApiError ? error.status : 502;
+      logger.warn({ err: error, conversationId: req.params.conversationId, messageId: req.params.messageId }, "Evolution media retrieval failed");
+      res.status(status).json({ error: "Não foi possível carregar a mídia do WhatsApp." });
+    }
+  },
+);
+
+router.post(
+  "/conversations/:conversationId/messages/:messageId/reaction",
+  async (req, res) => {
+    try {
+      const conversationId = Number(req.params.conversationId);
+      const messageId = Number(req.params.messageId);
+      if (!Number.isInteger(conversationId) || !Number.isInteger(messageId)) {
+        res.status(404).json({ error: "Mensagem não encontrada." });
+        return;
+      }
+      const { emoji } = SendConversationMessageReactionBody.parse(req.body);
+      const [conversation] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .limit(1);
+      const [target] = await db
+        .select()
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.id, messageId),
+            eq(chatMessages.conversationId, conversationId),
+          ),
+        )
+        .limit(1);
+      const session = activeEvolutionSession;
+      if (!conversation || !target) {
+        res.status(404).json({ error: "Mensagem não encontrada." });
+        return;
+      }
+      if (activeProvider !== "evolution" || !session?.connected) {
+        res.status(400).json({ error: "Reações estão disponíveis enquanto a conexão Evolution estiver ativa." });
+        return;
+      }
+      if (target.messageType === "reaction") {
+        res.status(400).json({ error: "Não é possível reagir a outra reação." });
+        return;
+      }
+      const [contact] = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, conversation.contactId))
+        .limit(1);
+      const storedPayload = asRecord(target.providerPayload);
+      const storedKey = asRecord(storedPayload.key);
+      const rawMessageId = target.whatsappMessageId?.split(":").slice(2).join(":") || "";
+      const remoteJid =
+        stringValue(storedKey.remoteJid)
+        || conversation.remoteJid
+        || (contact?.phoneNumber.endsWith("@g.us")
+          ? contact.phoneNumber
+          : `${contact?.phoneNumber ?? ""}@s.whatsapp.net`);
+      const reactionKey = {
+        ...storedKey,
+        remoteJid,
+        id: stringValue(storedKey.id) || rawMessageId,
+        fromMe: typeof storedKey.fromMe === "boolean"
+          ? storedKey.fromMe
+          : target.direction === "outbound",
+      };
+      if (!reactionKey.id || !reactionKey.remoteJid) {
+        res.status(400).json({ error: "A Evolution API não possui os dados necessários para reagir a esta mensagem." });
+        return;
+      }
+
+      const response = await evolutionRequest<Record<string, unknown>>(
+        session,
+        `/message/sendReaction/${encodeURIComponent(session.instanceName)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reactionKey, reactionMessage: emoji }),
+        },
+      );
+      await db
+        .delete(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.conversationId, conversation.id),
+            eq(chatMessages.replyToMessageId, target.id),
+            eq(chatMessages.direction, "outbound"),
+            eq(chatMessages.messageType, "reaction"),
+          ),
+        );
+      const responseKey = asRecord(asRecord(response.data).key);
+      const topKey = asRecord(response.key);
+      const reactionRawId = stringValue(responseKey.id) || stringValue(topKey.id);
+      const reactionMessage = {
+        key: responseKey,
+        message: asRecord(response.data).message,
+        messageTimestamp: Math.floor(Date.now() / 1000),
+      };
+      const [reaction] = await db
+        .insert(chatMessages)
+        .values({
+          conversationId: conversation.id,
+          whatsappMessageId: reactionRawId
+            ? `evolution:${session.instanceName}:${reactionRawId}`
+            : null,
+          direction: "outbound",
+          messageType: "reaction",
+          content: emoji,
+          reactionEmoji: emoji || null,
+          replyToMessageId: target.id,
+          providerPayload: reactionMessage,
+          status: "sent",
+        })
+        .returning();
+      publishConversationEvent({ conversationId: conversation.id, reason: "message" });
+      res.json(messageResponse(reaction, conversation.id));
+    } catch (error) {
+      const status = error instanceof MetaApiError ? error.status : 400;
+      logger.warn({ err: error, conversationId: req.params.conversationId, messageId: req.params.messageId }, "Evolution message reaction failed");
+      res.status(status).json({ error: error instanceof Error ? error.message : "Falha ao reagir à mensagem." });
+    }
+  },
+);
 
 router.post("/conversations/:conversationId/messages", async (req, res) => {
   try {
@@ -1735,7 +2296,7 @@ router.post("/conversations/:conversationId/messages", async (req, res) => {
       res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de enviar mensagens." });
       return;
     }
-    res.status(201).json(messageResponse(message));
+    res.status(201).json(messageResponse(message, conversation.id));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
     const message = error instanceof Error ? error.message : "Falha ao enviar mensagem.";
@@ -1779,7 +2340,7 @@ router.post(
         res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de enviar arquivos." });
         return;
       }
-      res.status(201).json(messageResponse(message));
+      res.status(201).json(messageResponse(message, conversation.id));
     } catch (error) {
       const status = error instanceof MetaApiError ? error.status : 400;
       const message = error instanceof Error ? error.message : "Falha ao enviar arquivo.";
@@ -1873,10 +2434,12 @@ router.get("/contacts", async (_req, res) => {
       .select()
       .from(contacts)
       .orderBy(asc(contacts.name), asc(contacts.phoneNumber));
-    res.json(ListContactsResponse.parse(savedContacts.map((contact) => ({
+    res.json(ListContactsResponse.parse(savedContacts
+      .filter((contact) => /^\d{8,15}$/.test(contact.phoneNumber))
+      .map((contact) => ({
       name: contact.name,
       phoneNumber: contact.phoneNumber,
-    }))));
+      }))));
   } catch (error) {
     logger.error({ err: error }, "Failed to list WhatsApp leads");
     res.status(500).json({ error: "Não foi possível carregar os leads." });
@@ -2236,7 +2799,7 @@ router.post("/evolution/webhook", async (req, res) => {
     const body = asRecord(req.body);
     const event = stringValue(body.event).toLowerCase();
     const dataValue = body.data;
-    const messages = Array.isArray(dataValue) ? dataValue : [dataValue];
+    const messages = evolutionEventItems(dataValue, "messages");
 
     if (event === "connection.update") {
       const update = asRecord(dataValue);
@@ -2250,87 +2813,273 @@ router.post("/evolution/webhook", async (req, res) => {
       if (qr) session.qrCode = qr;
     }
 
-    if (event === "messages.upsert") {
-      for (const raw of messages) {
-        const item = asRecord(raw);
+    if (["contacts.set", "contacts.upsert", "contacts.update"].includes(event)) {
+      for (const contactPayload of evolutionEventItems(dataValue, "contacts")) {
+        const jid =
+          stringValue(contactPayload.id)
+          || stringValue(contactPayload.jid)
+          || stringValue(contactPayload.remoteJid);
+        const profileName =
+          stringValue(contactPayload.name)
+          || stringValue(contactPayload.pushName)
+          || stringValue(contactPayload.notify)
+          || stringValue(contactPayload.verifiedName);
+        const rawPhone = stringValue(contactPayload.phoneNumber)
+          || stringValue(contactPayload.number)
+          || jid.split("@")[0];
+        const phoneNumber = normalizePhone(rawPhone);
+        if (/^\d{8,15}$/.test(phoneNumber)) {
+          await getOrCreateContact(phoneNumber, profileName || undefined);
+        } else if (jid.endsWith("@lid")) {
+          const [existing] = await db
+            .select()
+            .from(contacts)
+            .where(eq(contacts.phoneNumber, jid))
+            .limit(1);
+          if (existing) {
+            if (profileName && profileName !== existing.name) {
+              await db
+                .update(contacts)
+                .set({ name: profileName, updatedAt: new Date() })
+                .where(eq(contacts.id, existing.id));
+            }
+          } else {
+            await db.insert(contacts).values({
+              phoneNumber: jid,
+              name: profileName || "Contato do WhatsApp",
+            });
+          }
+        }
+      }
+    }
+
+    if (["chats.set", "chats.upsert", "chats.update", "groups.upsert", "group.update"].includes(event)) {
+      const collectionKey = event.startsWith("group") ? "groups" : "chats";
+      for (const chatPayload of evolutionEventItems(dataValue, collectionKey)) {
+        const remoteJid =
+          stringValue(chatPayload.id)
+          || stringValue(chatPayload.remoteJid)
+          || stringValue(chatPayload.jid)
+          || stringValue(asRecord(chatPayload.key).remoteJid);
+        if (!remoteJid.includes("@")) continue;
+        const name =
+          stringValue(chatPayload.name)
+          || stringValue(chatPayload.subject)
+          || stringValue(chatPayload.pushName)
+          || stringValue(chatPayload.notify)
+          || undefined;
+        const conversation = await getOrCreateEvolutionConversation(remoteJid, name, session);
+        if (!conversation) continue;
+        const rawUnread = Number(chatPayload.unreadCount ?? chatPayload.unreadMessages);
+        const lastTimestamp = Number(
+          chatPayload.lastMsgTimestamp
+          ?? chatPayload.conversationTimestamp
+          ?? chatPayload.timestamp,
+        );
+        await db
+          .update(conversations)
+          .set({
+            ...(Number.isFinite(rawUnread) && rawUnread >= 0
+              ? { unreadCount: Math.floor(rawUnread) }
+              : {}),
+            ...(Number.isFinite(lastTimestamp) && lastTimestamp > 0
+              ? { lastMessageAt: new Date(lastTimestamp * 1000) }
+              : {}),
+          })
+          .where(eq(conversations.id, conversation.id));
+      }
+    }
+
+    if (["messages.upsert", "messages.set"].includes(event)) {
+      const isHistorySync = event === "messages.set";
+      const changedConversationIds = new Set<number>();
+      for (const item of messages) {
         const key = asRecord(item.key);
         const rawId = stringValue(key.id) || stringValue(item.id);
         const remoteJid = stringValue(key.remoteJid) || stringValue(item.remoteJid);
-        const phoneNumber = normalizePhone(remoteJid.split("@")[0]);
-        if (!rawId || !phoneNumber || !/^\d{8,15}$/.test(phoneNumber)) continue;
+        if (!rawId || !remoteJid.includes("@")) continue;
         const messageId = `evolution:${session.instanceName}:${rawId}`;
-        const fromMe = key.fromMe === true;
-        if (fromMe) {
-          const [stored] = await db
-            .select()
-            .from(chatMessages)
-            .where(eq(chatMessages.whatsappMessageId, messageId))
-            .limit(1);
-          if (stored && stored.status !== "read") {
-            await db.update(chatMessages)
-              .set({ status: "sent" })
-              .where(eq(chatMessages.id, stored.id));
-            publishConversationEvent({ conversationId: stored.conversationId, reason: "status", whatsappMessageId: messageId });
-          }
-          continue;
-        }
-
-        const [alreadyStored] = await db
-          .select({ id: chatMessages.id })
+        const fromMe = key.fromMe === true || item.fromMe === true;
+        const details = evolutionMessageDetails(item);
+        const contactName =
+          stringValue(item.pushName)
+          || stringValue(item.notifyName)
+          || stringValue(item.verifiedName)
+          || undefined;
+        const conversation = await getOrCreateEvolutionConversation(
+          remoteJid,
+          remoteJid.endsWith("@g.us")
+            ? stringValue(item.subject) || stringValue(item.groupName) || undefined
+            : contactName,
+          session,
+        );
+        if (!conversation) continue;
+        const [stored] = await db
+          .select()
           .from(chatMessages)
           .where(eq(chatMessages.whatsappMessageId, messageId))
           .limit(1);
-        if (alreadyStored) continue;
-
-        const contentPayload = asRecord(item.message);
-        let content = "";
-        let messageType = stringValue(item.messageType).replace(/Message$/, "").toLowerCase() || "text";
-        if (typeof contentPayload.conversation === "string") {
-          content = contentPayload.conversation;
-          messageType = "text";
-        } else if (typeof asRecord(contentPayload.extendedTextMessage).text === "string") {
-          content = stringValue(asRecord(contentPayload.extendedTextMessage).text);
-          messageType = "text";
-        } else {
-          const payloadByType = [
-            ["image", contentPayload.imageMessage],
-            ["video", contentPayload.videoMessage],
-            ["document", contentPayload.documentMessage],
-            ["audio", contentPayload.audioMessage],
-            ["sticker", contentPayload.stickerMessage],
-          ] as const;
-          const media = payloadByType.find(([, payload]) => Object.keys(asRecord(payload)).length > 0);
-          if (media) {
-            messageType = media[0];
-            content = stringValue(asRecord(media[1]).caption) || `[${media[0] === "audio" ? "Áudio" : "Arquivo"} recebido]`;
-          } else {
-            content = "[Mensagem recebida]";
-          }
-        }
-
-        const contact = await getOrCreateContact(phoneNumber, stringValue(item.pushName) || undefined);
-        const conversation = await getOrCreateConversation(contact.id, "unknown");
-        const rawTimestamp = Number(item.messageTimestamp);
+        const rawTimestamp = Number(item.messageTimestamp ?? item.timestamp);
         const createdAt = Number.isFinite(rawTimestamp) && rawTimestamp > 0
           ? new Date(rawTimestamp * 1000)
           : new Date();
+        const status = evolutionMessageStatus(item.status, fromMe);
+        if (stored) {
+          await db
+            .update(chatMessages)
+            .set({
+              providerPayload: details.providerPayload,
+              mediaMimeType: details.mediaMimeType,
+              mediaFileName: details.mediaFileName,
+              mediaCaption: details.mediaCaption,
+              status: stored.status === "read" ? "read" : status,
+            })
+            .where(eq(chatMessages.id, stored.id));
+          continue;
+        }
+
+        if (fromMe) {
+          const pendingRows = await db
+            .select()
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.conversationId, conversation.id),
+                eq(chatMessages.direction, "outbound"),
+                eq(chatMessages.status, "pending"),
+              ),
+            )
+            .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
+            .limit(5);
+          const pending = pendingRows.find((candidate) => {
+            const ageMs = Math.abs(createdAt.getTime() - candidate.createdAt.getTime());
+            const sameType = candidate.messageType === details.messageType;
+            const sameText = candidate.content === details.content;
+            const isMedia = ["image", "video", "audio", "document", "sticker"].includes(details.messageType);
+            return ageMs < 120_000 && sameType && (sameText || isMedia);
+          });
+          if (pending) {
+            await db
+              .update(chatMessages)
+              .set({
+                whatsappMessageId: messageId,
+                status,
+                providerPayload: details.providerPayload,
+                mediaMimeType: details.mediaMimeType,
+                mediaFileName: details.mediaFileName,
+                mediaCaption: details.mediaCaption,
+              })
+              .where(eq(chatMessages.id, pending.id));
+            const latestMessageAt =
+              conversation.lastMessageAt && conversation.lastMessageAt > createdAt
+                ? conversation.lastMessageAt
+                : createdAt;
+            await db
+              .update(conversations)
+              .set({ lastMessageAt: latestMessageAt, updatedAt: latestMessageAt })
+              .where(eq(conversations.id, conversation.id));
+            changedConversationIds.add(conversation.id);
+            continue;
+          }
+        }
+
+        let replyToMessageId: number | null = null;
+        const targetRawId = details.messageType === "reaction"
+          ? details.reactionTargetId
+          : details.replyTargetId;
+        if (targetRawId) {
+          const [target] = await db
+            .select({ id: chatMessages.id })
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.conversationId, conversation.id),
+                eq(
+                  chatMessages.whatsappMessageId,
+                  `evolution:${session.instanceName}:${targetRawId}`,
+                ),
+              ),
+            )
+            .limit(1);
+          replyToMessageId = target?.id ?? null;
+          if (details.messageType === "reaction" && fromMe && replyToMessageId !== null) {
+            await db
+              .delete(chatMessages)
+              .where(
+                and(
+                  eq(chatMessages.conversationId, conversation.id),
+                  eq(chatMessages.replyToMessageId, replyToMessageId),
+                  eq(chatMessages.direction, "outbound"),
+                  eq(chatMessages.messageType, "reaction"),
+                ),
+              );
+          }
+          if (details.messageType === "reaction" && fromMe && !details.reactionEmoji) continue;
+        }
+
         await db.insert(chatMessages).values({
           conversationId: conversation.id,
           whatsappMessageId: messageId,
-          direction: "inbound",
-          messageType,
-          content,
-          status: "received",
+          direction: fromMe ? "outbound" : "inbound",
+          messageType: details.messageType,
+          content: details.content,
+          status,
+          providerPayload: details.providerPayload,
+          mediaMimeType: details.mediaMimeType,
+          mediaFileName: details.mediaFileName,
+          mediaCaption: details.mediaCaption,
+          replyToMessageId,
+          reactionEmoji: details.messageType === "reaction" ? details.reactionEmoji : null,
           createdAt,
         });
+        const latestMessageAt =
+          conversation.lastMessageAt && conversation.lastMessageAt > createdAt
+            ? conversation.lastMessageAt
+            : createdAt;
         await db.update(conversations)
           .set({
-            unreadCount: conversation.unreadCount + 1,
-            lastMessageAt: createdAt,
-            updatedAt: createdAt,
+            ...(isHistorySync || fromMe ? {} : { unreadCount: conversation.unreadCount + 1 }),
+            lastMessageAt: latestMessageAt,
+            updatedAt: latestMessageAt,
           })
           .where(eq(conversations.id, conversation.id));
-        publishConversationEvent({ conversationId: conversation.id, reason: "message", whatsappMessageId: messageId });
+        changedConversationIds.add(conversation.id);
+      }
+      for (const conversationId of changedConversationIds) {
+        const referenceRows = await db
+          .select()
+          .from(chatMessages)
+          .where(eq(chatMessages.conversationId, conversationId));
+        for (const row of referenceRows) {
+          if (row.replyToMessageId || !row.providerPayload) continue;
+          const details = evolutionMessageDetails(
+            asRecord(row.providerPayload),
+          );
+          const targetRawId = details.messageType === "reaction"
+            ? details.reactionTargetId
+            : details.replyTargetId;
+          if (!targetRawId) continue;
+          const [target] = await db
+            .select({ id: chatMessages.id })
+            .from(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.conversationId, conversationId),
+                eq(
+                  chatMessages.whatsappMessageId,
+                  `evolution:${session.instanceName}:${targetRawId}`,
+                ),
+              ),
+            )
+            .limit(1);
+          if (target) {
+            await db
+              .update(chatMessages)
+              .set({ replyToMessageId: target.id })
+              .where(eq(chatMessages.id, row.id));
+          }
+        }
+        publishConversationEvent({ conversationId, reason: "message" });
       }
     }
 
@@ -2364,10 +3113,36 @@ router.post("/evolution/webhook", async (req, res) => {
       }
     }
 
+    if (event === "messages.delete") {
+      for (const item of messages) {
+        const rawId = stringValue(asRecord(item.key).id) || stringValue(item.id);
+        if (!rawId) continue;
+        const messageId = `evolution:${session.instanceName}:${rawId}`;
+        const [stored] = await db
+          .select({ conversationId: chatMessages.conversationId })
+          .from(chatMessages)
+          .where(eq(chatMessages.whatsappMessageId, messageId))
+          .limit(1);
+        if (!stored) continue;
+        await db
+          .update(chatMessages)
+          .set({
+            content: "Esta mensagem foi apagada no WhatsApp.",
+            messageType: "text",
+            providerPayload: null,
+            mediaMimeType: null,
+            mediaFileName: null,
+            mediaCaption: null,
+          })
+          .where(eq(chatMessages.whatsappMessageId, messageId));
+        publishConversationEvent({ conversationId: stored.conversationId, reason: "message", whatsappMessageId: messageId });
+      }
+    }
+
     res.json({ success: true });
   } catch (error) {
     logger.error({ err: error, instanceName: session.instanceName }, "Evolution API webhook processing failed");
-    res.status(200).json({ success: true });
+    res.status(500).json({ error: "Falha ao processar a atualização do WhatsApp." });
   }
 });
 

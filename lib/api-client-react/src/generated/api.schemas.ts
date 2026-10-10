@@ -87,6 +87,124 @@ export interface ContactInput {
   phoneNumber: string;
 }
 
+export type DashboardReportResponsePeriod = typeof DashboardReportResponsePeriod[keyof typeof DashboardReportResponsePeriod];
+
+
+export const DashboardReportResponsePeriod = {
+  '7d': '7d',
+  '30d': '30d',
+  '90d': '90d',
+} as const;
+
+export interface DashboardSummary {
+  totalMessages: number;
+  inboundMessages: number;
+  outboundMessages: number;
+  pendingOutboundMessages: number;
+  failedOutboundMessages: number;
+  answeredInboundMessages: number;
+  unansweredInboundMessages: number;
+  responseRatePercent: number;
+  /** @nullable */
+  averageResponseTimeMinutes: number | null;
+  activeConversations: number;
+  waitingForTeam: number;
+  waitingForCustomer: number;
+  unreadConversations: number;
+  templateDispatchCount: number;
+  templateRecipientsCount: number;
+  templateSentCount: number;
+  templateDeliveredCount: number;
+  templateReadCount: number;
+  templateFailedCount: number;
+  templatePendingCount: number;
+}
+
+export interface DashboardTrendDay {
+  date: string;
+  inbound: number;
+  outbound: number;
+}
+
+export interface DashboardTopContact {
+  contactName: string;
+  phoneNumber: string;
+  messageCount: number;
+  lastMessageAt: string;
+}
+
+export interface DashboardTemplateDispatch {
+  id: number;
+  templateName: string;
+  status: string;
+  recipientsCount: number;
+  sentCount: number;
+  deliveredCount: number;
+  readCount: number;
+  failedCount: number;
+  pendingCount: number;
+  estimatedCost: number;
+  currency: string;
+  createdAt: string;
+}
+
+export type DashboardActivityDirection = typeof DashboardActivityDirection[keyof typeof DashboardActivityDirection];
+
+
+export const DashboardActivityDirection = {
+  inbound: 'inbound',
+  outbound: 'outbound',
+} as const;
+
+export type DashboardActivityConversationType = typeof DashboardActivityConversationType[keyof typeof DashboardActivityConversationType];
+
+
+export const DashboardActivityConversationType = {
+  direct: 'direct',
+  group: 'group',
+} as const;
+
+export interface DashboardActivity {
+  id: number;
+  conversationId: number;
+  contactName: string;
+  phoneNumber: string;
+  direction: DashboardActivityDirection;
+  content: string;
+  messageType: string;
+  status: string;
+  conversationType: DashboardActivityConversationType;
+  createdAt: string;
+}
+
+export interface DashboardActivityPage {
+  items: DashboardActivity[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface DashboardReportResponse {
+  period: DashboardReportResponsePeriod;
+  rangeStart: string;
+  rangeEnd: string;
+  generatedAt: string;
+  summary: DashboardSummary;
+  trend: DashboardTrendDay[];
+  topContacts: DashboardTopContact[];
+  recentDispatches: DashboardTemplateDispatch[];
+  activity: DashboardActivityPage;
+}
+
+export type ConversationConversationType = typeof ConversationConversationType[keyof typeof ConversationConversationType];
+
+
+export const ConversationConversationType = {
+  direct: 'direct',
+  group: 'group',
+} as const;
+
 export type ChatMessageDirection = typeof ChatMessageDirection[keyof typeof ChatMessageDirection];
 
 
@@ -104,14 +222,37 @@ export interface ChatMessage {
   createdAt: string;
   /** @nullable */
   whatsappMessageId: string | null;
+  /** @nullable */
+  mediaUrl: string | null;
+  /** @nullable */
+  mediaMimeType: string | null;
+  /** @nullable */
+  mediaFileName: string | null;
+  /** @nullable */
+  mediaCaption: string | null;
+  /** @nullable */
+  replyToMessageId: number | null;
+  /** @nullable */
+  reactionEmoji: string | null;
 }
 
 export interface Conversation {
   id: number;
+  conversationType: ConversationConversationType;
+  /** @nullable */
+  remoteJid: string | null;
   contact: Contact;
   lastMessage: ChatMessage;
   unreadCount: number;
   updatedAt: string;
+}
+
+export interface MessageReactionInput {
+  /**
+     * Emoji to apply, or an empty string to remove your reaction.
+     * @maxLength 8
+     */
+  emoji: string;
 }
 
 export interface MessageInput {
@@ -333,6 +474,36 @@ export interface TemplateDispatchResult {
   currency: string;
   results: TemplateDispatchRecipient[];
 }
+
+export type GetDashboardReportParams = {
+period: GetDashboardReportPeriod;
+/**
+ * @minimum 1
+ */
+page?: number;
+};
+
+export type GetDashboardReportPeriod = typeof GetDashboardReportPeriod[keyof typeof GetDashboardReportPeriod];
+
+
+export const GetDashboardReportPeriod = {
+  '7d': '7d',
+  '30d': '30d',
+  '90d': '90d',
+} as const;
+
+export type ExportDashboardReportCsvParams = {
+period: ExportDashboardReportCsvPeriod;
+};
+
+export type ExportDashboardReportCsvPeriod = typeof ExportDashboardReportCsvPeriod[keyof typeof ExportDashboardReportCsvPeriod];
+
+
+export const ExportDashboardReportCsvPeriod = {
+  '7d': '7d',
+  '30d': '30d',
+  '90d': '90d',
+} as const;
 
 export type VerifyWebhookParams = {
 'hub.mode': string;

@@ -7,9 +7,13 @@
  */
 import type { ChatMessage } from './chatMessage';
 import type { Contact } from './contact';
+import type { ConversationConversationType } from './conversationConversationType';
 
 export interface Conversation {
   id: number;
+  conversationType: ConversationConversationType;
+  /** @nullable */
+  remoteJid: string | null;
   contact: Contact;
   lastMessage: ChatMessage;
   unreadCount: number;
