@@ -86,6 +86,8 @@ type EvolutionSession = EvolutionConfig & {
   profilePictureUrl?: string | null;
   profileMetadataFetchedAt?: number;
   profilePictureFetchedAt?: number;
+  webhookUrlConfigured?: string;
+  webhookConfigAttemptedAt?: number;
   qrCode: string | null;
 };
 
@@ -721,6 +723,7 @@ async function refreshEvolutionSession(
 }
 
 async function setEvolutionWebhook(session: EvolutionSession, req: Request) {
+  const url = evolutionWebhookUrl(req, session);
   await evolutionRequest(
     session,
     `/webhook/set/${encodeURIComponent(session.instanceName)}`,
@@ -728,7 +731,7 @@ async function setEvolutionWebhook(session: EvolutionSession, req: Request) {
       method: "POST",
       body: JSON.stringify({
         webhook: {
-          url: evolutionWebhookUrl(req, session),
+          url,
           enabled: true,
           webhookByEvents: false,
           webhookBase64: false,
@@ -752,6 +755,17 @@ async function setEvolutionWebhook(session: EvolutionSession, req: Request) {
       }),
     },
   );
+  session.webhookUrlConfigured = url;
+}
+
+async function ensureEvolutionWebhook(session: EvolutionSession, req: Request): Promise<void> {
+  const expectedUrl = evolutionWebhookUrl(req, session);
+  if (session.webhookUrlConfigured === expectedUrl) return;
+
+  const now = Date.now();
+  if (now - (session.webhookConfigAttemptedAt ?? 0) < 60_000) return;
+  session.webhookConfigAttemptedAt = now;
+  await setEvolutionWebhook(session, req);
 }
 
 function evolutionConnectionResponse(session: EvolutionSession | null): EvolutionConnectionStatus {
@@ -1941,9 +1955,14 @@ router.get("/connection", (req, res) => {
   res.json(GetConnectionResponse.parse(connectionStatus(req)));
 });
 
-router.get("/evolution/connection", async (_req, res) => {
+router.get("/evolution/connection", async (req, res) => {
   const session = activeEvolutionSession;
   if (session) {
+    try {
+      await ensureEvolutionWebhook(session, req);
+    } catch (error) {
+      logger.warn({ err: error, instanceName: session.instanceName }, "Could not refresh QR Code webhook configuration");
+    }
     try {
       await refreshEvolutionSession(session, !session.qrCode);
     } catch (error) {
@@ -3200,7 +3219,7 @@ router.get("/webhook", (req, res) => {
   res.status(403).send("Forbidden");
 });
 
-router.post("/evolution/webhook", async (req, res) => {
+const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void> => {
   const session = activeEvolutionSession;
   if (!session) {
     res.status(401).json({ error: "A conexão via QR Code não está configurada." });
@@ -3210,7 +3229,8 @@ router.post("/evolution/webhook", async (req, res) => {
   const expected = createHash("sha256")
     .update(`${secret}:evolution-webhook:${session.instanceName}`)
     .digest();
-  const suppliedToken = stringValue(req.query.token);
+  const rawSuppliedToken = stringValue(req.query.token);
+  const suppliedToken = /^([a-f0-9]{64})(?:\/[a-z0-9_-]+)*\/?$/i.exec(rawSuppliedToken)?.[1] ?? "";
   const supplied = Buffer.from(suppliedToken, "hex");
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
     res.status(401).json({ error: "Assinatura de webhook inválida." });
@@ -3219,7 +3239,9 @@ router.post("/evolution/webhook", async (req, res) => {
 
   try {
     const body = asRecord(req.body);
-    const event = stringValue(body.event).toLowerCase();
+    const rawEvent = stringValue(body.event) || stringValue(req.params.eventName);
+    const event = rawEvent.toLowerCase().replace(/[_-]/g, ".").replace(/\.+/g, ".");
+    req.log.info({ event, instanceName: session.instanceName }, "QR Code webhook received");
     const dataValue = body.data;
     const messages = evolutionEventItems(dataValue, "messages");
 
@@ -3593,7 +3615,10 @@ router.post("/evolution/webhook", async (req, res) => {
     logger.error({ err: error, instanceName: session.instanceName }, "Evolution API webhook processing failed");
     res.status(500).json({ error: "Falha ao processar a atualização do WhatsApp." });
   }
-});
+};
+
+router.post("/evolution/webhook", handleEvolutionWebhook);
+router.post("/evolution/webhook/:eventName", handleEvolutionWebhook);
 
 router.post("/webhook", async (req, res) => {
   try {
