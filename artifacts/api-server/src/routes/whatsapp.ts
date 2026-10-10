@@ -1260,7 +1260,7 @@ async function storeOutboundEvolutionMediaMessage(
       {
         method: "POST",
         body: JSON.stringify({
-           number: evolutionRecipient(contact.phoneNumber, conversation, session),
+           number: evolutionRecipient(contact.phoneNumber, conversation),
           mediatype: type,
           mimetype: file.mimetype,
           caption,
@@ -1586,13 +1586,12 @@ async function getOrCreateEvolutionConversation(
 function evolutionRecipient(
   contactPhone: string,
   conversation: typeof conversations.$inferSelect,
-  session: EvolutionSession,
 ): string {
   if (conversation.conversationType === "group" && conversation.remoteJid?.endsWith("@g.us")) {
     return conversation.remoteJid;
   }
   if (conversation.remoteJid?.endsWith("@lid")) return conversation.remoteJid;
-  return evolutionPhoneNumber(contactPhone, session);
+  return evolutionPhoneNumber(contactPhone);
 }
 
 async function storeOutboundMessage(
@@ -1644,11 +1643,11 @@ async function storeOutboundMessage(
   }
 }
 
-function evolutionPhoneNumber(phoneNumber: string, session: EvolutionSession): string {
-  if (phoneNumber.includes("@")) return phoneNumber;
+function evolutionPhoneNumber(phoneNumber: string): string {
+  const isDirectJid = /@(?:s\.whatsapp\.net|c\.us)$/i.test(phoneNumber);
+  if (phoneNumber.includes("@") && !isDirectJid) return phoneNumber;
   const normalized = normalizePhone(phoneNumber);
-  const senderDigits = normalizePhone(session.phoneNumber ?? "");
-  if (senderDigits.startsWith("55") && (normalized.length === 10 || normalized.length === 11)) {
+  if (normalized.length === 10 || normalized.length === 11) {
     return `55${normalized}`;
   }
   return normalized;
@@ -1661,7 +1660,7 @@ async function sendEvolutionTextMessage(session: EvolutionSession, to: string, t
     {
       method: "POST",
       body: JSON.stringify({
-        number: evolutionPhoneNumber(to, session),
+        number: evolutionPhoneNumber(to),
         text,
         linkPreview: false,
       }),
@@ -1699,7 +1698,7 @@ async function storeOutboundEvolutionMessage(
   try {
     const whatsappMessageId = await sendEvolutionTextMessage(
       session,
-      evolutionRecipient(contact.phoneNumber, conversation, session),
+      evolutionRecipient(contact.phoneNumber, conversation),
       content,
     );
     const [latestPending] = await db
