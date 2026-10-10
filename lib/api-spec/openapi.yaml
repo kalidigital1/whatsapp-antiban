@@ -749,13 +749,15 @@ components:
           type: ["string", "null"]
         profileName:
           type: ["string", "null"]
+        profilePictureUrl:
+          type: ["string", "null"]
         qrCode:
           type: ["string", "null"]
         defaultServerUrlConfigured:
           type: boolean
         defaultApiKeyConfigured:
           type: boolean
-      required: [configured, connected, active, state, instanceName, phoneNumber, profileName, qrCode, defaultServerUrlConfigured, defaultApiKeyConfigured]
+      required: [configured, connected, active, state, instanceName, phoneNumber, profileName, profilePictureUrl, qrCode, defaultServerUrlConfigured, defaultApiKeyConfigured]
     Contact:
       type: object
       properties:

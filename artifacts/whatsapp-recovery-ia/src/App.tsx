@@ -323,11 +323,14 @@ function ConnectedProfile({ connection, connectionLabel, onSettings }: { connect
   const subtitle = selectedPhone?.displayPhoneNumber
     || (!connection ? 'Verificando conexão…' : connection.connected ? connectionLabel : 'WhatsApp desconectado');
   const profilePictureUrl = selectedPhone?.profilePictureUrl;
-  const profileStyle = profilePictureUrl ? { backgroundImage: `url(${profilePictureUrl})` } : undefined;
+  const [photoUnavailable, setPhotoUnavailable] = useState(false);
+  useEffect(() => setPhotoUnavailable(false), [profilePictureUrl]);
   return (
     <div className="profile-card">
-      <div className={`profile-photo ${profilePictureUrl ? 'connected-profile-photo' : ''}`} style={profileStyle} aria-hidden="true">
-        {profilePictureUrl ? '' : initials(name)}
+      <div className={`profile-photo ${profilePictureUrl && !photoUnavailable ? 'connected-profile-photo' : ''}`} aria-hidden="true">
+        {profilePictureUrl && !photoUnavailable
+          ? <img src={profilePictureUrl} alt="" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
+          : initials(name)}
       </div>
       <div className="profile-details">
         <strong data-testid="text-connected-verified-name">
@@ -1705,7 +1708,7 @@ function Home() {
           displayPhoneNumber: evolutionConnection.phoneNumber ?? '',
           verifiedName: evolutionConnection.profileName || 'WhatsApp conectado',
           qualityRating: 'N/A',
-          profilePictureUrl: null,
+          profilePictureUrl: evolutionConnection.profilePictureUrl ?? null,
         }] : [],
         selectedPhoneNumberId: evolutionConnection?.connected ? 'evolution-active' : null,
         webhookUrl: connection?.webhookUrl ?? '',

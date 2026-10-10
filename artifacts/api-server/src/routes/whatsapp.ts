@@ -81,7 +81,8 @@ type EvolutionSession = EvolutionConfig & {
   state: string | null;
   phoneNumber: string | null;
   profileName: string | null;
-  profileNameFetchedAt?: number;
+  profilePictureUrl?: string | null;
+  profileMetadataFetchedAt?: number;
   qrCode: string | null;
 };
 
@@ -257,6 +258,31 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function firstStringValue(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = stringValue(value).trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+function safeHttpUrl(value: unknown): string | null {
+  const candidate = stringValue(value).trim();
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function phoneNumberFromJid(value: unknown): string | null {
+  const identifier = stringValue(value).trim();
+  const number = identifier.split("@")[0];
+  return /^\d{8,15}$/.test(number) ? number : null;
 }
 
 function withoutEvolutionBinary(value: unknown): unknown {
@@ -535,6 +561,116 @@ function evolutionQrCode(body: Record<string, unknown>): string | null {
   return value.startsWith("data:image/") ? value : `data:image/png;base64,${value}`;
 }
 
+async function refreshConnectedProfileMetadata(session: EvolutionSession): Promise<void> {
+  const now = Date.now();
+  if (now - (session.profileMetadataFetchedAt ?? 0) < 60_000) return;
+  session.profileMetadataFetchedAt = now;
+  const encodedInstance = encodeURIComponent(session.instanceName);
+
+  try {
+    const instancesResponse = await evolutionRequest<unknown>(session, "/instance/fetchInstances");
+    const instances = Array.isArray(instancesResponse) ? instancesResponse : [instancesResponse];
+    const matchedRecord = instances
+      .map((value) => asRecord(value))
+      .find((record) => firstStringValue(
+        asRecord(record.instance).instanceName,
+        record.instanceName,
+      ) === session.instanceName);
+    const instance = asRecord(matchedRecord?.instance);
+
+    const profileName = firstStringValue(
+      instance.profileName,
+      instance.profile_name,
+      instance.pushName,
+      matchedRecord?.profileName,
+    );
+    if (profileName) session.profileName = profileName;
+
+    const profilePictureUrl = safeHttpUrl(firstStringValue(
+      instance.profilePictureUrl,
+      instance.profile_picture_url,
+      instance.profilePicUrl,
+      matchedRecord?.profilePictureUrl,
+      matchedRecord?.profilePicUrl,
+    ));
+    if (profilePictureUrl) session.profilePictureUrl = profilePictureUrl;
+
+    const phoneNumber = phoneNumberFromJid(firstStringValue(
+      instance.ownerJid,
+      instance.owner,
+      instance.wuid,
+      matchedRecord?.ownerJid,
+    ));
+    if (phoneNumber) session.phoneNumber = phoneNumber;
+  } catch (error) {
+    logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile metadata");
+  }
+
+  const ownWhatsAppId = session.phoneNumber
+    ? `${session.phoneNumber}@s.whatsapp.net`
+    : null;
+  if (!ownWhatsAppId) return;
+
+  if (!session.profileName) {
+    try {
+      const response = await evolutionRequest<unknown>(
+        session,
+        `/chat/fetchProfile/${encodedInstance}`,
+        { method: "POST", body: JSON.stringify({ number: ownWhatsAppId }) },
+      );
+      const record = asRecord(response);
+      const data = asRecord(record.data);
+      const profile = asRecord(record.profile);
+      session.profileName = firstStringValue(
+        record.profileName,
+        record.profile_name,
+        record.pushName,
+        record.push_name,
+        record.name,
+        data.profileName,
+        data.profile_name,
+        data.pushName,
+        data.push_name,
+        data.name,
+        profile.profileName,
+        profile.pushName,
+        profile.name,
+      ) || session.profileName;
+    } catch (error) {
+      logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile name");
+    }
+  }
+
+  if (!session.profilePictureUrl) {
+    try {
+      const response = await evolutionRequest<unknown>(
+        session,
+        `/chat/fetchProfilePictureUrl/${encodedInstance}`,
+        { method: "POST", body: JSON.stringify({ number: ownWhatsAppId }) },
+      );
+      const record = asRecord(response);
+      const data = asRecord(record.data);
+      const pictureUrl = safeHttpUrl(firstStringValue(
+        record.profilePictureUrl,
+        record.profile_picture_url,
+        record.profilePicUrl,
+        record.pictureUrl,
+        record.picture,
+        record.url,
+        data.profilePictureUrl,
+        data.profile_picture_url,
+        data.profilePicUrl,
+        data.pictureUrl,
+        data.picture,
+        data.url,
+      ));
+      if (pictureUrl) session.profilePictureUrl = pictureUrl;
+    } catch (error) {
+      logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile photo");
+    }
+  }
+}
+
 async function refreshEvolutionSession(
   session: EvolutionSession,
   requestQr = true,
@@ -547,33 +683,33 @@ async function refreshEvolutionSession(
   session.state = state;
   session.connected = state.toLowerCase() === "open";
   const instance = asRecord(stateBody.instance);
-  session.phoneNumber =
-    stringValue(instance.ownerJid).split("@")[0]
-    || stringValue(instance.owner)
-    || session.phoneNumber;
-  session.profileName =
-    stringValue(instance.profileName)
-    || stringValue(stateBody.profileName)
-    || session.profileName;
+  const stateData = asRecord(stateBody.data);
+  session.phoneNumber = phoneNumberFromJid(firstStringValue(
+    instance.ownerJid,
+    instance.owner,
+    instance.wuid,
+    stateBody.wuid,
+  )) || session.phoneNumber;
+  session.profileName = firstStringValue(
+    instance.profileName,
+    instance.profile_name,
+    instance.pushName,
+    stateBody.profileName,
+    stateData.profileName,
+  ) || session.profileName;
+  session.profilePictureUrl = safeHttpUrl(firstStringValue(
+    instance.profilePictureUrl,
+    instance.profile_picture_url,
+    instance.profilePicUrl,
+    stateBody.profilePictureUrl,
+    stateBody.profilePicUrl,
+    stateData.profilePictureUrl,
+    stateData.profilePicUrl,
+  )) || session.profilePictureUrl;
   if (session.connected) {
     session.qrCode = null;
-    if (!session.profileName && Date.now() - (session.profileNameFetchedAt ?? 0) >= 60_000) {
-      session.profileNameFetchedAt = Date.now();
-      try {
-        const instancesResponse = await evolutionRequest<unknown>(session, "/instance/fetchInstances");
-        const instances = Array.isArray(instancesResponse) ? instancesResponse : [instancesResponse];
-        const matchedRecord = instances
-          .map((value) => asRecord(value))
-          .find((record) => stringValue(asRecord(record.instance).instanceName) === session.instanceName);
-        const matchedInstance = asRecord(matchedRecord?.instance);
-        session.profileName =
-          stringValue(matchedInstance.profileName)
-          || stringValue(matchedInstance.pushName)
-          || stringValue(matchedRecord?.profileName)
-          || session.profileName;
-      } catch (error) {
-        logger.warn({ err: error, instanceName: session.instanceName }, "Could not resolve QR-connected account profile name");
-      }
+    if (!session.profileName || !session.profilePictureUrl) {
+      await refreshConnectedProfileMetadata(session);
     }
     return;
   }
@@ -634,6 +770,7 @@ function evolutionConnectionResponse(session: EvolutionSession | null): Evolutio
     instanceName: session?.instanceName ?? null,
     phoneNumber: session?.phoneNumber ?? null,
     profileName: session?.profileName ?? null,
+    profilePictureUrl: session?.profilePictureUrl ?? null,
     qrCode: session?.qrCode ?? null,
     defaultServerUrlConfigured: Boolean(process.env.EVOLUTION_API_URL?.trim()),
     defaultApiKeyConfigured: Boolean(process.env.EVOLUTION_API_KEY?.trim()),
@@ -3053,6 +3190,8 @@ router.post("/evolution/webhook", async (req, res) => {
 
     if (event === "connection.update") {
       const update = asRecord(dataValue);
+      const updateData = asRecord(update.data);
+      const updateInstance = asRecord(update.instance);
       const state = stringValue(asRecord(update.state).state) || stringValue(update.state);
       if (state) {
         session.state = state;
@@ -3063,8 +3202,27 @@ router.post("/evolution/webhook", async (req, res) => {
         stringValue(update.profileName)
         || stringValue(update.profile_name)
         || stringValue(update.pushName)
+        || stringValue(updateData.profileName)
+        || stringValue(updateData.pushName)
+        || stringValue(updateInstance.profileName)
         || stringValue(body.profileName)
         || session.profileName;
+      session.profilePictureUrl = safeHttpUrl(firstStringValue(
+        update.profilePictureUrl,
+        update.profile_picture_url,
+        update.profilePicUrl,
+        updateData.profilePictureUrl,
+        updateData.profilePicUrl,
+        updateInstance.profilePictureUrl,
+      )) || session.profilePictureUrl;
+      session.phoneNumber = phoneNumberFromJid(firstStringValue(
+        update.wuid,
+        update.ownerJid,
+        updateData.wuid,
+        updateData.ownerJid,
+        updateInstance.ownerJid,
+        updateInstance.owner,
+      )) || session.phoneNumber;
       const qr = evolutionQrCode(update);
       if (qr) session.qrCode = qr;
     }

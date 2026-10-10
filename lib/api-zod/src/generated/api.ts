@@ -86,6 +86,7 @@ export const GetEvolutionConnectionResponse = zod.object({
   "instanceName": zod.string().nullable(),
   "phoneNumber": zod.string().nullable(),
   "profileName": zod.string().nullable(),
+  "profilePictureUrl": zod.string().nullable(),
   "qrCode": zod.string().nullable(),
   "defaultServerUrlConfigured": zod.boolean(),
   "defaultApiKeyConfigured": zod.boolean()
@@ -114,6 +115,7 @@ export const ConnectEvolutionWhatsAppResponse = zod.object({
   "instanceName": zod.string().nullable(),
   "phoneNumber": zod.string().nullable(),
   "profileName": zod.string().nullable(),
+  "profilePictureUrl": zod.string().nullable(),
   "qrCode": zod.string().nullable(),
   "defaultServerUrlConfigured": zod.boolean(),
   "defaultApiKeyConfigured": zod.boolean()
@@ -139,6 +141,7 @@ export const RefreshEvolutionQrResponse = zod.object({
   "instanceName": zod.string().nullable(),
   "phoneNumber": zod.string().nullable(),
   "profileName": zod.string().nullable(),
+  "profilePictureUrl": zod.string().nullable(),
   "qrCode": zod.string().nullable(),
   "defaultServerUrlConfigured": zod.boolean(),
   "defaultApiKeyConfigured": zod.boolean()

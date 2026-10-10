@@ -19,6 +19,8 @@ export interface EvolutionConnectionStatus {
   /** @nullable */
   profileName: string | null;
   /** @nullable */
+  profilePictureUrl: string | null;
+  /** @nullable */
   qrCode: string | null;
   defaultServerUrlConfigured: boolean;
   defaultApiKeyConfigured: boolean;
