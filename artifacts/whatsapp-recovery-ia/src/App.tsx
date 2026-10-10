@@ -1703,7 +1703,7 @@ function Home() {
         phoneNumbers: evolutionConnection?.connected ? [{
           id: 'evolution-active',
           displayPhoneNumber: evolutionConnection.phoneNumber ?? '',
-          verifiedName: evolutionConnection.profileName || evolutionConnection.instanceName || 'WhatsApp conectado',
+          verifiedName: evolutionConnection.profileName || 'WhatsApp conectado',
           qualityRating: 'N/A',
           profilePictureUrl: null,
         }] : [],

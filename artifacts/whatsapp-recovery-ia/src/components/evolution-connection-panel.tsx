@@ -275,9 +275,8 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
             <div className="evolution-connected-symbol"><Check size={19} /></div>
             <div className="evolution-connected-details">
               <span className="evolution-connected-kicker">Sessão ativa</span>
-              <h3>{connection?.profileName || connection?.instanceName || "WhatsApp conectado"}</h3>
+              <h3>{connection?.profileName || "WhatsApp conectado"}</h3>
               {connection?.phoneNumber && <p data-testid="text-evolution-phone">{connection.phoneNumber}</p>}
-              {connection?.instanceName && <span className="evolution-instance-chip">{connection.instanceName}</span>}
             </div>
             <span className="evolution-connected-tag">Online</span>
           </div>

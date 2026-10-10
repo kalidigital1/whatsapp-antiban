@@ -81,6 +81,7 @@ type EvolutionSession = EvolutionConfig & {
   state: string | null;
   phoneNumber: string | null;
   profileName: string | null;
+  profileNameFetchedAt?: number;
   qrCode: string | null;
 };
 
@@ -550,9 +551,30 @@ async function refreshEvolutionSession(
     stringValue(instance.ownerJid).split("@")[0]
     || stringValue(instance.owner)
     || session.phoneNumber;
-  session.profileName = stringValue(instance.profileName) || session.profileName;
+  session.profileName =
+    stringValue(instance.profileName)
+    || stringValue(stateBody.profileName)
+    || session.profileName;
   if (session.connected) {
     session.qrCode = null;
+    if (!session.profileName && Date.now() - (session.profileNameFetchedAt ?? 0) >= 60_000) {
+      session.profileNameFetchedAt = Date.now();
+      try {
+        const instancesResponse = await evolutionRequest<unknown>(session, "/instance/fetchInstances");
+        const instances = Array.isArray(instancesResponse) ? instancesResponse : [instancesResponse];
+        const matchedRecord = instances
+          .map((value) => asRecord(value))
+          .find((record) => stringValue(asRecord(record.instance).instanceName) === session.instanceName);
+        const matchedInstance = asRecord(matchedRecord?.instance);
+        session.profileName =
+          stringValue(matchedInstance.profileName)
+          || stringValue(matchedInstance.pushName)
+          || stringValue(matchedRecord?.profileName)
+          || session.profileName;
+      } catch (error) {
+        logger.warn({ err: error, instanceName: session.instanceName }, "Could not resolve QR-connected account profile name");
+      }
+    }
     return;
   }
   if (requestQr) {
@@ -3037,6 +3059,12 @@ router.post("/evolution/webhook", async (req, res) => {
         session.connected = state.toLowerCase() === "open";
         if (session.connected) session.qrCode = null;
       }
+      session.profileName =
+        stringValue(update.profileName)
+        || stringValue(update.profile_name)
+        || stringValue(update.pushName)
+        || stringValue(body.profileName)
+        || session.profileName;
       const qr = evolutionQrCode(update);
       if (qr) session.qrCode = qr;
     }
