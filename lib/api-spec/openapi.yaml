@@ -269,6 +269,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /conversations/{conversationId}/contact-profile:
+    get:
+      operationId: getConversationContactProfile
+      tags: [whatsapp]
+      summary: Get profile details from the Evolution connection for a conversation contact
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WhatsApp profile details available from Evolution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationContactProfile"
+        "404":
+          description: Conversation or contact not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Evolution connection is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations/{conversationId}/messages/{messageId}/media:
     get:
       operationId: getConversationMessageMedia
@@ -734,6 +764,39 @@ components:
         phoneNumber:
           type: string
       required: [name, phoneNumber]
+    ConversationContactProfile:
+      type: object
+      properties:
+        profileName:
+          type: ["string", "null"]
+        profilePictureUrl:
+          type: ["string", "null"]
+        whatsappId:
+          type: ["string", "null"]
+        about:
+          type: ["string", "null"]
+        verifiedName:
+          type: ["string", "null"]
+        isBusiness:
+          type: ["boolean", "null"]
+        numberExists:
+          type: ["boolean", "null"]
+        businessDescription:
+          type: ["string", "null"]
+        businessEmail:
+          type: ["string", "null"]
+        businessWebsite:
+          type: ["string", "null"]
+        businessAddress:
+          type: ["string", "null"]
+        businessCategory:
+          type: ["string", "null"]
+        businessHours:
+          type: ["string", "null"]
+        fetchedAt:
+          type: string
+          format: date-time
+      required: [profileName, profilePictureUrl, whatsappId, about, verifiedName, isBusiness, numberExists, businessDescription, businessEmail, businessWebsite, businessAddress, businessCategory, businessHours, fetchedAt]
     ContactInput:
       type: object
       properties:

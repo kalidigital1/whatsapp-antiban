@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import {
   getGetConnectionQueryKey,
+  getGetConversationContactProfileQueryKey,
   getGetEvolutionConnectionQueryKey,
   getGetTemplateDispatchQueryKey,
   getGetTemplateCostsQueryKey,
@@ -50,6 +51,7 @@ import {
   useDeleteConversation,
   useDispatchTemplate,
   useGetConnection,
+  useGetConversationContactProfile,
   useGetEvolutionConnection,
   useGetTemplateDispatch,
   useGetTemplateCosts,
@@ -315,10 +317,11 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
   );
 }
 
-function ConnectedProfile({ connection, onSettings }: { connection?: ConnectionStatus; onSettings: () => void }) {
+function ConnectedProfile({ connection, connectionLabel, onSettings }: { connection?: ConnectionStatus; connectionLabel: string; onSettings: () => void }) {
   const selectedPhone = connection?.phoneNumbers.find((phone) => phone.id === connection.selectedPhoneNumberId) ?? connection?.phoneNumbers[0];
   const name = selectedPhone?.verifiedName || 'Número comercial';
-  const number = selectedPhone?.displayPhoneNumber || 'Número não conectado';
+  const subtitle = selectedPhone?.displayPhoneNumber
+    || (!connection ? 'Verificando conexão…' : connection.connected ? connectionLabel : 'WhatsApp desconectado');
   const profilePictureUrl = selectedPhone?.profilePictureUrl;
   const profileStyle = profilePictureUrl ? { backgroundImage: `url(${profilePictureUrl})` } : undefined;
   return (
@@ -331,7 +334,7 @@ function ConnectedProfile({ connection, onSettings }: { connection?: ConnectionS
           {name}
           {connection?.connected && <img className="verified-badge" src={verifiedBadgePath} alt="Meta Verified" />}
         </strong>
-        <p data-testid="text-connected-phone">{number}</p>
+        <p data-testid="text-connected-phone">{subtitle}</p>
       </div>
       <button type="button" className="action-btn profile-action" onClick={onSettings} aria-label="Abrir perfil e configurações" data-testid="button-open-profile"><Settings size={18} /></button>
     </div>
@@ -394,7 +397,7 @@ function Sidebar({
         </div>
       </header>
 
-      <ConnectedProfile connection={connection} onSettings={onSettings} />
+      <ConnectedProfile connection={connection} connectionLabel={connectionLabel} onSettings={onSettings} />
 
       <div className="sidebar-tools">
         <label className="search-box">
@@ -604,16 +607,40 @@ function MessageBubble({
 function ContactProfilePanel({
   conversation,
   messages,
+  evolutionMode,
   onClose,
 }: {
   conversation: Conversation;
   messages: ChatMessage[];
+  evolutionMode: boolean;
   onClose: () => void;
 }) {
   const inboundCount = messages.filter((message) => message.direction === 'inbound').length;
   const outboundCount = messages.filter((message) => message.direction === 'outbound').length;
   const groupConversation = conversation.conversationType === 'group';
   const phoneAvailable = !groupConversation && !conversation.contact.phoneNumber.includes('@');
+  const contactProfileQuery = useGetConversationContactProfile(conversation.id, {
+    query: {
+      enabled: evolutionMode,
+      queryKey: getGetConversationContactProfileQueryKey(conversation.id),
+      staleTime: 5 * 60 * 1000,
+    },
+  });
+  const contactProfile = contactProfileQuery.data;
+  const profileName = contactProfile?.profileName || conversation.contact.name;
+  const [photoUnavailable, setPhotoUnavailable] = useState(false);
+  useEffect(() => setPhotoUnavailable(false), [contactProfile?.profilePictureUrl]);
+  const profileDetails: Array<[string, string | null]> = [
+    ['Sobre', contactProfile?.about ?? null],
+    ['Nome comercial', contactProfile?.verifiedName ?? null],
+    ['Descrição comercial', contactProfile?.businessDescription ?? null],
+    ['Categoria', contactProfile?.businessCategory ?? null],
+    ['E-mail comercial', contactProfile?.businessEmail ?? null],
+    ['Site', contactProfile?.businessWebsite ?? null],
+    ['Endereço comercial', contactProfile?.businessAddress ?? null],
+    ['Horário comercial', contactProfile?.businessHours ?? null],
+  ];
+  const hasProfileDetails = profileDetails.some(([, value]) => Boolean(value));
   return (
     <aside className="contact-profile-panel rise-in" aria-label="Perfil do cliente" data-testid="contact-profile-panel">
       <header className="contact-profile-header">
@@ -625,8 +652,12 @@ function ContactProfilePanel({
       </header>
       <div className="contact-profile-content quiet-scroll">
         <div className="contact-profile-hero">
-          <Avatar name={conversation.contact.name} size="large" />
-          <strong>{conversation.contact.name}</strong>
+          <div className="avatar chat-contact-photo" aria-hidden="true">
+            {contactProfile?.profilePictureUrl && !photoUnavailable
+              ? <img src={contactProfile.profilePictureUrl} alt="" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
+              : initials(profileName)}
+          </div>
+          <strong>{profileName}</strong>
           <span>{groupConversation ? 'Grupo do WhatsApp' : phoneAvailable ? conversation.contact.phoneNumber : 'Telefone não disponibilizado'}</span>
         </div>
         <div className="contact-profile-section">
@@ -637,6 +668,55 @@ function ContactProfilePanel({
               ? <a href={`tel:${conversation.contact.phoneNumber}`} className="contact-profile-phone"><Phone size={15} /> {conversation.contact.phoneNumber}</a>
               : <span className="contact-profile-phone">Telefone não disponibilizado pela conexão.</span>}
         </div>
+        {evolutionMode && (
+          <div className="contact-profile-section">
+            <span className="contact-profile-label">Perfil do WhatsApp</span>
+            {contactProfileQuery.isLoading ? (
+              <p className="flex items-center gap-2 text-xs text-[#9ba7a0]"><Loader2 size={14} className="animate-spin" /> Consultando dados disponíveis na Evolution…</p>
+            ) : contactProfileQuery.isError ? (
+              <div className="space-y-2">
+                <p className="text-xs leading-5 text-[#d7a79b]">Não foi possível consultar o perfil agora. A foto e os outros dados dependem da conexão e da privacidade do contato.</p>
+                <button type="button" className="text-xs font-medium text-[#b9d8c1] hover:text-white" onClick={() => void contactProfileQuery.refetch()}>Tentar novamente</button>
+              </div>
+            ) : contactProfile ? (
+              <div className="space-y-3">
+                {contactProfile.isBusiness !== null && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[#405a49] bg-[#263a2e] px-2.5 py-1 text-[11px] font-medium text-[#b9d8c1]">
+                    {contactProfile.isBusiness && <ShieldCheck size={13} />}
+                    {contactProfile.isBusiness ? 'Conta comercial' : 'Conta pessoal'}
+                  </span>
+                )}
+                {contactProfile.numberExists !== null && (
+                  <p className={`text-xs ${contactProfile.numberExists ? 'text-[#9ecfae]' : 'text-[#d7a79b]'}`}>
+                    {contactProfile.numberExists ? 'Número encontrado no WhatsApp' : 'Número não confirmado no WhatsApp'}
+                  </p>
+                )}
+                {contactProfile.whatsappId && (
+                  <div className="grid gap-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e8d84]">Identificador WhatsApp</span>
+                    <span className="break-all text-xs leading-5 text-[#cbd5cf]">{contactProfile.whatsappId}</span>
+                  </div>
+                )}
+                {profileDetails.map(([label, value]) => value && (
+                  <div className="grid gap-1" key={label}>
+                    <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e8d84]">{label}</span>
+                    {label === 'E-mail comercial'
+                      ? <a href={`mailto:${value}`} className="break-all text-xs leading-5 text-[#b9d8c1] hover:text-white">{value}</a>
+                      : label === 'Site' && /^https?:\/\//i.test(value)
+                        ? <a href={value} target="_blank" rel="noreferrer" className="break-all text-xs leading-5 text-[#b9d8c1] hover:text-white">{value}</a>
+                        : <span className="break-words whitespace-pre-line text-xs leading-5 text-[#cbd5cf]">{value}</span>}
+                  </div>
+                ))}
+                {!hasProfileDetails && contactProfile.numberExists === null && contactProfile.isBusiness === null && (
+                  <p className="text-xs leading-5 text-[#9ba7a0]">A Evolution não retornou outros dados públicos do perfil. Isso pode depender da privacidade do contato ou da versão da API.</p>
+                )}
+                <p className="text-[10px] text-[#75837b]">Consultado às {formatClock(contactProfile.fetchedAt) || 'agora'}</p>
+              </div>
+            ) : (
+              <p className="text-xs leading-5 text-[#9ba7a0]">Nenhum dado adicional de perfil foi retornado pela Evolution.</p>
+            )}
+          </div>
+        )}
         <div className="contact-profile-section">
           <span className="contact-profile-label">Resumo da conversa</span>
           <div className="contact-profile-stats">
@@ -647,7 +727,7 @@ function ContactProfilePanel({
         </div>
         <div className="contact-profile-note">
           <UserRound size={16} />
-          <p>{conversation.conversationType === 'group' ? 'O nome e o identificador do grupo são sincronizados pela Evolution API; a foto do grupo pode não estar disponível.' : 'O nome e o telefone são sincronizados pela conexão do WhatsApp; quando não há foto disponível, usamos as iniciais.'}</p>
+          <p>{evolutionMode ? 'O perfil é consultado na Evolution ao abrir este painel. Só mostramos informações que a conexão consegue obter; dados ocultos pelas configurações de privacidade não aparecem.' : conversation.conversationType === 'group' ? 'O nome e o identificador do grupo são sincronizados pela conexão do WhatsApp.' : 'O nome e o telefone são sincronizados pela conexão do WhatsApp.'}</p>
         </div>
       </div>
     </aside>
@@ -892,7 +972,7 @@ function ChatPanel({
         {mediaFile && <div className="attachment-selection"><Paperclip size={14} /><span>{mediaFile.name}</span><button type="button" onClick={() => setMediaFile(null)} aria-label="Remover arquivo selecionado"><X size={14} /></button></div>}
         {(sendMessage.isError || sendMedia.isError) && <p className="mx-auto mt-2 max-w-[1000px] text-right text-[11px] text-[#eea59e]" data-testid="status-send-error">{errorText(sendMessage.error || sendMedia.error)}</p>}
       </div>
-      {profileOpen && <ContactProfilePanel conversation={conversation} messages={messages} onClose={() => setProfileOpen(false)} />}
+      {profileOpen && <ContactProfilePanel conversation={conversation} messages={messages} evolutionMode={evolutionMode} onClose={() => setProfileOpen(false)} />}
     </section>
   );
 }

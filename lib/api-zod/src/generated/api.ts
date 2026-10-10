@@ -329,6 +329,31 @@ export const SendConversationMessageResponse = zod.object({
 
 
 /**
+ * @summary Get profile details from the Evolution connection for a conversation contact
+ */
+export const GetConversationContactProfileParams = zod.object({
+  "conversationId": zod.coerce.number().int()
+})
+
+export const GetConversationContactProfileResponse = zod.object({
+  "profileName": zod.string().nullable(),
+  "profilePictureUrl": zod.string().nullable(),
+  "whatsappId": zod.string().nullable(),
+  "about": zod.string().nullable(),
+  "verifiedName": zod.string().nullable(),
+  "isBusiness": zod.boolean().nullable(),
+  "numberExists": zod.boolean().nullable(),
+  "businessDescription": zod.string().nullable(),
+  "businessEmail": zod.string().nullable(),
+  "businessWebsite": zod.string().nullable(),
+  "businessAddress": zod.string().nullable(),
+  "businessCategory": zod.string().nullable(),
+  "businessHours": zod.string().nullable(),
+  "fetchedAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Load media attached to a WhatsApp message through its provider
  */
 export const GetConversationMessageMediaParams = zod.object({

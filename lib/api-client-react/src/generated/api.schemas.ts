@@ -80,6 +80,36 @@ export interface Contact {
   phoneNumber: string;
 }
 
+export interface ConversationContactProfile {
+  /** @nullable */
+  profileName: string | null;
+  /** @nullable */
+  profilePictureUrl: string | null;
+  /** @nullable */
+  whatsappId: string | null;
+  /** @nullable */
+  about: string | null;
+  /** @nullable */
+  verifiedName: string | null;
+  /** @nullable */
+  isBusiness: boolean | null;
+  /** @nullable */
+  numberExists: boolean | null;
+  /** @nullable */
+  businessDescription: string | null;
+  /** @nullable */
+  businessEmail: string | null;
+  /** @nullable */
+  businessWebsite: string | null;
+  /** @nullable */
+  businessAddress: string | null;
+  /** @nullable */
+  businessCategory: string | null;
+  /** @nullable */
+  businessHours: string | null;
+  fetchedAt: string;
+}
+
 export interface ContactInput {
   /** @minLength 1 */
   name: string;

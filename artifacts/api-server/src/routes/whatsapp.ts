@@ -11,6 +11,8 @@ import {
   GetTemplateCostsResponse,
   GetConnectionResponse,
   GetEvolutionConnectionResponse,
+  GetConversationContactProfileParams,
+  GetConversationContactProfileResponse,
   ListConversationsResponse,
   ListContactsResponse,
   ListConversationMessagesParams,
@@ -2046,6 +2048,189 @@ router.get("/conversations", async (_req, res) => {
   } catch (error) {
     logger.error({ err: error }, "Failed to list WhatsApp conversations");
     res.status(500).json({ error: "Não foi possível carregar as conversas." });
+  }
+});
+
+router.get("/conversations/:conversationId/contact-profile", async (req, res): Promise<void> => {
+  try {
+    const params = GetConversationContactProfileParams.parse(req.params);
+    const [conversation] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, params.conversationId))
+      .limit(1);
+    if (!conversation) {
+      res.status(404).json({ error: "Conversa não encontrada." });
+      return;
+    }
+
+    const [contact] = await db
+      .select()
+      .from(contacts)
+      .where(eq(contacts.id, conversation.contactId))
+      .limit(1);
+    if (!contact) {
+      res.status(404).json({ error: "Contato não encontrado." });
+      return;
+    }
+
+    const session = activeEvolutionSession;
+    if (activeProvider !== "evolution" || !session?.connected) {
+      res.status(503).json({ error: "A conexão Evolution não está ativa." });
+      return;
+    }
+
+    const whatsappId =
+      conversation.remoteJid
+      || (contact.phoneNumber.includes("@")
+        ? contact.phoneNumber
+        : `${normalizePhone(contact.phoneNumber)}@s.whatsapp.net`);
+    const instance = encodeURIComponent(session.instanceName);
+    const pictureRequest = evolutionRequest<Record<string, unknown>>(
+      session,
+      `/chat/fetchProfilePictureUrl/${instance}`,
+      { method: "POST", body: JSON.stringify({ number: whatsappId }) },
+    );
+    const profileRequest = conversation.conversationType === "group"
+      ? Promise.resolve<Record<string, unknown>>({})
+      : evolutionRequest<Record<string, unknown>>(
+          session,
+          `/chat/fetchProfile/${instance}`,
+          { method: "POST", body: JSON.stringify({ number: whatsappId }) },
+        );
+    const [pictureResult, profileResult] = await Promise.allSettled([
+      pictureRequest,
+      profileRequest,
+    ]);
+
+    if (pictureResult.status === "rejected" && profileResult.status === "rejected") {
+      throw pictureResult.reason;
+    }
+
+    const pictureRecords = pictureResult.status === "fulfilled"
+      ? [pictureResult.value, asRecord(pictureResult.value.data)]
+      : [];
+    const profileRoot = profileResult.status === "fulfilled" ? profileResult.value : {};
+    const profileData = asRecord(profileRoot.data);
+    const records = [
+      profileRoot,
+      profileData,
+      asRecord(profileRoot.profile),
+      asRecord(profileRoot.businessProfile),
+      asRecord(profileData.profile),
+      asRecord(profileData.businessProfile),
+      asRecord(profileRoot.business),
+      asRecord(profileData.business),
+    ];
+    const profileValueText = (value: unknown): string | null => {
+      if (typeof value === "string") return value.trim() || null;
+      if (typeof value === "number") return String(value);
+      if (Array.isArray(value)) {
+        const parts = value.map(profileValueText).filter((part): part is string => Boolean(part));
+        return parts.length ? parts.join(", ") : null;
+      }
+      if (typeof value === "object" && value !== null) {
+        const record = asRecord(value);
+        for (const key of ["localized_display_name", "displayName", "name", "label", "text", "value"]) {
+          const preferred = profileValueText(record[key]);
+          if (preferred) return preferred;
+        }
+        const parts = Object.entries(record)
+          .map(([key, nested]) => {
+            const text = profileValueText(nested);
+            return text ? `${key}: ${text}` : null;
+          })
+          .filter((part): part is string => Boolean(part));
+        return parts.length ? parts.join("\n") : null;
+      }
+      return null;
+    };
+    const firstText = (sources: Record<string, unknown>[], keys: string[]): string | null => {
+      for (const source of sources) {
+        for (const key of keys) {
+          const text = profileValueText(source[key]);
+          if (text) return text;
+        }
+      }
+      return null;
+    };
+    const firstBoolean = (keys: string[]): boolean | null => {
+      for (const source of records) {
+        for (const key of keys) {
+          const value = source[key];
+          if (typeof value === "boolean") return value;
+          if (typeof value === "string" && /^(true|false)$/i.test(value.trim())) {
+            return value.trim().toLowerCase() === "true";
+          }
+        }
+      }
+      return null;
+    };
+    const pictureUrl = firstText(
+      [...pictureRecords, ...records],
+      ["profilePictureUrl", "profile_picture_url", "pictureUrl", "picture", "profilePicUrl"],
+    );
+    let safePictureUrl: string | null = null;
+    if (pictureUrl) {
+      try {
+        const parsedUrl = new URL(pictureUrl);
+        if (parsedUrl.protocol === "https:" || parsedUrl.protocol === "http:") {
+          safePictureUrl = parsedUrl.toString();
+        }
+      } catch {
+        safePictureUrl = null;
+      }
+    }
+
+    const addressValue = records
+      .map((record) => record.businessAddress ?? record.business_address ?? record.address)
+      .find((value) => value !== undefined && value !== null);
+    const businessAddress = typeof addressValue === "string"
+      ? addressValue.trim() || null
+      : (() => {
+          const address = asRecord(addressValue);
+          const parts = ["street", "number", "city", "state", "zip", "country"]
+            .map((key) => stringValue(address[key]).trim())
+            .filter(Boolean);
+          return parts.length ? parts.join(", ") : null;
+        })();
+    const website = firstText(records, ["businessWebsite", "business_website", "website", "websites"]);
+    let safeWebsite: string | null = null;
+    if (website) {
+      try {
+        const parsedUrl = new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`);
+        if (parsedUrl.protocol === "https:" || parsedUrl.protocol === "http:") {
+          safeWebsite = parsedUrl.toString();
+        }
+      } catch {
+        safeWebsite = null;
+      }
+    }
+
+    const response = {
+      profileName: firstText(records, ["profileName", "profile_name", "pushName", "push_name", "name"]),
+      profilePictureUrl: safePictureUrl,
+      whatsappId,
+      about: firstText(records, ["about", "statusText", "status_text", "status", "profileStatus", "profile_status"]),
+      verifiedName: firstText(records, ["verifiedName", "verified_name", "businessName", "business_name"]),
+      isBusiness: firstBoolean(["isBusiness", "is_business"]),
+      numberExists: firstBoolean(["numberExists", "number_exists", "exists", "isOnWhatsApp", "is_on_whatsapp"]),
+      businessDescription: firstText(records, ["businessDescription", "business_description", "description"]),
+      businessEmail: firstText(records, ["businessEmail", "business_email", "email"]),
+      businessWebsite: safeWebsite,
+      businessAddress,
+      businessCategory: firstText(records, ["businessCategory", "business_category", "categories", "category", "industry"]),
+      businessHours: firstText(records, ["businessHours", "business_hours", "hours"]),
+      fetchedAt: new Date().toISOString(),
+    };
+    res.json(GetConversationContactProfileResponse.parse(response));
+  } catch (error) {
+    const status = error instanceof MetaApiError ? error.status : 502;
+    const message = error instanceof Error
+      ? error.message
+      : "Não foi possível consultar o perfil na Evolution.";
+    req.log.warn({ err: error }, "Failed to fetch WhatsApp contact profile from Evolution");
+    res.status(status).json({ error: message });
   }
 });
 

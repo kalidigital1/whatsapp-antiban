@@ -13,6 +13,7 @@ export * from './connectionStatus';
 export * from './contact';
 export * from './contactInput';
 export * from './conversation';
+export * from './conversationContactProfile';
 export * from './conversationConversationType';
 export * from './dashboardActivity';
 export * from './dashboardActivityConversationType';

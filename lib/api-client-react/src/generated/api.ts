@@ -26,6 +26,7 @@ import type {
   Contact,
   ContactInput,
   Conversation,
+  ConversationContactProfile,
   DashboardReportResponse,
   ErrorResponse,
   EvolutionConnectionInput,
@@ -1116,6 +1117,83 @@ export const useSendConversationMessage = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getSendConversationMessageMutationOptions(options));
     }
+
+export const getGetConversationContactProfileUrl = (conversationId: number,) => {
+
+
+
+
+  return `/api/conversations/${conversationId}/contact-profile`
+}
+
+/**
+ * @summary Get profile details from the Evolution connection for a conversation contact
+ */
+export const getConversationContactProfile = async (conversationId: number, options?: Parameters<typeof customFetch>[1]): Promise<ConversationContactProfile> => {
+
+  return customFetch<ConversationContactProfile>(getGetConversationContactProfileUrl(conversationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConversationContactProfileQueryKey = (conversationId: number,) => {
+    return [
+    `/api/conversations/${conversationId}/contact-profile`
+    ] as const;
+    }
+
+
+export const getGetConversationContactProfileQueryOptions = <TData = Awaited<ReturnType<typeof getConversationContactProfile>>, TError = ErrorType<ErrorResponse>>(conversationId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationContactProfile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConversationContactProfileQueryKey(conversationId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationContactProfile>>> = ({ signal }) => getConversationContactProfile(conversationId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: conversationId !== null && conversationId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversationContactProfile>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConversationContactProfileQueryResult = NonNullable<Awaited<ReturnType<typeof getConversationContactProfile>>>
+export type GetConversationContactProfileQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get profile details from the Evolution connection for a conversation contact
+ */
+
+export function useGetConversationContactProfile<TData = Awaited<ReturnType<typeof getConversationContactProfile>>, TError = ErrorType<ErrorResponse>>(
+ conversationId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationContactProfile>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConversationContactProfileQueryOptions(conversationId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetConversationMessageMediaUrl = (conversationId: number,
     messageId: number,) => {
