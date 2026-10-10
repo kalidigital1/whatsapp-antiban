@@ -133,7 +133,7 @@ export function DashboardWorkspace({ onBackToInbox }: Props) {
             <img src="/assets/antiban-logo-white.png" alt="Antiban" />
           </button>
           <span className="dashboard-header-divider" />
-          <div className="dashboard-title-wrap"><span className="dashboard-overline"><span className="dash-live-dot" /> CENTRAL DE OPERAÇÕES</span><h1 id="dashboard-title">Dashboard</h1></div>
+          <div className="dashboard-title-wrap"><h1 id="dashboard-title">Dashboard</h1></div>
           <div className="dashboard-period-control" role="group" aria-label="Período do relatório" data-testid="control-dashboard-period">
             {periodOptions.map((option) => <button type="button" key={option.value} aria-pressed={period === option.value} data-testid={`button-period-${option.value}`} onClick={() => changePeriod(option.value)}>{option.label}</button>)}
           </div>
@@ -182,7 +182,7 @@ export function DashboardWorkspace({ onBackToInbox }: Props) {
         {query.isError && report && <div className="dashboard-inline-warning" role="status">A atualização falhou. Exibindo os últimos dados carregados.</div>}
         <section className="dashboard-chart-grid" aria-label="Análises">
           <article className="dashboard-panel dashboard-trend-panel">
-            <div className="dashboard-panel-heading"><div><span className="dash-panel-kicker">MOVIMENTO DE MENSAGENS</span><h2>Entradas e respostas</h2><p>Volume diário de conversas recebidas e enviadas</p></div><ChartDownload label="tendencia" disabled={loading || !trends.length} onClick={() => downloadCsv(`mensagens-${period}.csv`, trendCsv)} /></div>
+            <div className="dashboard-panel-heading"><div><h2>Entradas e respostas</h2><p>Volume diário de conversas recebidas e enviadas</p></div><ChartDownload label="tendencia" disabled={loading || !trends.length} onClick={() => downloadCsv(`mensagens-${period}.csv`, trendCsv)} /></div>
             <div className="dashboard-chart-area" data-testid="chart-message-trend">
               {loading && !report ? <div className="dash-chart-skeleton"><i /><i /><i /><i /><i /><i /></div> : !trends.length ? <EmptyChart title="mensagens" /> : <ResponsiveContainer width="100%" height={245} debounce={0}>
                 <AreaChart data={trends} margin={{ top: 8, right: 10, left: -18, bottom: 0 }}>
@@ -199,7 +199,7 @@ export function DashboardWorkspace({ onBackToInbox }: Props) {
             </div>
           </article>
           <article className="dashboard-panel dashboard-contact-panel">
-            <div className="dashboard-panel-heading"><div><span className="dash-panel-kicker">CONTATOS EM FOCO</span><h2>Mais conversas</h2><p>Contatos com mais mensagens no período</p></div><ChartDownload label="contatos" disabled={loading || !contacts.length} onClick={() => downloadCsv(`contatos-mais-ativos-${period}.csv`, contactsCsv)} /></div>
+            <div className="dashboard-panel-heading"><div><h2>Mais conversas</h2><p>Contatos com mais mensagens no período</p></div><ChartDownload label="contatos" disabled={loading || !contacts.length} onClick={() => downloadCsv(`contatos-mais-ativos-${period}.csv`, contactsCsv)} /></div>
             <div className="dashboard-chart-area" data-testid="chart-top-contacts">
               {loading && !report ? <div className="dash-chart-skeleton"><i /><i /><i /><i /><i /></div> : !contacts.length ? <EmptyChart title="contatos" /> : <ResponsiveContainer width="100%" height={245} debounce={0}>
                 <BarChart data={contacts.slice(0, 6)} layout="vertical" margin={{ top: 4, right: 16, left: 4, bottom: 0 }}>
@@ -213,7 +213,7 @@ export function DashboardWorkspace({ onBackToInbox }: Props) {
             </div>
           </article>
           <article className="dashboard-panel dashboard-dispatch-panel">
-            <div className="dashboard-panel-heading"><div><span className="dash-panel-kicker">CAMPANHAS</span><h2>Desempenho de envios</h2><p>{number(summary?.templateDispatchCount ?? 0)} disparos no período · lista recente limitada a 8</p></div><ChartDownload label="campanhas" disabled={loading || !dispatches.length} onClick={() => downloadCsv(`campanhas-${period}.csv`, dispatchCsv)} /></div>
+            <div className="dashboard-panel-heading"><div><h2>Desempenho de envios</h2><p>{number(summary?.templateDispatchCount ?? 0)} disparos no período · lista recente limitada a 8</p></div><ChartDownload label="campanhas" disabled={loading || !dispatches.length} onClick={() => downloadCsv(`campanhas-${period}.csv`, dispatchCsv)} /></div>
             <div className="dispatch-summary">
               <div><span>Destinatários</span><strong>{number(summary?.templateRecipientsCount ?? 0)}</strong></div>
               <div><span>Enviadas</span><strong>{number(summary?.templateSentCount ?? 0)}</strong></div>
@@ -227,7 +227,7 @@ export function DashboardWorkspace({ onBackToInbox }: Props) {
         </section>
 
         <section className="dashboard-panel dashboard-activity-panel">
-          <div className="dashboard-panel-heading activity-heading"><div><span className="dash-panel-kicker">ATIVIDADE RECENTE</span><h2>Mensagens da operação</h2><p>Até 50 registros por página · exportação completa disponível acima</p></div><button type="button" className="dash-activity-export" onClick={exportFullReport} disabled={exportQuery.isFetching} data-testid="button-export-activity"><Download size={14} /> CSV completo</button></div>
+          <div className="dashboard-panel-heading activity-heading"><div><h2>Mensagens da operação</h2><p>Até 50 registros por página · exportação completa disponível acima</p></div><button type="button" className="dash-activity-export" onClick={exportFullReport} disabled={exportQuery.isFetching} data-testid="button-export-activity"><Download size={14} /> CSV completo</button></div>
           {loading && !report ? <div className="activity-skeleton" aria-label="Carregando atividade">{[1, 2, 3, 4].map((row) => <i key={row} />)}</div> : !activity?.items.length ? <div className="dashboard-activity-empty" data-testid="state-dashboard-activity-empty"><Inbox size={23} /><strong>Nenhuma atividade neste período</strong><span>Quando houver mensagens, elas aparecerão aqui.</span></div> : <>
             <div className="activity-table-wrap"><table className="dashboard-table"><thead><tr><th>Contato</th><th>Mensagem</th><th>Direção</th><th>Status</th><th>Data e hora</th></tr></thead><tbody>{activity.items.map((item) => <tr key={item.id} data-testid={`activity-row-${item.id}`}><td><strong className="activity-contact">{item.contactName}</strong><span className="activity-phone">{item.phoneNumber}</span></td><td className="activity-message" title={item.content}>{item.content || `Mensagem ${item.messageType}`}</td><td><span className={`activity-direction ${item.direction}`}>{item.direction === 'inbound' ? <><ArrowDownLeft size={13} /> Recebida</> : <><ArrowUpRight size={13} /> Enviada</>}</span></td><td><span className={`activity-status activity-${item.status}`}>{item.status}</span></td><td className="activity-date">{localDate(item.createdAt, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td></tr>)}</tbody></table></div>
             <div className="activity-pagination" data-testid="pagination-dashboard-activity"><span>{number(activity.total)} mensagens · Página {activity.page} de {Math.max(activity.totalPages, 1)}</span><div><button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(current - 1, 1))} data-testid="button-activity-previous">Anterior</button><button type="button" disabled={page >= activity.totalPages || loading} onClick={() => setPage((current) => Math.min(current + 1, activity.totalPages))} data-testid="button-activity-next">Próxima</button></div></div>
