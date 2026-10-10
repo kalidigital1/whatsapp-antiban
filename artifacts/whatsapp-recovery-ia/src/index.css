@@ -92,7 +92,6 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .connected-profile:hover { background:#252726; border-color:#34413c; }
 .profile-photo, .avatar { display:grid; place-items:center; flex:none; border-radius:50%; font-weight:700; letter-spacing:-.03em; color:#dcefe4; background:linear-gradient(145deg,#b8c9c2 0%,#6c8279 41%,#294a3d 100%); border:1px solid rgba(255,255,255,.2); overflow:hidden; }
 .profile-photo { width:42px; height:42px; margin:0 auto 5px; font-size:12px; box-shadow:0 0 0 2px #1c2c25; }
-.connected-profile-photo { background-image:url('/assets/connected-profile.jpg'); background-position:center; background-size:cover; }
 .sidebar-panel { min-width:0; min-height:0; display:flex; flex-direction:column; background:hsl(var(--wa-list)); border-right:1px solid hsl(0 0% 19%); }
 .sidebar-header { min-height:64px; display:flex; align-items:center; justify-content:space-between; padding:0 16px; background:hsl(var(--wa-header)); border-bottom:1px solid hsl(0 0% 17%); }
 .brand-logo { display:block; width:min(124px, 42%); height:auto; object-fit:contain; }

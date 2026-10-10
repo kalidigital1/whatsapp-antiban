@@ -51,6 +51,7 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v23.0";
 const metaRequestTimeoutMs = 15_000;
+const profilePictureRefreshIntervalMs = 60_000;
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
@@ -84,6 +85,7 @@ type EvolutionSession = EvolutionConfig & {
   profileName: string | null;
   profilePictureUrl?: string | null;
   profileMetadataFetchedAt?: number;
+  profilePictureFetchedAt?: number;
   qrCode: string | null;
 };
 
@@ -564,47 +566,40 @@ function evolutionQrCode(body: Record<string, unknown>): string | null {
 
 async function refreshConnectedProfileMetadata(session: EvolutionSession): Promise<void> {
   const now = Date.now();
-  if (now - (session.profileMetadataFetchedAt ?? 0) < 60_000) return;
-  session.profileMetadataFetchedAt = now;
+  const shouldRefreshMetadata = now - (session.profileMetadataFetchedAt ?? 0) >= 60_000;
+  if (shouldRefreshMetadata) session.profileMetadataFetchedAt = now;
   const encodedInstance = encodeURIComponent(session.instanceName);
 
-  try {
-    const instancesResponse = await evolutionRequest<unknown>(session, "/instance/fetchInstances");
-    const instances = Array.isArray(instancesResponse) ? instancesResponse : [instancesResponse];
-    const matchedRecord = instances
-      .map((value) => asRecord(value))
-      .find((record) => firstStringValue(
-        asRecord(record.instance).instanceName,
-        record.instanceName,
-      ) === session.instanceName);
-    const instance = asRecord(matchedRecord?.instance);
+  if (shouldRefreshMetadata) {
+    try {
+      const instancesResponse = await evolutionRequest<unknown>(session, "/instance/fetchInstances");
+      const instances = Array.isArray(instancesResponse) ? instancesResponse : [instancesResponse];
+      const matchedRecord = instances
+        .map((value) => asRecord(value))
+        .find((record) => firstStringValue(
+          asRecord(record.instance).instanceName,
+          record.instanceName,
+        ) === session.instanceName);
+      const instance = asRecord(matchedRecord?.instance);
 
-    const profileName = firstStringValue(
-      instance.profileName,
-      instance.profile_name,
-      instance.pushName,
-      matchedRecord?.profileName,
-    );
-    if (profileName) session.profileName = profileName;
+      const profileName = firstStringValue(
+        instance.profileName,
+        instance.profile_name,
+        instance.pushName,
+        matchedRecord?.profileName,
+      );
+      if (profileName) session.profileName = profileName;
 
-    const profilePictureUrl = safeHttpUrl(firstStringValue(
-      instance.profilePictureUrl,
-      instance.profile_picture_url,
-      instance.profilePicUrl,
-      matchedRecord?.profilePictureUrl,
-      matchedRecord?.profilePicUrl,
-    ));
-    if (profilePictureUrl) session.profilePictureUrl = profilePictureUrl;
-
-    const phoneNumber = phoneNumberFromJid(firstStringValue(
-      instance.ownerJid,
-      instance.owner,
-      instance.wuid,
-      matchedRecord?.ownerJid,
-    ));
-    if (phoneNumber) session.phoneNumber = phoneNumber;
-  } catch (error) {
-    logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile metadata");
+      const phoneNumber = phoneNumberFromJid(firstStringValue(
+        instance.ownerJid,
+        instance.owner,
+        instance.wuid,
+        matchedRecord?.ownerJid,
+      ));
+      if (phoneNumber) session.phoneNumber = phoneNumber;
+    } catch (error) {
+      logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile metadata");
+    }
   }
 
   const ownWhatsAppId = session.phoneNumber
@@ -612,7 +607,7 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
     : null;
   if (!ownWhatsAppId) return;
 
-  if (!session.profileName) {
+  if (!session.profileName && shouldRefreshMetadata) {
     try {
       const response = await evolutionRequest<unknown>(
         session,
@@ -642,7 +637,8 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
     }
   }
 
-  if (!session.profilePictureUrl) {
+  if (now - (session.profilePictureFetchedAt ?? 0) >= profilePictureRefreshIntervalMs) {
+    session.profilePictureFetchedAt = now;
     try {
       const response = await evolutionRequest<unknown>(
         session,
@@ -651,6 +647,7 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
       );
       const record = asRecord(response);
       const data = asRecord(record.data);
+      const profile = asRecord(record.profile);
       const pictureUrl = safeHttpUrl(firstStringValue(
         record.profilePictureUrl,
         record.profile_picture_url,
@@ -664,8 +661,14 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
         data.pictureUrl,
         data.picture,
         data.url,
+        profile.profilePictureUrl,
+        profile.profile_picture_url,
+        profile.profilePicUrl,
+        profile.pictureUrl,
+        profile.picture,
+        profile.url,
       ));
-      if (pictureUrl) session.profilePictureUrl = pictureUrl;
+      session.profilePictureUrl = pictureUrl;
     } catch (error) {
       logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile photo");
     }
@@ -698,20 +701,9 @@ async function refreshEvolutionSession(
     stateBody.profileName,
     stateData.profileName,
   ) || session.profileName;
-  session.profilePictureUrl = safeHttpUrl(firstStringValue(
-    instance.profilePictureUrl,
-    instance.profile_picture_url,
-    instance.profilePicUrl,
-    stateBody.profilePictureUrl,
-    stateBody.profilePicUrl,
-    stateData.profilePictureUrl,
-    stateData.profilePicUrl,
-  )) || session.profilePictureUrl;
   if (session.connected) {
     session.qrCode = null;
-    if (!session.profileName || !session.profilePictureUrl) {
-      await refreshConnectedProfileMetadata(session);
-    }
+    await refreshConnectedProfileMetadata(session);
     return;
   }
   if (requestQr) {

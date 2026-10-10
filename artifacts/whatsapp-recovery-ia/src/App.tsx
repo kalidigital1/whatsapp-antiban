@@ -249,6 +249,18 @@ function initials(name: string) {
   return (parts.length > 1 ? `${parts[0][0]}${parts[parts.length - 1][0]}` : name.slice(0, 2)).toUpperCase();
 }
 
+function ProfileAvatar({ photoUrl, name, className = '' }: { photoUrl?: string | null; name: string; className?: string }) {
+  const [photoUnavailable, setPhotoUnavailable] = useState(false);
+  useEffect(() => setPhotoUnavailable(false), [photoUrl]);
+  return (
+    <div className={`profile-photo ${className}`} aria-hidden="true">
+      {photoUrl && !photoUnavailable
+        ? <img src={photoUrl} alt="" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
+        : initials(name)}
+    </div>
+  );
+}
+
 function formatClock(value?: string) {
   if (!value) return '';
   const date = new Date(value);
@@ -291,7 +303,7 @@ function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'la
   );
 }
 
-function NavigationRail({ onSettings, connected, profilePictureUrl, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; activeSection: 'inbox' | 'templates' | 'dashboard'; onSectionChange: (section: 'inbox' | 'templates' | 'dashboard') => void }) {
+function NavigationRail({ onSettings, connected, profilePictureUrl, profileName, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; profileName?: string | null; activeSection: 'inbox' | 'templates' | 'dashboard'; onSectionChange: (section: 'inbox' | 'templates' | 'dashboard') => void }) {
   return (
     <aside className="wa-rail" aria-label="Navegação principal">
       <div className="rail-brand" aria-label="Meta Business Partner">
@@ -306,12 +318,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
       <div className="rail-bottom">
         <button type="button" className="rail-btn" onClick={onSettings} aria-label="Configurações" data-testid="rail-settings"><Settings size={17} /><span className="rail-btn-label">Configurações</span></button>
         <button type="button" className="rail-btn" onClick={onSettings} aria-label={connected ? 'Perfil conectado' : 'Configurar conexão'} data-testid="rail-profile">
-          <div
-            className={`profile-photo !m-0 !h-8 !w-8 text-[10px] ${connected ? 'connected-profile-photo' : ''}`}
-            style={profilePictureUrl ? { backgroundImage: `url(${profilePictureUrl})` } : undefined}
-          >
-            {connected ? (profilePictureUrl ? '' : '?') : '?'}
-          </div>
+          <ProfileAvatar photoUrl={connected ? profilePictureUrl : null} name={connected ? profileName || 'WhatsApp' : '?'} className="!m-0 !h-8 !w-8 text-[10px]" />
           <span className="rail-btn-label">Perfil</span>
         </button>
       </div>
@@ -330,9 +337,6 @@ function ConnectedProfile({ connection, connectionLabel, onSettings, canEditProf
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(name);
   const [nameFeedback, setNameFeedback] = useState<{ text: string; error: boolean } | null>(null);
-  const [photoUnavailable, setPhotoUnavailable] = useState(false);
-  useEffect(() => setPhotoUnavailable(false), [profilePictureUrl]);
-
   const submitProfileName = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const nextName = nameDraft.trim();
@@ -353,11 +357,7 @@ function ConnectedProfile({ connection, connectionLabel, onSettings, canEditProf
 
   return (
     <div className="profile-card">
-      <div className={`profile-photo ${profilePictureUrl && !photoUnavailable ? 'connected-profile-photo' : ''}`} aria-hidden="true">
-        {profilePictureUrl && !photoUnavailable
-          ? <img src={profilePictureUrl} alt="" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
-          : initials(name)}
-      </div>
+      <ProfileAvatar photoUrl={profilePictureUrl} name={name} />
       <div className="profile-details">
         {editingName ? (
           <form className="profile-name-edit-form" onSubmit={submitProfileName}>
@@ -1172,7 +1172,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
             <div className="space-y-4">
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
                 <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium"><Smartphone size={16} className="text-[#65cb87]" /> Número conectado</div><span className="text-[11px] text-[#8c9993]">{connection.phoneNumbers.length} disponível(is)</span></div>
-                {connection.phoneNumbers.length > 0 ? <div className="divide-y divide-[#303633]">{connection.phoneNumbers.map((phone) => <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0" key={phone.id}><div className="flex min-w-0 items-center gap-3"><div className="profile-photo !m-0 !h-9 !w-9 shrink-0 text-[10px]" style={phone.profilePictureUrl ? { backgroundImage: `url(${phone.profilePictureUrl})` } : undefined}>{phone.profilePictureUrl ? '' : initials(phone.verifiedName || 'WA')}</div><div className="min-w-0"><p className="truncate text-[13px] font-medium">{phone.verifiedName || 'Número comercial'}</p><p className="mt-1 truncate text-[11px] text-[#8f9b95]">{phone.displayPhoneNumber} · qualidade {phone.qualityRating}</p></div></div>{phone.id === connection.selectedPhoneNumberId && <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#68d18c]"><Check size={14} /> selecionado</span>}</div>)}</div> : <p className="text-xs text-[#8f9b95]">Nenhum número retornado pela conta.</p>}
+                {connection.phoneNumbers.length > 0 ? <div className="divide-y divide-[#303633]">{connection.phoneNumbers.map((phone) => <div className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0" key={phone.id}><div className="flex min-w-0 items-center gap-3"><ProfileAvatar photoUrl={phone.profilePictureUrl} name={phone.verifiedName || 'WA'} className="!m-0 !h-9 !w-9 shrink-0 text-[10px]" /><div className="min-w-0"><p className="truncate text-[13px] font-medium">{phone.verifiedName || 'Número comercial'}</p><p className="mt-1 truncate text-[11px] text-[#8f9b95]">{phone.displayPhoneNumber} · qualidade {phone.qualityRating}</p></div></div>{phone.id === connection.selectedPhoneNumberId && <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-[#68d18c]"><Check size={14} /> selecionado</span>}</div>)}</div> : <p className="text-xs text-[#8f9b95]">Nenhum número retornado pela conta.</p>}
               </div>
               <div className="rounded-lg border border-[#414845] bg-[#171b19] p-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-medium"><ShieldCheck size={16} className="text-[#65cb87]" /> Callback do webhook</div>
@@ -1843,6 +1843,7 @@ function Home() {
           onSettings={() => setSettingsOpen(true)}
           connected={chatConnected}
           profilePictureUrl={displayConnection?.phoneNumbers.find((phone) => phone.id === displayConnection.selectedPhoneNumberId)?.profilePictureUrl}
+          profileName={displayConnection?.phoneNumbers.find((phone) => phone.id === displayConnection.selectedPhoneNumberId)?.verifiedName}
           activeSection={activeSection}
           onSectionChange={setActiveSection}
         />
