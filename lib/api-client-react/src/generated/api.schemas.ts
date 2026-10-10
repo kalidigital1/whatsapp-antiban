@@ -57,6 +57,11 @@ export interface EvolutionConnectionInput {
   instanceName: string;
 }
 
+export interface EvolutionProfileNameInput {
+  /** @minLength 1 */
+  name: string;
+}
+
 export interface EvolutionConnectionStatus {
   configured: boolean;
   connected: boolean;

@@ -28,6 +28,7 @@ export * from './dashboardTrendDay';
 export * from './errorResponse';
 export * from './evolutionConnectionInput';
 export * from './evolutionConnectionStatus';
+export * from './evolutionProfileNameInput';
 export * from './exportDashboardReportCsvParams';
 export * from './exportDashboardReportCsvPeriod';
 export * from './getDashboardReportParams';

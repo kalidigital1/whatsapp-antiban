@@ -32,6 +32,7 @@ import {
   GetTemplateDispatchResponse,
   ListTemplateDispatchesResponse,
   EvolutionConnectionStatus,
+  UpdateEvolutionProfileNameBody,
 } from "@workspace/api-zod";
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
@@ -2057,6 +2058,48 @@ router.post("/evolution/connection/qr", async (_req, res) => {
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
     const message = error instanceof Error ? error.message : "Não foi possível atualizar o QR Code.";
+    res.status(status).json({ error: message });
+  }
+});
+
+router.post("/evolution/profile-name", async (req, res): Promise<void> => {
+  const input = UpdateEvolutionProfileNameBody.safeParse(req.body);
+  if (!input.success) {
+    res.status(400).json({ error: "Informe um nome válido para o perfil do WhatsApp." });
+    return;
+  }
+
+  const session = activeEvolutionSession;
+  if (!session || activeProvider !== "evolution" || !session.connected) {
+    res.status(400).json({ error: "Conecte o WhatsApp via QR Code antes de alterar o nome do perfil." });
+    return;
+  }
+
+  const name = input.data.name.trim();
+  if (!name) {
+    res.status(400).json({ error: "O nome do perfil não pode ficar vazio." });
+    return;
+  }
+
+  try {
+    await evolutionRequest(
+      session,
+      `/chat/updateProfileName/${encodeURIComponent(session.instanceName)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      },
+    );
+    session.profileName = name;
+    res.json(evolutionConnectionResponse(session));
+  } catch (error) {
+    const status = error instanceof MetaApiError ? error.status : 502;
+    const providerMessage = error instanceof Error ? error.message : "";
+    const genericRejection = /recusou o envio com HTTP \d+ sem informar a causa/i.test(providerMessage);
+    const message = genericRejection
+      ? "Não foi possível atualizar o nome do perfil. Confira o nome e tente novamente."
+      : providerMessage || "Não foi possível atualizar o nome do perfil do WhatsApp.";
+    req.log.warn({ status, instanceName: session.instanceName }, "WhatsApp profile name update failed");
     res.status(status).json({ error: message });
   }
 });

@@ -136,6 +136,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /evolution/profile-name:
+    post:
+      operationId: updateEvolutionProfileName
+      tags: [whatsapp]
+      summary: Update the connected WhatsApp profile name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvolutionProfileNameInput"
+      responses:
+        "200":
+          description: Updated WhatsApp profile name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvolutionConnectionStatus"
+        "400":
+          description: Invalid profile name or disconnected account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations:
     get:
       operationId: listConversations
@@ -732,6 +756,13 @@ components:
           minLength: 2
           maxLength: 64
       required: [instanceName]
+    EvolutionProfileNameInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+      required: [name]
     EvolutionConnectionStatus:
       type: object
       properties:

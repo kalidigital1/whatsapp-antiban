@@ -18,6 +18,7 @@ import {
   MessageCircle,
   MoreVertical,
   Paperclip,
+  Pencil,
   Phone,
   Plus,
   QrCode,
@@ -53,6 +54,7 @@ import {
   useGetConnection,
   useGetConversationContactProfile,
   useGetEvolutionConnection,
+  useUpdateEvolutionProfileName,
   useGetTemplateDispatch,
   useGetTemplateCosts,
   useListConversationMessages,
@@ -317,14 +319,38 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, activeSectio
   );
 }
 
-function ConnectedProfile({ connection, connectionLabel, onSettings }: { connection?: ConnectionStatus; connectionLabel: string; onSettings: () => void }) {
+function ConnectedProfile({ connection, connectionLabel, onSettings, canEditProfileName }: { connection?: ConnectionStatus; connectionLabel: string; onSettings: () => void; canEditProfileName: boolean }) {
   const selectedPhone = connection?.phoneNumbers.find((phone) => phone.id === connection.selectedPhoneNumberId) ?? connection?.phoneNumbers[0];
   const name = selectedPhone?.verifiedName || 'Número comercial';
   const subtitle = selectedPhone?.displayPhoneNumber
     || (!connection ? 'Verificando conexão…' : connection.connected ? connectionLabel : 'WhatsApp desconectado');
   const profilePictureUrl = selectedPhone?.profilePictureUrl;
+  const queryClient = useQueryClient();
+  const updateProfileName = useUpdateEvolutionProfileName();
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(name);
+  const [nameFeedback, setNameFeedback] = useState<{ text: string; error: boolean } | null>(null);
   const [photoUnavailable, setPhotoUnavailable] = useState(false);
   useEffect(() => setPhotoUnavailable(false), [profilePictureUrl]);
+
+  const submitProfileName = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextName = nameDraft.trim();
+    if (!nextName || updateProfileName.isPending) return;
+    setNameFeedback(null);
+    updateProfileName.mutate(
+      { data: { name: nextName } },
+      {
+        onSuccess: (updatedConnection) => {
+          queryClient.setQueryData(getGetEvolutionConnectionQueryKey(), updatedConnection);
+          setEditingName(false);
+          setNameFeedback({ text: 'Nome do perfil atualizado.', error: false });
+        },
+        onError: (error) => setNameFeedback({ text: errorText(error), error: true }),
+      },
+    );
+  };
+
   return (
     <div className="profile-card">
       <div className={`profile-photo ${profilePictureUrl && !photoUnavailable ? 'connected-profile-photo' : ''}`} aria-hidden="true">
@@ -333,11 +359,45 @@ function ConnectedProfile({ connection, connectionLabel, onSettings }: { connect
           : initials(name)}
       </div>
       <div className="profile-details">
-        <strong data-testid="text-connected-verified-name">
-          {name}
-          {connection?.connected && <img className="verified-badge" src={verifiedBadgePath} alt="Meta Verified" />}
-        </strong>
+        {editingName ? (
+          <form className="profile-name-edit-form" onSubmit={submitProfileName}>
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              aria-label="Nome do perfil do WhatsApp"
+              data-testid="input-connected-profile-name"
+              required
+            />
+            <button type="submit" className="profile-name-save" aria-label="Salvar nome do perfil" disabled={!nameDraft.trim() || updateProfileName.isPending} data-testid="button-save-connected-profile-name">
+              {updateProfileName.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            </button>
+            <button type="button" className="profile-name-cancel" aria-label="Cancelar edição do nome" onClick={() => { setEditingName(false); setNameFeedback(null); }} disabled={updateProfileName.isPending}>
+              <X size={14} />
+            </button>
+          </form>
+        ) : (
+          <div className="profile-name-line">
+            <strong data-testid="text-connected-verified-name">
+              {name}
+              {connection?.connected && <img className="verified-badge" src={verifiedBadgePath} alt="Meta Verified" />}
+            </strong>
+            {canEditProfileName && connection?.connected && (
+              <button
+                type="button"
+                className="profile-name-edit-button"
+                onClick={() => { setNameDraft(name); setNameFeedback(null); setEditingName(true); }}
+                aria-label="Editar nome do perfil do WhatsApp"
+                title="Editar nome do perfil"
+                data-testid="button-edit-connected-profile-name"
+              >
+                <Pencil size={12} />
+              </button>
+            )}
+          </div>
+        )}
         <p data-testid="text-connected-phone">{subtitle}</p>
+        {nameFeedback && <small className={`profile-name-feedback ${nameFeedback.error ? 'is-error' : ''}`} role={nameFeedback.error ? 'alert' : 'status'}>{nameFeedback.text}</small>}
       </div>
       <button type="button" className="action-btn profile-action" onClick={onSettings} aria-label="Abrir perfil e configurações" data-testid="button-open-profile"><Settings size={18} /></button>
     </div>
@@ -359,6 +419,7 @@ function Sidebar({
   mobileOpen,
   onCloseMobile,
   connectionLabel,
+  canEditProfileName,
 }: {
   conversations: Conversation[];
   selectedId: number | null;
@@ -374,6 +435,7 @@ function Sidebar({
   mobileOpen: boolean;
   onCloseMobile: () => void;
   connectionLabel: string;
+  canEditProfileName: boolean;
 }) {
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
@@ -400,7 +462,7 @@ function Sidebar({
         </div>
       </header>
 
-      <ConnectedProfile connection={connection} connectionLabel={connectionLabel} onSettings={onSettings} />
+      <ConnectedProfile connection={connection} connectionLabel={connectionLabel} onSettings={onSettings} canEditProfileName={canEditProfileName} />
 
       <div className="sidebar-tools">
         <label className="search-box">
@@ -1786,7 +1848,7 @@ function Home() {
         />
         {activeSection === 'dashboard' ? <DashboardWorkspace onBackToInbox={() => setActiveSection('inbox')} /> : activeSection === 'templates' ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} /> : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
             <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>

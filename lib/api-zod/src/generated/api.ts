@@ -149,6 +149,31 @@ export const RefreshEvolutionQrResponse = zod.object({
 
 
 /**
+ * @summary Update the connected WhatsApp profile name
+ */
+
+
+
+export const UpdateEvolutionProfileNameBody = zod.object({
+  "name": zod.string().min(1)
+})
+
+export const UpdateEvolutionProfileNameResponse = zod.object({
+  "configured": zod.boolean(),
+  "connected": zod.boolean(),
+  "active": zod.boolean(),
+  "state": zod.string().nullable(),
+  "instanceName": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "profileName": zod.string().nullable(),
+  "profilePictureUrl": zod.string().nullable(),
+  "qrCode": zod.string().nullable(),
+  "defaultServerUrlConfigured": zod.boolean(),
+  "defaultApiKeyConfigured": zod.boolean()
+})
+
+
+/**
  * @summary List conversations received through the webhook
  */
 export const ListConversationsResponseItem = zod.object({
