@@ -15,7 +15,7 @@ import {
 
 type Props = { onBackToInbox: () => void };
 type ExportRow = Record<string, string | number>;
-const CHART_COLORS = { blue: '#0079F2', purple: '#795EFF', green: '#009118', red: '#A60808', pink: '#ec4899' };
+const CHART_COLORS = { blue: '#557c96', purple: '#7a708e', green: '#68856d', red: '#a96f69', pink: '#9a7187' };
 const INTERVAL_OPTIONS = [
   { label: '5 minutos', ms: 5 * 60 * 1000 },
   { label: '15 minutos', ms: 15 * 60 * 1000 },
@@ -68,7 +68,7 @@ function MetricCard({ eyebrow, value, detail, icon, accent = '' }: { eyebrow: st
 export function DashboardWorkspace({ onBackToInbox }: Props) {
   const [period, setPeriod] = useState<GetDashboardReportPeriod>('7d');
   const [page, setPage] = useState(1);
-  const [isDark, setIsDark] = useState(() => localStorage.getItem('dashboard-theme') !== 'light');
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('dashboard-theme-v2') === 'dark');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [intervalMs, setIntervalMs] = useState(INTERVAL_OPTIONS[0].ms);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -89,7 +89,7 @@ export function DashboardWorkspace({ onBackToInbox }: Props) {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dashboard-light', !isDark);
-    localStorage.setItem('dashboard-theme', isDark ? 'dark' : 'light');
+    localStorage.setItem('dashboard-theme-v2', isDark ? 'dark' : 'light');
   }, [isDark]);
   useEffect(() => {
     const close = (event: MouseEvent) => { if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setDropdownOpen(false); };
