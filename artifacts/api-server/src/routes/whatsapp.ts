@@ -2261,7 +2261,7 @@ router.post(
         `/message/sendReaction/${encodeURIComponent(session.instanceName)}`,
         {
           method: "POST",
-          body: JSON.stringify({ reactionKey, reactionMessage: emoji }),
+          body: JSON.stringify({ key: reactionKey, reaction: emoji }),
         },
       );
       await db
