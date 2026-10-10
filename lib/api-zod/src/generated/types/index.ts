@@ -14,6 +14,8 @@ export * from './contact';
 export * from './contactInput';
 export * from './conversation';
 export * from './errorResponse';
+export * from './evolutionConnectionInput';
+export * from './evolutionConnectionStatus';
 export * from './healthStatus';
 export * from './mediaInput';
 export * from './messageInput';

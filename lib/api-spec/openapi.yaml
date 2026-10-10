@@ -72,6 +72,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
+  /evolution/connection:
+    get:
+      operationId: getEvolutionConnection
+      tags: [whatsapp]
+      summary: Get the current Evolution API connection
+      responses:
+        "200":
+          description: Evolution API connection and QR status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvolutionConnectionStatus"
+    post:
+      operationId: connectEvolutionWhatsApp
+      tags: [whatsapp]
+      summary: Create or connect an Evolution API WhatsApp instance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvolutionConnectionInput"
+      responses:
+        "200":
+          description: Evolution API instance and QR status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvolutionConnectionStatus"
+        "400":
+          description: Invalid settings or Evolution API rejected the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: disconnectEvolutionWhatsApp
+      tags: [whatsapp]
+      summary: Disconnect the Evolution API instance from this inbox
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+  /evolution/connection/qr:
+    post:
+      operationId: refreshEvolutionQr
+      tags: [whatsapp]
+      summary: Refresh the Evolution API QR code
+      responses:
+        "200":
+          description: Updated QR code or connected state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvolutionConnectionStatus"
+        "400":
+          description: Evolution API is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations:
     get:
       operationId: listConversations
@@ -506,6 +570,41 @@ components:
           type: ["string", "null"]
       required:
         [connected, businessAccountId, phoneNumbers, selectedPhoneNumberId, webhookUrl, webhookVerifyTokenConfigured, webhookVerifyToken]
+    EvolutionConnectionInput:
+      type: object
+      properties:
+        serverUrl:
+          type: string
+          format: uri
+          minLength: 1
+        apiKey:
+          type: string
+          minLength: 1
+        instanceName:
+          type: string
+          minLength: 2
+          maxLength: 64
+      required: [serverUrl, apiKey, instanceName]
+    EvolutionConnectionStatus:
+      type: object
+      properties:
+        configured:
+          type: boolean
+        connected:
+          type: boolean
+        active:
+          type: boolean
+        state:
+          type: ["string", "null"]
+        instanceName:
+          type: ["string", "null"]
+        phoneNumber:
+          type: ["string", "null"]
+        profileName:
+          type: ["string", "null"]
+        qrCode:
+          type: ["string", "null"]
+      required: [configured, connected, active, state, instanceName, phoneNumber, profileName, qrCode]
     Contact:
       type: object
       properties:

@@ -47,6 +47,34 @@ export interface ConnectionStatus {
   webhookVerifyToken: string | null;
 }
 
+export interface EvolutionConnectionInput {
+  /** @minLength 1 */
+  serverUrl: string;
+  /** @minLength 1 */
+  apiKey: string;
+  /**
+     * @minLength 2
+     * @maxLength 64
+     */
+  instanceName: string;
+}
+
+export interface EvolutionConnectionStatus {
+  configured: boolean;
+  connected: boolean;
+  active: boolean;
+  /** @nullable */
+  state: string | null;
+  /** @nullable */
+  instanceName: string | null;
+  /** @nullable */
+  phoneNumber: string | null;
+  /** @nullable */
+  profileName: string | null;
+  /** @nullable */
+  qrCode: string | null;
+}
+
 export interface Contact {
   name: string;
   phoneNumber: string;

@@ -20,6 +20,7 @@ import {
   Paperclip,
   Phone,
   Plus,
+  QrCode,
   Search,
   Send,
   Settings,
@@ -33,6 +34,7 @@ import {
 } from 'lucide-react';
 import {
   getGetConnectionQueryKey,
+  getGetEvolutionConnectionQueryKey,
   getGetTemplateDispatchQueryKey,
   getGetTemplateCostsQueryKey,
   getListConversationMessagesQueryKey,
@@ -47,6 +49,7 @@ import {
   useDeleteConversation,
   useDispatchTemplate,
   useGetConnection,
+  useGetEvolutionConnection,
   useGetTemplateDispatch,
   useGetTemplateCosts,
   useListConversationMessages,
@@ -68,6 +71,7 @@ import {
   type TemplateInput,
 } from '@workspace/api-client-react';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { EvolutionConnectionPanel } from '@/components/evolution-connection-panel';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
@@ -321,6 +325,7 @@ function Sidebar({
   onTemplates,
   mobileOpen,
   onCloseMobile,
+  connectionLabel,
 }: {
   conversations: Conversation[];
   selectedId: number | null;
@@ -334,6 +339,7 @@ function Sidebar({
   onTemplates: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  connectionLabel: string;
 }) {
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
@@ -420,7 +426,7 @@ function Sidebar({
       <footer className="border-t border-[#292e2c] px-5 py-3">
         <button type="button" className="flex w-full items-center gap-2 text-left text-[11px] text-[#89958f] hover:text-[#eaf1ed]" onClick={onSettings} data-testid="button-sidebar-connection">
           <Wifi size={14} className={connected ? 'text-[#48c976]' : 'text-[#dfb76d]'} />
-          {connected ? 'WhatsApp Cloud API ativo' : 'Configure sua conexão'}
+          {connected ? connectionLabel : 'Configure sua conexão'}
           <span className="ml-auto">›</span>
         </button>
       </footer>
@@ -790,13 +796,16 @@ function DeleteConversationDialog({
 function SettingsDialog({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const connectionQuery = useGetConnection({ query: { refetchInterval: 10000, queryKey: getGetConnectionQueryKey() } });
+  const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 10000, queryKey: getGetEvolutionConnectionQueryKey() } });
   const connection = connectionQuery.data;
+  const evolutionActive = Boolean(evolutionConnectionQuery.data?.active);
   const [accessToken, setAccessToken] = useState('');
   const [businessAccountId, setBusinessAccountId] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [formError, setFormError] = useState('');
   const [copied, setCopied] = useState(false);
   const [copiedVerifyToken, setCopiedVerifyToken] = useState(false);
+  const [connectionMethod, setConnectionMethod] = useState<'cloud' | 'evolution'>('cloud');
   const connect = useConnectWhatsApp();
   const disconnect = useDisconnectWhatsApp();
 
@@ -806,6 +815,9 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   }, [connection]);
 
   const isConnected = Boolean(connection?.connected);
+  useEffect(() => {
+    if (evolutionActive) setConnectionMethod('evolution');
+  }, [evolutionActive]);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError('');
@@ -847,11 +859,16 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           <button type="button" className="action-btn" onClick={onClose} data-testid="button-close-settings" aria-label="Fechar configurações"><X size={20} /></button>
         </div>
         <div className="space-y-5 p-5">
+          <div className="connection-method-tabs" role="tablist" aria-label="Método de conexão do WhatsApp">
+            <button type="button" role="tab" aria-selected={connectionMethod === 'cloud'} className={connectionMethod === 'cloud' ? 'is-active' : ''} onClick={() => setConnectionMethod('cloud')} data-testid="tab-whatsapp-cloud">API Oficial{isConnected && !evolutionActive && <span>Ativa</span>}</button>
+            <button type="button" role="tab" aria-selected={connectionMethod === 'evolution'} className={connectionMethod === 'evolution' ? 'is-active' : ''} onClick={() => setConnectionMethod('evolution')} data-testid="tab-whatsapp-evolution"><QrCode size={15} /> Conectar via QR Code{evolutionActive && <span>Ativa</span>}</button>
+          </div>
+          {connectionMethod === 'evolution' ? <EvolutionConnectionPanel /> : <>
           {connectionQuery.isLoading && <div className="space-y-3" data-testid="state-connection-loading"><div className="skeleton h-12 rounded-lg" /><div className="skeleton h-12 rounded-lg" /></div>}
           {connectionQuery.isError && <div className="status-note" data-testid="state-connection-error"><AlertCircle size={16} /> Não foi possível consultar o status atual da conexão.</div>}
           <div className={`flex items-center justify-between rounded-lg border p-4 ${isConnected ? 'border-[#35684b] bg-[#1b3024]' : 'border-[#685330] bg-[#332b1e]'}`} data-testid="status-connection">
-            <div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full bg-[#2b4736] text-[#68d18c]"><Wifi size={17} /></div><div><p className="text-sm font-medium">{isConnected ? 'WhatsApp conectado' : 'Conexão pendente'}</p><p className="mt-1 text-[11px] text-[#a2aaa5]">{isConnected ? 'Mensagens podem ser recebidas e enviadas.' : 'Adicione as credenciais da Meta para começar.'}</p></div></div>
-            <span className={`connection-pill ${isConnected ? '' : 'offline'}`}><span className="dot" />{isConnected ? 'Ativo' : 'Offline'}</span>
+            <div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full bg-[#2b4736] text-[#68d18c]"><Wifi size={17} /></div><div><p className="text-sm font-medium">{isConnected ? 'WhatsApp conectado' : 'Conexão pendente'}</p><p className="mt-1 text-[11px] text-[#a2aaa5]">{isConnected ? (evolutionActive ? 'A API Oficial está conectada; o inbox usa a sessão Evolution.' : 'Mensagens do inbox passam pela API Oficial.') : 'Adicione as credenciais da Meta para começar.'}</p></div></div>
+            <span className={`connection-pill ${isConnected ? '' : 'offline'}`}><span className="dot" />{isConnected ? (evolutionActive ? 'Conectada' : 'Ativa') : 'Offline'}</span>
           </div>
           {!isConnected && (
             <form className="space-y-4" onSubmit={submit}>
@@ -878,6 +895,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
               <button type="button" className="btn-ghost btn-danger w-full" onClick={disconnectNow} disabled={disconnect.isPending} data-testid="button-disconnect-whatsapp">{disconnect.isPending ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}{disconnect.isPending ? 'Desconectando...' : 'Desconectar WhatsApp'}</button>
             </div>
           )}
+          </>}
           <button type="button" className="btn-ghost w-full" onClick={() => void logout()} data-testid="button-logout"><LogOut size={16} /> Sair da conta</button>
         </div>
       </div>
@@ -888,6 +906,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
 function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (conversation: Conversation) => void }) {
   const queryClient = useQueryClient();
   const templatesQuery = useListTemplates({ query: { queryKey: getListTemplatesQueryKey() } });
+  const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 10000, queryKey: getGetEvolutionConnectionQueryKey() } });
+  const evolutionMode = Boolean(evolutionConnectionQuery.data?.active);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [sendMode, setSendMode] = useState<'text' | 'template'>('text');
   const [content, setContent] = useState('');
@@ -907,6 +927,10 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
     () => selectedTemplate ? templateParameterSlots(selectedTemplate) : [],
     [selectedTemplate],
   );
+
+  useEffect(() => {
+    if (evolutionMode && sendMode === 'template') setSendMode('text');
+  }, [evolutionMode, sendMode]);
 
   useEffect(() => {
     if (templateId === null && approvedTemplates.length > 0) {
@@ -991,7 +1015,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
         <div className="settings-section flex items-start justify-between"><div><p className="mb-2 text-[11px] font-bold uppercase tracking-[.12em] text-[#68c98a]">Novo contato</p><h2 id="new-conversation-title" className="settings-title">Iniciar conversa</h2><p className="settings-copy">Envie uma mensagem normal ou use um template aprovado.</p></div><button type="button" className="action-btn" onClick={onClose} data-testid="button-close-new-conversation" aria-label="Fechar nova conversa"><X size={20} /></button></div>
         <form className="space-y-4 p-5" onSubmit={submit}>
           <div className="field"><label className="field-label" htmlFor="new-phone-number">Telefone com DDI</label><input id="new-phone-number" className="field-input" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+55 11 99999-0000" data-testid="input-new-phone-number" /><p className="field-help">Use o mesmo formato cadastrado no WhatsApp.</p></div>
-          <div className="field"><label className="field-label" htmlFor="new-message-mode">Tipo de mensagem</label><select id="new-message-mode" className="field-input" value={sendMode} onChange={(event) => setSendMode(event.target.value as 'text' | 'template')} data-testid="select-new-message-mode"><option value="text">Mensagem normal</option><option value="template" disabled={approvedTemplates.length === 0}>Template aprovado{approvedTemplates.length === 0 ? ' (nenhum disponível)' : ''}</option></select></div>
+          <div className="field"><label className="field-label" htmlFor="new-message-mode">Tipo de mensagem</label><select id="new-message-mode" className="field-input" value={sendMode} onChange={(event) => setSendMode(event.target.value as 'text' | 'template')} data-testid="select-new-message-mode"><option value="text">Mensagem normal</option><option value="template" disabled={evolutionMode || approvedTemplates.length === 0}>{evolutionMode ? 'Template disponível apenas na API Oficial' : `Template aprovado${approvedTemplates.length === 0 ? ' (nenhum disponível)' : ''}`}</option></select>{evolutionMode && <p className="field-help">Templates oficiais exigem conexão ativa com a API Oficial da Meta.</p>}</div>
           {sendMode === 'text' && <div className="field"><label className="field-label" htmlFor="new-message">Mensagem inicial</label><textarea id="new-message" className="field-input min-h-28 resize-y" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Olá, como podemos ajudar?" data-testid="input-new-message" /><p className="field-help">A Meta pode bloquear texto normal quando o contato ainda não iniciou uma conversa ou não há janela de atendimento ativa.</p></div>}
           {templatesQuery.isLoading && <div className="status-note"><Loader2 size={16} className="animate-spin" /> Carregando templates aprovados...</div>}
           {sendMode === 'template' && !templatesQuery.isLoading && approvedTemplates.length === 0 && <div className="status-note"><AlertCircle size={16} /> Nenhum template aprovado está disponível.</div>}
@@ -1433,8 +1457,31 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
 function Home() {
   const conversationsQuery = useListConversations({ query: { refetchInterval: 5000, queryKey: getListConversationsQueryKey() } });
   const connectionQuery = useGetConnection({ query: { refetchInterval: 10000, queryKey: getGetConnectionQueryKey() } });
+  const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 10000, queryKey: getGetEvolutionConnectionQueryKey() } });
   const conversations = conversationsQuery.data ?? [];
   const connection = connectionQuery.data;
+  const evolutionConnection = evolutionConnectionQuery.data;
+  const evolutionMode = Boolean(evolutionConnection?.active);
+  const chatConnected = evolutionMode
+    ? Boolean(evolutionConnection?.connected)
+    : Boolean(connection?.connected);
+  const displayConnection: ConnectionStatus | undefined = evolutionMode
+    ? {
+        connected: Boolean(evolutionConnection?.connected),
+        businessAccountId: null,
+        phoneNumbers: evolutionConnection?.connected ? [{
+          id: 'evolution-active',
+          displayPhoneNumber: evolutionConnection.phoneNumber ?? '',
+          verifiedName: evolutionConnection.profileName || evolutionConnection.instanceName || 'WhatsApp conectado',
+          qualityRating: 'N/A',
+          profilePictureUrl: null,
+        }] : [],
+        selectedPhoneNumberId: evolutionConnection?.connected ? 'evolution-active' : null,
+        webhookUrl: connection?.webhookUrl ?? '',
+        webhookVerifyTokenConfigured: false,
+        webhookVerifyToken: null,
+      }
+    : connection;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
@@ -1498,16 +1545,16 @@ function Home() {
       <div className="inbox-shell" data-mobile-list-open={activeSection === 'inbox' ? mobileListOpen : undefined}>
         <NavigationRail
           onSettings={() => setSettingsOpen(true)}
-          connected={Boolean(connection?.connected)}
-          profilePictureUrl={connection?.phoneNumbers.find((phone) => phone.id === connection.selectedPhoneNumberId)?.profilePictureUrl}
+          connected={chatConnected}
+          profilePictureUrl={displayConnection?.phoneNumbers.find((phone) => phone.id === displayConnection.selectedPhoneNumberId)?.profilePictureUrl}
           activeSection={activeSection}
           onSectionChange={setActiveSection}
         />
         {activeSection === 'templates' ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} /> : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={Boolean(connection?.connected)} connection={connection} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} connectionLabel={evolutionMode ? 'Evolution API · QR' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
-            <ChatPanel conversation={selectedConversation} connected={Boolean(connection?.connected)} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
+            <ChatPanel conversation={selectedConversation} connected={chatConnected} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>
         )}
       </div>

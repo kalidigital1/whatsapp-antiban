@@ -1,10 +1,10 @@
 ---
 name: WhatsApp connection security
-description: Security boundary and restart behavior for the WhatsApp Cloud API connection.
+description: Security boundaries and provider behavior for Cloud API and Evolution API connections.
 ---
 
-The WhatsApp access token must stay server-side and is intentionally held only in the API process for the current MVP; it is never returned by the connection status endpoint or saved in browser storage.
+The Meta access token and Evolution API key/configuration stay server-side, encrypted at rest, and are never returned by connection status endpoints or saved in browser storage. The Evolution webhook uses an instance-specific derived secret. The active provider is persisted separately from whether its session is currently online. Official templates must only be sent through the Meta Cloud API; regular chat text and media can use the selected provider.
 
-**Why:** Returning or browser-persisting the Meta token would expose a credential to the client. The current app has no authenticated operator scope, so durable encrypted credential storage should be designed together with authentication rather than added ad hoc.
+**Why:** Both providers can access WhatsApp conversations, and the Evolution API is unofficial; credentials and inbound webhook access must remain isolated from the browser and from unrelated instances.
 
-**How to apply:** Keep the connection endpoint as the only place that accepts the raw Meta token. If connection persistence is added, use server-managed encrypted storage and user-scoped access. The webhook verification token may be shown separately because it is not the Meta access token.
+**How to apply:** Keep provider credentials in server-managed encrypted storage, never return them to clients, verify Evolution webhook requests with the per-instance secret, and preserve the distinction between official templates and regular chat messaging.

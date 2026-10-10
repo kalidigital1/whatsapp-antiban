@@ -79,6 +79,8 @@ export const appSettings = pgTable("whatsapp_app_settings", {
   whatsappAccessTokenEncrypted: text("whatsapp_access_token_encrypted"),
   whatsappBusinessAccountId: text("whatsapp_business_account_id"),
   whatsappSelectedPhoneNumberId: text("whatsapp_selected_phone_number_id"),
+  whatsappEvolutionConfigEncrypted: text("whatsapp_evolution_config_encrypted"),
+  whatsappActiveProvider: text("whatsapp_active_provider").notNull().default("none"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

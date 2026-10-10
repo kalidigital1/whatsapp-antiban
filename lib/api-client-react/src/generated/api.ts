@@ -27,6 +27,8 @@ import type {
   ContactInput,
   Conversation,
   ErrorResponse,
+  EvolutionConnectionInput,
+  EvolutionConnectionStatus,
   HealthStatus,
   MediaInput,
   MessageInput,
@@ -385,6 +387,319 @@ export const useDisconnectWhatsApp = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDisconnectWhatsAppMutationOptions(options));
+    }
+
+export const getGetEvolutionConnectionUrl = () => {
+
+
+
+
+  return `/api/evolution/connection`
+}
+
+/**
+ * @summary Get the current Evolution API connection
+ */
+export const getEvolutionConnection = async ( options?: Parameters<typeof customFetch>[1]): Promise<EvolutionConnectionStatus> => {
+
+  return customFetch<EvolutionConnectionStatus>(getGetEvolutionConnectionUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEvolutionConnectionQueryKey = () => {
+    return [
+    `/api/evolution/connection`
+    ] as const;
+    }
+
+
+export const getGetEvolutionConnectionQueryOptions = <TData = Awaited<ReturnType<typeof getEvolutionConnection>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEvolutionConnection>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEvolutionConnectionQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEvolutionConnection>>> = ({ signal }) => getEvolutionConnection({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEvolutionConnection>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEvolutionConnectionQueryResult = NonNullable<Awaited<ReturnType<typeof getEvolutionConnection>>>
+export type GetEvolutionConnectionQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the current Evolution API connection
+ */
+
+export function useGetEvolutionConnection<TData = Awaited<ReturnType<typeof getEvolutionConnection>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEvolutionConnection>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEvolutionConnectionQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getConnectEvolutionWhatsAppUrl = () => {
+
+
+
+
+  return `/api/evolution/connection`
+}
+
+/**
+ * @summary Create or connect an Evolution API WhatsApp instance
+ */
+export const connectEvolutionWhatsApp = async (evolutionConnectionInput: EvolutionConnectionInput, options?: Parameters<typeof customFetch>[1]): Promise<EvolutionConnectionStatus> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<EvolutionConnectionStatus>(getConnectEvolutionWhatsAppUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(evolutionConnectionInput)
+  }
+);}
+
+
+
+
+
+export const getConnectEvolutionWhatsAppMutationKey = () => ['connectEvolutionWhatsApp'] as const;
+
+export const getConnectEvolutionWhatsAppMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectEvolutionWhatsApp>>, TError,ConnectEvolutionWhatsAppMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof connectEvolutionWhatsApp>>, TError,ConnectEvolutionWhatsAppMutationVariables, TContext> => {
+
+const mutationKey = getConnectEvolutionWhatsAppMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectEvolutionWhatsApp>>, ConnectEvolutionWhatsAppMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  connectEvolutionWhatsApp(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConnectEvolutionWhatsAppMutationResult = NonNullable<Awaited<ReturnType<typeof connectEvolutionWhatsApp>>>
+    export type ConnectEvolutionWhatsAppMutationBody = BodyType<EvolutionConnectionInput>
+    export type ConnectEvolutionWhatsAppMutationError = ErrorType<ErrorResponse>
+    export type ConnectEvolutionWhatsAppMutationVariables = {data: BodyType<EvolutionConnectionInput>}
+
+    /**
+ * @summary Create or connect an Evolution API WhatsApp instance
+ */
+export const useConnectEvolutionWhatsApp = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectEvolutionWhatsApp>>, TError,ConnectEvolutionWhatsAppMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof connectEvolutionWhatsApp>>,
+        TError,
+        ConnectEvolutionWhatsAppMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConnectEvolutionWhatsAppMutationOptions(options));
+    }
+
+export const getDisconnectEvolutionWhatsAppUrl = () => {
+
+
+
+
+  return `/api/evolution/connection`
+}
+
+/**
+ * @summary Disconnect the Evolution API instance from this inbox
+ */
+export const disconnectEvolutionWhatsApp = async ( options?: Parameters<typeof customFetch>[1]): Promise<SuccessResponse> => {
+
+  return customFetch<SuccessResponse>(getDisconnectEvolutionWhatsAppUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDisconnectEvolutionWhatsAppMutationKey = () => ['disconnectEvolutionWhatsApp'] as const;
+
+export const getDisconnectEvolutionWhatsAppMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext> => {
+
+const mutationKey = getDisconnectEvolutionWhatsAppMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, void> = () => {
+
+
+          return  disconnectEvolutionWhatsApp(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisconnectEvolutionWhatsAppMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>>
+
+    export type DisconnectEvolutionWhatsAppMutationError = ErrorType<unknown>
+
+
+    /**
+ * @summary Disconnect the Evolution API instance from this inbox
+ */
+export const useDisconnectEvolutionWhatsApp = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDisconnectEvolutionWhatsAppMutationOptions(options));
+    }
+
+export const getRefreshEvolutionQrUrl = () => {
+
+
+
+
+  return `/api/evolution/connection/qr`
+}
+
+/**
+ * @summary Refresh the Evolution API QR code
+ */
+export const refreshEvolutionQr = async ( options?: Parameters<typeof customFetch>[1]): Promise<EvolutionConnectionStatus> => {
+
+  return customFetch<EvolutionConnectionStatus>(getRefreshEvolutionQrUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshEvolutionQrMutationKey = () => ['refreshEvolutionQr'] as const;
+
+export const getRefreshEvolutionQrMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshEvolutionQr>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshEvolutionQr>>, TError,void, TContext> => {
+
+const mutationKey = getRefreshEvolutionQrMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshEvolutionQr>>, void> = () => {
+
+
+          return  refreshEvolutionQr(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshEvolutionQrMutationResult = NonNullable<Awaited<ReturnType<typeof refreshEvolutionQr>>>
+
+    export type RefreshEvolutionQrMutationError = ErrorType<ErrorResponse>
+
+
+    /**
+ * @summary Refresh the Evolution API QR code
+ */
+export const useRefreshEvolutionQr = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshEvolutionQr>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshEvolutionQr>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRefreshEvolutionQrMutationOptions(options));
     }
 
 export const getListConversationsUrl = () => {

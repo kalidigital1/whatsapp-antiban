@@ -8,7 +8,7 @@ const router: IRouter = Router();
 router.use(healthRouter);
 router.use(authRouter);
 router.use((req, res, next) => {
-  if (req.path === "/webhook") {
+  if (req.path === "/webhook" || req.path === "/evolution/webhook") {
     next();
     return;
   }

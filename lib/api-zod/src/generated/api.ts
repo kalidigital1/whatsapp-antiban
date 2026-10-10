@@ -76,6 +76,72 @@ export const DisconnectWhatsAppResponse = zod.object({
 
 
 /**
+ * @summary Get the current Evolution API connection
+ */
+export const GetEvolutionConnectionResponse = zod.object({
+  "configured": zod.boolean(),
+  "connected": zod.boolean(),
+  "active": zod.boolean(),
+  "state": zod.string().nullable(),
+  "instanceName": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "profileName": zod.string().nullable(),
+  "qrCode": zod.string().nullable()
+})
+
+
+/**
+ * @summary Create or connect an Evolution API WhatsApp instance
+ */
+
+
+export const connectEvolutionWhatsAppBodyInstanceNameMin = 2;
+export const connectEvolutionWhatsAppBodyInstanceNameMax = 64;
+
+
+
+export const ConnectEvolutionWhatsAppBody = zod.object({
+  "serverUrl": zod.string().url().min(1),
+  "apiKey": zod.string().min(1),
+  "instanceName": zod.string().min(connectEvolutionWhatsAppBodyInstanceNameMin).max(connectEvolutionWhatsAppBodyInstanceNameMax)
+})
+
+export const ConnectEvolutionWhatsAppResponse = zod.object({
+  "configured": zod.boolean(),
+  "connected": zod.boolean(),
+  "active": zod.boolean(),
+  "state": zod.string().nullable(),
+  "instanceName": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "profileName": zod.string().nullable(),
+  "qrCode": zod.string().nullable()
+})
+
+
+/**
+ * @summary Disconnect the Evolution API instance from this inbox
+ */
+export const DisconnectEvolutionWhatsAppResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * @summary Refresh the Evolution API QR code
+ */
+export const RefreshEvolutionQrResponse = zod.object({
+  "configured": zod.boolean(),
+  "connected": zod.boolean(),
+  "active": zod.boolean(),
+  "state": zod.string().nullable(),
+  "instanceName": zod.string().nullable(),
+  "phoneNumber": zod.string().nullable(),
+  "profileName": zod.string().nullable(),
+  "qrCode": zod.string().nullable()
+})
+
+
+/**
  * @summary List conversations received through the webhook
  */
 export const ListConversationsResponseItem = zod.object({

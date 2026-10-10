@@ -1,7 +1,8 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import multer from "multer";
 import {
+  ConnectEvolutionWhatsAppBody,
   ConnectWhatsAppBody,
   CreateContactBody,
   CreateTemplateBody,
@@ -9,6 +10,7 @@ import {
   DispatchTemplateParams,
   GetTemplateCostsResponse,
   GetConnectionResponse,
+  GetEvolutionConnectionResponse,
   ListConversationsResponse,
   ListContactsResponse,
   ListConversationMessagesParams,
@@ -26,6 +28,7 @@ import {
   GetTemplateDispatchParams,
   GetTemplateDispatchResponse,
   ListTemplateDispatchesResponse,
+  EvolutionConnectionStatus,
 } from "@workspace/api-zod";
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
@@ -64,7 +67,24 @@ type ActiveConnection = {
   selectedPhoneNumberId: string;
 };
 
+type EvolutionConfig = {
+  serverUrl: string;
+  apiKey: string;
+  instanceName: string;
+};
+
+type EvolutionSession = EvolutionConfig & {
+  connected: boolean;
+  state: string | null;
+  phoneNumber: string | null;
+  profileName: string | null;
+  qrCode: string | null;
+};
+
 let activeConnection: ActiveConnection | null = null;
+let activeEvolutionSession: EvolutionSession | null = null;
+let activeProvider: "none" | "cloud" | "evolution" = "none";
+let connectionsRestored = false;
 let connectionRestorePromise: Promise<void> | null = null;
 const eventClients = new Set<Response>();
 
@@ -131,32 +151,89 @@ function decryptWhatsAppToken(value: string) {
   ]).toString("utf8");
 }
 
+function evolutionEncryptionKey() {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is required to protect the Evolution API key.");
+  return createHash("sha256").update(`${secret}:evolution-api-config`).digest();
+}
+
+function encryptEvolutionConfig(value: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", evolutionEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [iv, tag, encrypted].map((part) => part.toString("base64url")).join(".");
+}
+
+function decryptEvolutionConfig(value: string) {
+  const [ivEncoded, tagEncoded, encryptedEncoded] = value.split(".");
+  if (!ivEncoded || !tagEncoded || !encryptedEncoded) throw new Error("Stored Evolution API configuration is invalid.");
+  const decipher = createDecipheriv("aes-256-gcm", evolutionEncryptionKey(), Buffer.from(ivEncoded, "base64url"));
+  decipher.setAuthTag(Buffer.from(tagEncoded, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedEncoded, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
 async function restoreActiveConnection() {
-  if (activeConnection) return;
+  if (connectionsRestored) return;
   if (connectionRestorePromise) return connectionRestorePromise;
   connectionRestorePromise = (async () => {
     try {
       const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1)).limit(1);
-      if (!settings?.whatsappAccessTokenEncrypted || !settings.whatsappBusinessAccountId) return;
-      const accessToken = decryptWhatsAppToken(settings.whatsappAccessTokenEncrypted);
-      await subscribeWhatsAppBusinessAccount(
-        accessToken,
-        settings.whatsappBusinessAccountId,
-      );
-      const phoneNumbers = await loadPhoneNumbers(accessToken, settings.whatsappBusinessAccountId);
-      if (phoneNumbers.length === 0) return;
-      const selected = phoneNumbers.some((phone) => phone.id === settings.whatsappSelectedPhoneNumberId)
-        ? settings.whatsappSelectedPhoneNumberId!
-        : phoneNumbers[0].id;
-      activeConnection = {
-        accessToken,
-        businessAccountId: settings.whatsappBusinessAccountId,
-        phoneNumbers,
-        selectedPhoneNumberId: selected,
-      };
+      if (!settings) return;
+      const hasCloudConfig = Boolean(settings.whatsappAccessTokenEncrypted && settings.whatsappBusinessAccountId);
+      const hasEvolutionConfig = Boolean(settings.whatsappEvolutionConfigEncrypted);
+      activeProvider = settings.whatsappActiveProvider === "evolution" && hasEvolutionConfig
+        ? "evolution"
+        : settings.whatsappActiveProvider === "cloud" && hasCloudConfig
+          ? "cloud"
+          : hasCloudConfig
+            ? "cloud"
+            : hasEvolutionConfig
+              ? "evolution"
+              : "none";
+      if (!activeConnection && settings.whatsappAccessTokenEncrypted && settings.whatsappBusinessAccountId) {
+        try {
+          const accessToken = decryptWhatsAppToken(settings.whatsappAccessTokenEncrypted);
+          await subscribeWhatsAppBusinessAccount(accessToken, settings.whatsappBusinessAccountId);
+          const phoneNumbers = await loadPhoneNumbers(accessToken, settings.whatsappBusinessAccountId);
+          if (phoneNumbers.length > 0) {
+            const selected = phoneNumbers.some((phone) => phone.id === settings.whatsappSelectedPhoneNumberId)
+              ? settings.whatsappSelectedPhoneNumberId!
+              : phoneNumbers[0].id;
+            activeConnection = {
+              accessToken,
+              businessAccountId: settings.whatsappBusinessAccountId,
+              phoneNumbers,
+              selectedPhoneNumberId: selected,
+            };
+          }
+        } catch (error) {
+          logger.warn({ err: error }, "Could not restore WhatsApp Cloud API connection");
+        }
+      }
+      if (!activeEvolutionSession && settings.whatsappEvolutionConfigEncrypted) {
+        const config = JSON.parse(decryptEvolutionConfig(settings.whatsappEvolutionConfigEncrypted)) as EvolutionConfig;
+        activeEvolutionSession = {
+          ...config,
+          connected: false,
+          state: "connecting",
+          phoneNumber: null,
+          profileName: null,
+          qrCode: null,
+        };
+        try {
+          await refreshEvolutionSession(activeEvolutionSession, false);
+        } catch (error) {
+          logger.warn({ err: error }, "Could not refresh Evolution API connection state");
+        }
+      }
     } catch (error) {
-      logger.warn({ err: error }, "Could not restore WhatsApp connection from storage");
+      logger.warn({ err: error }, "Could not restore WhatsApp connection settings from storage");
     } finally {
+      connectionsRestored = true;
       connectionRestorePromise = null;
     }
   })();
@@ -197,6 +274,151 @@ function webhookVerifyToken(): string {
 function webhookUrl(req: Request): string {
   const protocol = req.header("x-forwarded-proto")?.split(",")[0] ?? req.protocol;
   return `${protocol}://${req.get("host") ?? "localhost"}/api/webhook`;
+}
+
+function evolutionWebhookUrl(req: Request, session: EvolutionSession): string {
+  const protocol = req.header("x-forwarded-proto")?.split(",")[0] ?? req.protocol;
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is required to secure Evolution API webhooks.");
+  const token = createHash("sha256")
+    .update(`${secret}:evolution-webhook:${session.instanceName}`)
+    .digest("hex");
+  return `${protocol}://${req.get("host") ?? "localhost"}/api/evolution/webhook?token=${token}`;
+}
+
+function normalizeEvolutionUrl(rawUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new MetaApiError("Informe uma URL válida para o servidor Evolution API.");
+  }
+  const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  if ((parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLoopback))
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash) {
+    throw new MetaApiError("Use uma URL HTTPS pública ou HTTP local, sem usuário, senha, parâmetros ou fragmento.");
+  }
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+async function evolutionRequest<T>(
+  session: EvolutionConfig,
+  endpoint: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), metaRequestTimeoutMs);
+  const headers = new Headers(init.headers);
+  headers.set("apikey", session.apiKey);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  try {
+    const response = await fetch(`${session.serverUrl}${endpoint}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) {
+      const message = stringValue(body.message)
+        || stringValue(body.error)
+        || `Evolution API respondeu com HTTP ${response.status}.`;
+      throw new MetaApiError(message, response.status);
+    }
+    return body as T;
+  } catch (error) {
+    if (error instanceof MetaApiError) throw error;
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new MetaApiError("O servidor Evolution API não respondeu em 15 segundos.", 504);
+    }
+    throw new MetaApiError("Não foi possível alcançar o servidor Evolution API.", 502);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function evolutionQrCode(body: Record<string, unknown>): string | null {
+  const qrcode = asRecord(body.qrcode);
+  const qr = asRecord(body.qr);
+  const value = stringValue(qrcode.base64)
+    || stringValue(qrcode.code)
+    || stringValue(body.base64)
+    || stringValue(body.code)
+    || stringValue(qr.base64)
+    || stringValue(qr.code);
+  if (!value) return null;
+  return value.startsWith("data:image/") ? value : `data:image/png;base64,${value}`;
+}
+
+async function refreshEvolutionSession(
+  session: EvolutionSession,
+  requestQr = true,
+): Promise<void> {
+  const stateBody = await evolutionRequest<Record<string, unknown>>(
+    session,
+    `/instance/connectionState/${encodeURIComponent(session.instanceName)}`,
+  );
+  const state = stringValue(asRecord(stateBody.instance).state) || stringValue(stateBody.state) || "unknown";
+  session.state = state;
+  session.connected = state.toLowerCase() === "open";
+  const instance = asRecord(stateBody.instance);
+  session.phoneNumber =
+    stringValue(instance.ownerJid).split("@")[0]
+    || stringValue(instance.owner)
+    || session.phoneNumber;
+  session.profileName = stringValue(instance.profileName) || session.profileName;
+  if (session.connected) {
+    session.qrCode = null;
+    return;
+  }
+  if (requestQr) {
+    const qrBody = await evolutionRequest<Record<string, unknown>>(
+      session,
+      `/instance/connect/${encodeURIComponent(session.instanceName)}`,
+    );
+    session.qrCode = evolutionQrCode(qrBody);
+    const qrInstance = asRecord(qrBody.instance);
+    session.phoneNumber =
+      stringValue(qrInstance.ownerJid).split("@")[0]
+      || stringValue(qrInstance.owner)
+      || session.phoneNumber;
+  }
+}
+
+async function setEvolutionWebhook(session: EvolutionSession, req: Request) {
+  await evolutionRequest(
+    session,
+    `/webhook/set/${encodeURIComponent(session.instanceName)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        webhook: {
+          url: evolutionWebhookUrl(req, session),
+          enabled: true,
+          webhookByEvents: false,
+          webhookBase64: false,
+          events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"],
+        },
+      }),
+    },
+  );
+}
+
+function evolutionConnectionResponse(session: EvolutionSession | null): EvolutionConnectionStatus {
+  return GetEvolutionConnectionResponse.parse({
+    configured: Boolean(session),
+    connected: Boolean(session?.connected),
+    active: activeProvider === "evolution" && Boolean(session),
+    state: session?.state ?? null,
+    instanceName: session?.instanceName ?? null,
+    phoneNumber: session?.phoneNumber ?? null,
+    profileName: session?.profileName ?? null,
+    qrCode: session?.qrCode ?? null,
+  });
 }
 
 function connectionStatus(req: Request) {
@@ -782,6 +1004,71 @@ async function sendMediaMessage(
   return { id, type };
 }
 
+async function storeOutboundEvolutionMediaMessage(
+  conversation: typeof conversations.$inferSelect,
+  file: Express.Multer.File,
+  caption: string,
+  session: EvolutionSession,
+) {
+  const [contact] = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.id, conversation.contactId))
+    .limit(1);
+  if (!contact) throw new MetaApiError("Contato da conversa não encontrado.", 404);
+
+  const type = mediaMessageType(file.mimetype);
+  const [pending] = await db
+    .insert(chatMessages)
+    .values({
+      conversationId: conversation.id,
+      direction: "outbound",
+      messageType: type,
+      content: caption || file.originalname,
+      status: "pending",
+    })
+    .returning();
+  try {
+    const body = await evolutionRequest<Record<string, unknown>>(
+      session,
+      `/message/sendMedia/${encodeURIComponent(session.instanceName)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          number: evolutionPhoneNumber(contact.phoneNumber, session),
+          mediatype: type,
+          mimetype: file.mimetype,
+          caption,
+          media: file.buffer.toString("base64"),
+          fileName: file.originalname,
+        }),
+      },
+    );
+    const key = asRecord(asRecord(body.data).key);
+    const topKey = asRecord(body.key);
+    const rawId = stringValue(key.id) || stringValue(topKey.id) || stringValue(body.keyId);
+    if (!rawId) throw new MetaApiError("A Evolution API não retornou o ID da mídia enviada.");
+    const whatsappMessageId = `evolution:${session.instanceName}:${rawId}`;
+    const [sent] = await db
+      .update(chatMessages)
+      .set({ status: "sent", whatsappMessageId })
+      .where(eq(chatMessages.id, pending.id))
+      .returning();
+    await db
+      .update(conversations)
+      .set({ lastMessageAt: new Date(), updatedAt: new Date() })
+      .where(eq(conversations.id, conversation.id));
+    publishConversationEvent({ conversationId: conversation.id, reason: "message", whatsappMessageId });
+    return sent ?? pending;
+  } catch (error) {
+    await db
+      .update(chatMessages)
+      .set({ status: "failed" })
+      .where(eq(chatMessages.id, pending.id));
+    throw error;
+  }
+}
+
 async function storeOutboundMediaMessage(
   conversation: typeof conversations.$inferSelect,
   file: Express.Multer.File,
@@ -848,13 +1135,17 @@ function contactDisplayName(contact: typeof contacts.$inferSelect): string {
 async function getOrCreateContact(phoneNumber: string, name?: string) {
   const normalizedPhone = normalizePhone(phoneNumber);
   const candidatePhones: string[] = [];
-  if (activeConnection) {
-    const canonicalPhone = recipientPhoneNumber(normalizedPhone, activeConnection);
-    if (canonicalPhone.startsWith("55") && canonicalPhone.length > 12) {
-      const localPhone = canonicalPhone.slice(2);
-      candidatePhones.push(localPhone);
+  if (activeConnection || activeEvolutionSession) {
+    const countryAwarePhone = activeConnection
+      ? recipientPhoneNumber(normalizedPhone, activeConnection)
+      : normalizedPhone;
+    const brazilPhone = countryAwarePhone.startsWith("55") && countryAwarePhone.length > 12
+      ? countryAwarePhone
+      : normalizedPhone;
+    if (brazilPhone.startsWith("55") && brazilPhone.length > 12) {
+      candidatePhones.push(brazilPhone.slice(2));
     }
-    candidatePhones.push(canonicalPhone);
+    candidatePhones.push(countryAwarePhone);
   }
   candidatePhones.push(normalizedPhone);
 
@@ -975,6 +1266,83 @@ async function storeOutboundMessage(
   }
 }
 
+function evolutionPhoneNumber(phoneNumber: string, session: EvolutionSession): string {
+  const normalized = normalizePhone(phoneNumber);
+  const senderDigits = normalizePhone(session.phoneNumber ?? "");
+  if (senderDigits.startsWith("55") && (normalized.length === 10 || normalized.length === 11)) {
+    return `55${normalized}`;
+  }
+  return normalized;
+}
+
+async function sendEvolutionTextMessage(session: EvolutionSession, to: string, text: string) {
+  const body = await evolutionRequest<Record<string, unknown>>(
+    session,
+    `/message/sendText/${encodeURIComponent(session.instanceName)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        number: evolutionPhoneNumber(to, session),
+        text,
+        linkPreview: false,
+      }),
+    },
+  );
+  const key = asRecord(asRecord(body.data).key);
+  const topKey = asRecord(body.key);
+  const id = stringValue(key.id) || stringValue(topKey.id) || stringValue(body.keyId);
+  if (!id) throw new MetaApiError("A Evolution API não retornou o ID da mensagem enviada.");
+  return `evolution:${session.instanceName}:${id}`;
+}
+
+async function storeOutboundEvolutionMessage(
+  conversation: typeof conversations.$inferSelect,
+  content: string,
+  session: EvolutionSession,
+) {
+  const [contact] = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.id, conversation.contactId))
+    .limit(1);
+  if (!contact) throw new MetaApiError("Contato da conversa não encontrado.", 404);
+
+  const [pending] = await db
+    .insert(chatMessages)
+    .values({
+      conversationId: conversation.id,
+      direction: "outbound",
+      messageType: "text",
+      content,
+      status: "pending",
+    })
+    .returning();
+  try {
+    const whatsappMessageId = await sendEvolutionTextMessage(session, contact.phoneNumber, content);
+    const [sent] = await db
+      .update(chatMessages)
+      .set({ status: "sent", whatsappMessageId })
+      .where(eq(chatMessages.id, pending.id))
+      .returning();
+    await db
+      .update(conversations)
+      .set({ lastMessageAt: new Date(), updatedAt: new Date() })
+      .where(eq(conversations.id, conversation.id));
+    publishConversationEvent({
+      conversationId: conversation.id,
+      reason: "message",
+      whatsappMessageId,
+    });
+    return sent ?? pending;
+  } catch (error) {
+    await db
+      .update(chatMessages)
+      .set({ status: "failed" })
+      .where(eq(chatMessages.id, pending.id));
+    throw error;
+  }
+}
+
 async function storeOutboundTemplateMessage(
   conversation: typeof conversations.$inferSelect,
   template: typeof whatsappTemplates.$inferSelect,
@@ -1017,6 +1385,136 @@ async function storeOutboundTemplateMessage(
 
 router.get("/connection", (req, res) => {
   res.json(GetConnectionResponse.parse(connectionStatus(req)));
+});
+
+router.get("/evolution/connection", async (_req, res) => {
+  const session = activeEvolutionSession;
+  if (session) {
+    try {
+      await refreshEvolutionSession(session, !session.qrCode);
+    } catch (error) {
+      session.state = "unreachable";
+      session.connected = false;
+      logger.warn({ err: error, instanceName: session.instanceName }, "Evolution API state check failed");
+    }
+  }
+  res.json(evolutionConnectionResponse(session));
+});
+
+router.post("/evolution/connection", async (req, res) => {
+  try {
+    const input = ConnectEvolutionWhatsAppBody.parse(req.body);
+    const instanceName = input.instanceName.trim();
+    if (!/^[a-zA-Z0-9_-]{2,64}$/.test(instanceName)) {
+      res.status(400).json({ error: "O nome da instância deve ter de 2 a 64 caracteres: letras, números, hífen ou sublinhado." });
+      return;
+    }
+    if (!process.env.SESSION_SECRET) {
+      res.status(500).json({ error: "SESSION_SECRET não está configurado para proteger a conexão Evolution." });
+      return;
+    }
+
+    const session: EvolutionSession = {
+      serverUrl: normalizeEvolutionUrl(input.serverUrl),
+      apiKey: input.apiKey.trim(),
+      instanceName,
+      connected: false,
+      state: "connecting",
+      phoneNumber: null,
+      profileName: null,
+      qrCode: null,
+    };
+    try {
+      const created = await evolutionRequest<Record<string, unknown>>(
+        session,
+        "/instance/create",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            instanceName,
+            integration: "WHATSAPP-BAILEYS",
+            qrcode: true,
+          }),
+        },
+      );
+      session.qrCode = evolutionQrCode(created);
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const status = error instanceof MetaApiError ? error.status : 0;
+      if (status !== 409 && !message.includes("already") && !message.includes("exist")) throw error;
+    }
+    await setEvolutionWebhook(session, req);
+    await refreshEvolutionSession(session, true);
+    const encryptedConfig = encryptEvolutionConfig(JSON.stringify({
+      serverUrl: session.serverUrl,
+      apiKey: session.apiKey,
+      instanceName: session.instanceName,
+    }));
+    await db
+      .insert(appSettings)
+      .values({
+        id: 1,
+        whatsappEvolutionConfigEncrypted: encryptedConfig,
+        whatsappActiveProvider: "evolution",
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: appSettings.id,
+        set: {
+          whatsappEvolutionConfigEncrypted: encryptedConfig,
+          whatsappActiveProvider: "evolution",
+          updatedAt: new Date(),
+        },
+      });
+    activeEvolutionSession = session;
+    activeProvider = "evolution";
+    res.json(evolutionConnectionResponse(session));
+  } catch (error) {
+    const status = error instanceof MetaApiError ? error.status : 400;
+    const message = error instanceof Error ? error.message : "Não foi possível iniciar a conexão Evolution.";
+    logger.warn({ status, message }, "Evolution API connection setup failed");
+    res.status(status).json({ error: message });
+  }
+});
+
+router.post("/evolution/connection/qr", async (_req, res) => {
+  if (!activeEvolutionSession) {
+    res.status(400).json({ error: "Configure a conexão Evolution antes de solicitar um QR Code." });
+    return;
+  }
+  try {
+    await refreshEvolutionSession(activeEvolutionSession, true);
+    res.json(evolutionConnectionResponse(activeEvolutionSession));
+  } catch (error) {
+    const status = error instanceof MetaApiError ? error.status : 400;
+    const message = error instanceof Error ? error.message : "Não foi possível atualizar o QR Code.";
+    res.status(status).json({ error: message });
+  }
+});
+
+router.delete("/evolution/connection", async (_req, res) => {
+  if (activeEvolutionSession) {
+    try {
+      await evolutionRequest(
+        activeEvolutionSession,
+        `/instance/logout/${encodeURIComponent(activeEvolutionSession.instanceName)}`,
+        { method: "DELETE" },
+      );
+    } catch (error) {
+      logger.warn({ err: error, instanceName: activeEvolutionSession.instanceName }, "Evolution API logout failed; clearing local connection");
+    }
+  }
+  activeEvolutionSession = null;
+  activeProvider = activeConnection ? "cloud" : "none";
+  await db
+    .update(appSettings)
+    .set({
+      whatsappEvolutionConfigEncrypted: null,
+      whatsappActiveProvider: activeProvider,
+      updatedAt: new Date(),
+    })
+    .where(eq(appSettings.id, 1));
+  res.json({ success: true });
 });
 
 router.post("/connection", async (req, res) => {
@@ -1067,6 +1565,11 @@ router.post("/connection", async (req, res) => {
       phoneNumbers,
       selectedPhoneNumberId: selected,
     };
+    activeProvider = "cloud";
+    connectionsRestored = true;
+    await db.update(appSettings)
+      .set({ whatsappActiveProvider: "cloud", updatedAt: new Date() })
+      .where(eq(appSettings.id, 1));
 
     res.json(connectionStatus(req));
   } catch (error) {
@@ -1082,12 +1585,14 @@ router.post("/connection", async (req, res) => {
 
 router.delete("/connection", async (_req, res) => {
   activeConnection = null;
+  activeProvider = activeEvolutionSession?.connected ? "evolution" : "none";
   await db
     .update(appSettings)
     .set({
       whatsappAccessTokenEncrypted: null,
       whatsappBusinessAccountId: null,
       whatsappSelectedPhoneNumberId: null,
+      whatsappActiveProvider: activeProvider,
       updatedAt: new Date(),
     })
     .where(eq(appSettings.id, 1));
@@ -1196,10 +1701,6 @@ router.post("/conversations/:conversationId/messages", async (req, res) => {
   try {
     const params = SendConversationMessageParams.parse(req.params);
     const { content } = SendConversationMessageBody.parse(req.body);
-    if (!activeConnection) {
-      res.status(400).json({ error: "Conecte a API Oficial antes de enviar mensagens." });
-      return;
-    }
 
     const [conversation] = await db
       .select()
@@ -1211,11 +1712,19 @@ router.post("/conversations/:conversationId/messages", async (req, res) => {
       return;
     }
 
-    const message = await storeOutboundMessage(
-      conversation,
-      content.trim(),
-      activeConnection,
-    );
+    let message;
+    if (activeProvider === "evolution") {
+      if (!activeEvolutionSession?.connected) {
+        res.status(400).json({ error: "A sessão Evolution não está conectada. Leia o QR Code novamente." });
+        return;
+      }
+      message = await storeOutboundEvolutionMessage(conversation, content.trim(), activeEvolutionSession);
+    } else if (activeProvider === "cloud" && activeConnection) {
+      message = await storeOutboundMessage(conversation, content.trim(), activeConnection);
+    } else {
+      res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de enviar mensagens." });
+      return;
+    }
     res.status(201).json(messageResponse(message));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
@@ -1231,10 +1740,6 @@ router.post(
   async (req, res) => {
     try {
       const params = SendConversationMessageParams.parse(req.params);
-      if (!activeConnection) {
-        res.status(400).json({ error: "Conecte a API Oficial antes de enviar arquivos." });
-        return;
-      }
       if (!req.file) {
         res.status(400).json({ error: "Selecione um arquivo para enviar." });
         return;
@@ -1251,12 +1756,19 @@ router.post(
       }
 
       const caption = typeof req.body?.caption === "string" ? req.body.caption.trim() : "";
-      const message = await storeOutboundMediaMessage(
-        conversation,
-        req.file,
-        caption,
-        activeConnection,
-      );
+      let message;
+      if (activeProvider === "evolution") {
+        if (!activeEvolutionSession?.connected) {
+          res.status(400).json({ error: "A sessão Evolution não está conectada. Leia o QR Code novamente." });
+          return;
+        }
+        message = await storeOutboundEvolutionMediaMessage(conversation, req.file, caption, activeEvolutionSession);
+      } else if (activeProvider === "cloud" && activeConnection) {
+        message = await storeOutboundMediaMessage(conversation, req.file, caption, activeConnection);
+      } else {
+        res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de enviar arquivos." });
+        return;
+      }
       res.status(201).json(messageResponse(message));
     } catch (error) {
       const status = error instanceof MetaApiError ? error.status : 400;
@@ -1270,14 +1782,23 @@ router.post(
 router.post("/conversations/start", async (req, res) => {
   try {
     const input = StartConversationBody.parse(req.body);
-    if (!activeConnection) {
-      res.status(400).json({ error: "Conecte a API Oficial antes de iniciar conversas." });
+    const usingEvolution = activeProvider === "evolution";
+    if (usingEvolution && !activeEvolutionSession?.connected) {
+      res.status(400).json({ error: "A sessão Evolution não está conectada. Leia o QR Code novamente." });
+      return;
+    }
+    if (!usingEvolution && (activeProvider !== "cloud" || !activeConnection)) {
+      res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de iniciar conversas." });
       return;
     }
     if (!input.content?.trim() && !input.templateId) {
       res.status(400).json({
         error: "Para iniciar conversa com um novo contato, selecione um template aprovado pela Meta.",
       });
+      return;
+    }
+    if (usingEvolution && input.templateId) {
+      res.status(400).json({ error: "Templates aprovados só podem ser enviados pela conexão da API Oficial da Meta." });
       return;
     }
 
@@ -1289,7 +1810,7 @@ router.post("/conversations/start", async (req, res) => {
     const contact = await getOrCreateContact(phoneNumber);
     const conversation = await getOrCreateConversation(
       contact.id,
-      activeConnection.selectedPhoneNumberId,
+      usingEvolution ? "unknown" : activeConnection!.selectedPhoneNumberId,
     );
     let message;
     if (input.templateId) {
@@ -1313,14 +1834,12 @@ router.post("/conversations/start", async (req, res) => {
         template,
         input.variables ?? [],
         (input.componentParameters ?? []) as ComponentParameterInput[],
-        activeConnection,
+        activeConnection!,
       );
     } else {
-      message = await storeOutboundMessage(
-        conversation,
-        input.content!.trim(),
-        activeConnection,
-      );
+      message = usingEvolution
+        ? await storeOutboundEvolutionMessage(conversation, input.content!.trim(), activeEvolutionSession!)
+        : await storeOutboundMessage(conversation, input.content!.trim(), activeConnection!);
     }
     const currentConversation =
       (await conversationResponse(conversation, contact)) ?? conversation;
@@ -1526,6 +2045,10 @@ router.get("/templates/dispatches/:dispatchId", async (req, res) => {
 
 router.post("/templates/:templateId/dispatch", async (req, res) => {
   try {
+    if (activeProvider !== "cloud" || !activeConnection) {
+      res.status(400).json({ error: "Envio de templates oficiais exige que a conexão da API Oficial da Meta esteja ativa." });
+      return;
+    }
     const params = DispatchTemplateParams.parse(req.params);
     const input = DispatchTemplateBody.parse(req.body);
     if (!activeConnection) {
@@ -1680,6 +2203,162 @@ router.get("/webhook", (req, res) => {
     return;
   }
   res.status(403).send("Forbidden");
+});
+
+router.post("/evolution/webhook", async (req, res) => {
+  const session = activeEvolutionSession;
+  if (!session) {
+    res.status(401).json({ error: "Evolution API não está configurada." });
+    return;
+  }
+  const secret = process.env.SESSION_SECRET;
+  const expected = createHash("sha256")
+    .update(`${secret}:evolution-webhook:${session.instanceName}`)
+    .digest();
+  const suppliedToken = stringValue(req.query.token);
+  const supplied = Buffer.from(suppliedToken, "hex");
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    res.status(401).json({ error: "Assinatura de webhook inválida." });
+    return;
+  }
+
+  try {
+    const body = asRecord(req.body);
+    const event = stringValue(body.event).toLowerCase();
+    const dataValue = body.data;
+    const messages = Array.isArray(dataValue) ? dataValue : [dataValue];
+
+    if (event === "connection.update") {
+      const update = asRecord(dataValue);
+      const state = stringValue(asRecord(update.state).state) || stringValue(update.state);
+      if (state) {
+        session.state = state;
+        session.connected = state.toLowerCase() === "open";
+        if (session.connected) session.qrCode = null;
+      }
+      const qr = evolutionQrCode(update);
+      if (qr) session.qrCode = qr;
+    }
+
+    if (event === "messages.upsert") {
+      for (const raw of messages) {
+        const item = asRecord(raw);
+        const key = asRecord(item.key);
+        const rawId = stringValue(key.id) || stringValue(item.id);
+        const remoteJid = stringValue(key.remoteJid) || stringValue(item.remoteJid);
+        const phoneNumber = normalizePhone(remoteJid.split("@")[0]);
+        if (!rawId || !phoneNumber || !/^\d{8,15}$/.test(phoneNumber)) continue;
+        const messageId = `evolution:${session.instanceName}:${rawId}`;
+        const fromMe = key.fromMe === true;
+        if (fromMe) {
+          const [stored] = await db
+            .select()
+            .from(chatMessages)
+            .where(eq(chatMessages.whatsappMessageId, messageId))
+            .limit(1);
+          if (stored && stored.status !== "read") {
+            await db.update(chatMessages)
+              .set({ status: "sent" })
+              .where(eq(chatMessages.id, stored.id));
+            publishConversationEvent({ conversationId: stored.conversationId, reason: "status", whatsappMessageId: messageId });
+          }
+          continue;
+        }
+
+        const [alreadyStored] = await db
+          .select({ id: chatMessages.id })
+          .from(chatMessages)
+          .where(eq(chatMessages.whatsappMessageId, messageId))
+          .limit(1);
+        if (alreadyStored) continue;
+
+        const contentPayload = asRecord(item.message);
+        let content = "";
+        let messageType = stringValue(item.messageType).replace(/Message$/, "").toLowerCase() || "text";
+        if (typeof contentPayload.conversation === "string") {
+          content = contentPayload.conversation;
+          messageType = "text";
+        } else if (typeof asRecord(contentPayload.extendedTextMessage).text === "string") {
+          content = stringValue(asRecord(contentPayload.extendedTextMessage).text);
+          messageType = "text";
+        } else {
+          const payloadByType = [
+            ["image", contentPayload.imageMessage],
+            ["video", contentPayload.videoMessage],
+            ["document", contentPayload.documentMessage],
+            ["audio", contentPayload.audioMessage],
+            ["sticker", contentPayload.stickerMessage],
+          ] as const;
+          const media = payloadByType.find(([, payload]) => Object.keys(asRecord(payload)).length > 0);
+          if (media) {
+            messageType = media[0];
+            content = stringValue(asRecord(media[1]).caption) || `[${media[0] === "audio" ? "Áudio" : "Arquivo"} recebido]`;
+          } else {
+            content = "[Mensagem recebida]";
+          }
+        }
+
+        const contact = await getOrCreateContact(phoneNumber, stringValue(item.pushName) || undefined);
+        const conversation = await getOrCreateConversation(contact.id, "unknown");
+        const rawTimestamp = Number(item.messageTimestamp);
+        const createdAt = Number.isFinite(rawTimestamp) && rawTimestamp > 0
+          ? new Date(rawTimestamp * 1000)
+          : new Date();
+        await db.insert(chatMessages).values({
+          conversationId: conversation.id,
+          whatsappMessageId: messageId,
+          direction: "inbound",
+          messageType,
+          content,
+          status: "received",
+          createdAt,
+        });
+        await db.update(conversations)
+          .set({
+            unreadCount: conversation.unreadCount + 1,
+            lastMessageAt: createdAt,
+            updatedAt: createdAt,
+          })
+          .where(eq(conversations.id, conversation.id));
+        publishConversationEvent({ conversationId: conversation.id, reason: "message", whatsappMessageId: messageId });
+      }
+    }
+
+    if (event === "messages.update") {
+      for (const raw of messages) {
+        const item = asRecord(raw);
+        const key = asRecord(item.key);
+        const rawId = stringValue(key.id) || stringValue(item.id);
+        if (!rawId) continue;
+        const update = asRecord(item.update);
+        const rawStatus = String(update.status ?? item.status ?? "").toLowerCase();
+        const status = rawStatus.includes("read") || rawStatus === "4"
+          ? "read"
+          : rawStatus.includes("deliver") || rawStatus === "3"
+            ? "delivered"
+            : rawStatus.includes("sent") || rawStatus === "2"
+              ? "sent"
+              : "";
+        if (!status) continue;
+        const messageId = `evolution:${session.instanceName}:${rawId}`;
+        const [stored] = await db
+          .select({ conversationId: chatMessages.conversationId })
+          .from(chatMessages)
+          .where(eq(chatMessages.whatsappMessageId, messageId))
+          .limit(1);
+        if (!stored) continue;
+        await db.update(chatMessages)
+          .set({ status })
+          .where(eq(chatMessages.whatsappMessageId, messageId));
+        publishConversationEvent({ conversationId: stored.conversationId, reason: "status", whatsappMessageId: messageId });
+      }
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ err: error, instanceName: session.instanceName }, "Evolution API webhook processing failed");
+    res.status(200).json({ success: true });
+  }
 });
 
 router.post("/webhook", async (req, res) => {
