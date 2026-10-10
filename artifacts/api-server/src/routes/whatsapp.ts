@@ -444,6 +444,28 @@ function normalizeEvolutionUrl(rawUrl: string): string {
   return parsed.toString().replace(/\/+$/, "");
 }
 
+function evolutionErrorMessages(value: unknown, depth = 0): string[] {
+  if (depth > 5) return [];
+  if (typeof value === "string") return [value.trim()].filter(Boolean);
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => evolutionErrorMessages(item, depth + 1));
+  }
+  const record = asRecord(value);
+  return [
+    "message",
+    "detail",
+    "details",
+    "description",
+    "reason",
+    "errors",
+    "issues",
+    "cause",
+    "error",
+    "response",
+    "data",
+  ].flatMap((key) => evolutionErrorMessages(record[key], depth + 1));
+}
+
 async function evolutionRequest<T>(
   session: EvolutionConfig,
   endpoint: string,
@@ -475,28 +497,11 @@ async function evolutionRequest<T>(
       }
     }
     if (!response.ok) {
-      const nestedResponse = asRecord(body.response);
-      const nestedData = asRecord(body.data);
-      const candidates = [
-        nestedResponse.message,
-        nestedData.message,
-        body.message,
-        nestedResponse.error,
-        nestedData.error,
-        body.error,
-      ].flatMap((value) => {
-        if (typeof value === "string") return [value.trim()].filter(Boolean);
-        if (Array.isArray(value)) {
-          return value.flatMap((item) =>
-            typeof item === "string" ? [item.trim()].filter(Boolean) : [],
-          );
-        }
-        return [];
-      });
+      const candidates = evolutionErrorMessages(body);
+      const genericMessages = /^(bad request|error)$/i;
       const message =
-        candidates.find((candidate) => !/^(bad request|error)$/i.test(candidate))
-        || candidates[0]
-        || `Evolution API respondeu com HTTP ${response.status}.`;
+        candidates.find((candidate) => !genericMessages.test(candidate))
+        || `A Evolution API recusou o envio com HTTP ${response.status} sem informar a causa. Confira se o telefone tem código do país e WhatsApp ativo e consulte os logs do servidor Evolution.`;
       throw new MetaApiError(message, response.status);
     }
     return body as T;
