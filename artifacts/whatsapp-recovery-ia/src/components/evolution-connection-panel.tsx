@@ -133,12 +133,12 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
       <header className="evolution-panel-header">
         <div className="evolution-heading-mark" aria-hidden="true"><QrCode size={18} /></div>
         <div className="evolution-heading-copy">
-          <p className="evolution-kicker">Método alternativo</p>
-          <h2 id="evolution-panel-title">Conectar via Evolution API</h2>
+          <p className="evolution-kicker">Conexão por QR Code</p>
+          <h2 id="evolution-panel-title">Conectar via QR Code</h2>
           <p>Vincule uma instância ao inbox e acompanhe a sessão por aqui.</p>
         </div>
         {onClose && (
-          <button type="button" className="action-btn evolution-close" onClick={onClose} aria-label="Fechar conexão Evolution" data-testid="button-close-evolution">
+          <button type="button" className="action-btn evolution-close" onClick={onClose} aria-label="Fechar conexão via QR Code" data-testid="button-close-evolution">
             <X size={18} />
           </button>
         )}
@@ -179,7 +179,7 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
               <span className="evolution-step">01</span>
               <div>
                 <h3>Dados do servidor</h3>
-                <p>Use os dados da sua instalação Evolution API.</p>
+                <p>Use os dados do servidor da sua conexão.</p>
               </div>
             </div>
 
@@ -199,7 +199,7 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
             {!connection?.defaultServerUrlConfigured && (
             <label className="evolution-field" htmlFor="evolution-server-url">
               <span>URL do servidor</span>
-              <input id="evolution-server-url" type="url" inputMode="url" autoComplete="url" value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="https://evolution.suaempresa.com" required data-testid="input-evolution-server-url" />
+              <input id="evolution-server-url" type="url" inputMode="url" autoComplete="url" value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="https://sua-instancia.com" required data-testid="input-evolution-server-url" />
             </label>
             )}
             {!connection?.defaultApiKeyConfigured && (
@@ -213,7 +213,7 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
             </label>
             )}
             <label className="evolution-field" htmlFor="evolution-instance-name">
-              <span>Nome da instância</span>
+              <span>Nome da conexão</span>
               <input id="evolution-instance-name" type="text" autoComplete="off" minLength={2} maxLength={64} value={instanceName} onChange={(event) => setInstanceName(event.target.value)} placeholder="Ex.: atendimento-loja" required data-testid="input-evolution-instance-name" />
             </label>
 
@@ -287,7 +287,7 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
 
         {isConfigured && (
           <div className="evolution-footer">
-            <p><ShieldAlert size={14} /> Evolution API é uma integração não oficial. A disponibilidade depende da sua instância e do WhatsApp.</p>
+            <p><ShieldAlert size={14} /> Esta é uma conexão não oficial. A disponibilidade depende do servidor configurado e do WhatsApp.</p>
             {isConnected && (
               <button type="button" className="evolution-disconnect-button" onClick={disconnectNow} disabled={disconnect.isPending} data-testid="button-disconnect-evolution">
                 {disconnect.isPending ? <Loader2 size={15} className="animate-spin" /> : <Wifi size={15} />}
@@ -297,7 +297,7 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
           </div>
         )}
         {!isConfigured && !connectionQuery.isLoading && (
-          <div className="evolution-notice"><ShieldAlert size={14} /><p>Evolution API é uma integração não oficial; use uma instância confiável.</p></div>
+          <div className="evolution-notice"><ShieldAlert size={14} /><p>Esta conexão não é oficial; use apenas um servidor em que confia.</p></div>
         )}
       </div>
     </section>

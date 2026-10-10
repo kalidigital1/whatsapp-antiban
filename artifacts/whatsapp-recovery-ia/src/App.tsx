@@ -672,7 +672,7 @@ function ContactProfilePanel({
           <div className="contact-profile-section">
             <span className="contact-profile-label">Perfil do WhatsApp</span>
             {contactProfileQuery.isLoading ? (
-              <p className="flex items-center gap-2 text-xs text-[#9ba7a0]"><Loader2 size={14} className="animate-spin" /> Consultando dados disponíveis na Evolution…</p>
+              <p className="flex items-center gap-2 text-xs text-[#9ba7a0]"><Loader2 size={14} className="animate-spin" /> Consultando dados disponíveis…</p>
             ) : contactProfileQuery.isError ? (
               <div className="space-y-2">
                 <p className="text-xs leading-5 text-[#d7a79b]">Não foi possível consultar o perfil agora. A foto e os outros dados dependem da conexão e da privacidade do contato.</p>
@@ -708,12 +708,12 @@ function ContactProfilePanel({
                   </div>
                 ))}
                 {!hasProfileDetails && contactProfile.numberExists === null && contactProfile.isBusiness === null && (
-                  <p className="text-xs leading-5 text-[#9ba7a0]">A Evolution não retornou outros dados públicos do perfil. Isso pode depender da privacidade do contato ou da versão da API.</p>
+                  <p className="text-xs leading-5 text-[#9ba7a0]">A conexão via QR Code não retornou outros dados públicos do perfil. Isso pode depender da privacidade do contato ou da compatibilidade da conexão.</p>
                 )}
                 <p className="text-[10px] text-[#75837b]">Consultado às {formatClock(contactProfile.fetchedAt) || 'agora'}</p>
               </div>
             ) : (
-              <p className="text-xs leading-5 text-[#9ba7a0]">Nenhum dado adicional de perfil foi retornado pela Evolution.</p>
+              <p className="text-xs leading-5 text-[#9ba7a0]">Nenhum dado adicional de perfil foi retornado pela conexão via QR Code.</p>
             )}
           </div>
         )}
@@ -727,7 +727,7 @@ function ContactProfilePanel({
         </div>
         <div className="contact-profile-note">
           <UserRound size={16} />
-          <p>{evolutionMode ? 'O perfil é consultado na Evolution ao abrir este painel. Só mostramos informações que a conexão consegue obter; dados ocultos pelas configurações de privacidade não aparecem.' : conversation.conversationType === 'group' ? 'O nome e o identificador do grupo são sincronizados pela conexão do WhatsApp.' : 'O nome e o telefone são sincronizados pela conexão do WhatsApp.'}</p>
+          <p>{evolutionMode ? 'O perfil é consultado ao abrir este painel. Só mostramos informações que a conexão consegue obter; dados ocultos pelas configurações de privacidade não aparecem.' : conversation.conversationType === 'group' ? 'O nome e o identificador do grupo são sincronizados pela conexão do WhatsApp.' : 'O nome e o telefone são sincronizados pela conexão do WhatsApp.'}</p>
         </div>
       </div>
     </aside>
@@ -1091,7 +1091,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           {connectionQuery.isLoading && <div className="space-y-3" data-testid="state-connection-loading"><div className="skeleton h-12 rounded-lg" /><div className="skeleton h-12 rounded-lg" /></div>}
           {connectionQuery.isError && <div className="status-note" data-testid="state-connection-error"><AlertCircle size={16} /> Não foi possível consultar o status atual da conexão.</div>}
           <div className={`flex items-center justify-between rounded-lg border p-4 ${isConnected ? 'border-[#35684b] bg-[#1b3024]' : 'border-[#685330] bg-[#332b1e]'}`} data-testid="status-connection">
-            <div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full bg-[#2b4736] text-[#68d18c]"><Wifi size={17} /></div><div><p className="text-sm font-medium">{isConnected ? 'WhatsApp conectado' : 'Conexão pendente'}</p><p className="mt-1 text-[11px] text-[#a2aaa5]">{isConnected ? (evolutionActive ? 'A API Oficial está conectada; o inbox usa a sessão Evolution.' : 'Mensagens do inbox passam pela API Oficial.') : 'Adicione as credenciais da Meta para começar.'}</p></div></div>
+            <div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full bg-[#2b4736] text-[#68d18c]"><Wifi size={17} /></div><div><p className="text-sm font-medium">{isConnected ? 'WhatsApp conectado' : 'Conexão pendente'}</p><p className="mt-1 text-[11px] text-[#a2aaa5]">{isConnected ? (evolutionActive ? 'A API Oficial está conectada; o inbox usa a conexão via QR Code.' : 'Mensagens do inbox passam pela API Oficial.') : 'Adicione as credenciais da Meta para começar.'}</p></div></div>
             <span className={`connection-pill ${isConnected ? '' : 'offline'}`}><span className="dot" />{isConnected ? (evolutionActive ? 'Conectada' : 'Ativa') : 'Offline'}</span>
           </div>
           {!isConnected && (
@@ -1783,7 +1783,7 @@ function Home() {
         />
         {activeSection === 'dashboard' ? <DashboardWorkspace onBackToInbox={() => setActiveSection('inbox')} /> : activeSection === 'templates' ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} /> : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} connectionLabel={evolutionMode ? 'Evolution API · QR' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
             <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>

@@ -156,7 +156,7 @@ function decryptWhatsAppToken(value: string) {
 
 function evolutionEncryptionKey() {
   const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is required to protect the Evolution API key.");
+  if (!secret) throw new Error("Não foi possível proteger a configuração da conexão via QR Code.");
   return createHash("sha256").update(`${secret}:evolution-api-config`).digest();
 }
 
@@ -170,7 +170,7 @@ function encryptEvolutionConfig(value: string) {
 
 function decryptEvolutionConfig(value: string) {
   const [ivEncoded, tagEncoded, encryptedEncoded] = value.split(".");
-  if (!ivEncoded || !tagEncoded || !encryptedEncoded) throw new Error("Stored Evolution API configuration is invalid.");
+  if (!ivEncoded || !tagEncoded || !encryptedEncoded) throw new Error("A configuração salva da conexão via QR Code é inválida.");
   const decipher = createDecipheriv("aes-256-gcm", evolutionEncryptionKey(), Buffer.from(ivEncoded, "base64url"));
   decipher.setAuthTag(Buffer.from(tagEncoded, "base64url"));
   return Buffer.concat([
@@ -433,7 +433,7 @@ function normalizeEvolutionUrl(rawUrl: string): string {
   try {
     parsed = new URL(rawUrl);
   } catch {
-    throw new MetaApiError("Informe uma URL válida para o servidor Evolution API.");
+    throw new MetaApiError("Informe uma URL válida para o servidor configurado.");
   }
   const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
   if ((parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLoopback))
@@ -503,16 +503,19 @@ async function evolutionRequest<T>(
       const genericMessages = /^(bad request|error)$/i;
       const message =
         candidates.find((candidate) => !genericMessages.test(candidate))
-        || `A Evolution API recusou o envio com HTTP ${response.status} sem informar a causa. Confira se o telefone tem código do país e WhatsApp ativo e consulte os logs do servidor Evolution.`;
-      throw new MetaApiError(message, response.status);
+        || `A conexão via QR Code recusou o envio com HTTP ${response.status} sem informar a causa. Confira se o telefone tem código do país e WhatsApp ativo.`;
+      const userMessage = message
+        .replace(/\bEvolution API\b/gi, "conexão via QR Code")
+        .replace(/\bEvolution\b/gi, "conexão via QR Code");
+      throw new MetaApiError(userMessage, response.status);
     }
     return body as T;
   } catch (error) {
     if (error instanceof MetaApiError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
-      throw new MetaApiError("O servidor Evolution API não respondeu em 15 segundos.", 504);
+      throw new MetaApiError("O servidor da conexão via QR Code não respondeu em 15 segundos.", 504);
     }
-    throw new MetaApiError("Não foi possível alcançar o servidor Evolution API.", 502);
+    throw new MetaApiError("Não foi possível alcançar o servidor da conexão via QR Code.", 502);
   } finally {
     clearTimeout(timeout);
   }
@@ -1275,7 +1278,7 @@ async function storeOutboundEvolutionMediaMessage(
     const key = asRecord(asRecord(body.data).key);
     const topKey = asRecord(body.key);
     const rawId = stringValue(key.id) || stringValue(topKey.id) || stringValue(body.keyId);
-    if (!rawId) throw new MetaApiError("A Evolution API não retornou o ID da mídia enviada.");
+    if (!rawId) throw new MetaApiError("O serviço de conexão via QR Code não retornou o ID da mídia enviada.");
     const whatsappMessageId = `evolution:${session.instanceName}:${rawId}`;
     const mediaData = asRecord(body.data);
     const providerPayload = withoutEvolutionBinary({
@@ -1678,7 +1681,7 @@ async function sendEvolutionTextMessage(session: EvolutionSession, to: string, t
   const key = asRecord(asRecord(body.data).key);
   const topKey = asRecord(body.key);
   const id = stringValue(key.id) || stringValue(topKey.id) || stringValue(body.keyId);
-  if (!id) throw new MetaApiError("A Evolution API não retornou o ID da mensagem enviada.");
+  if (!id) throw new MetaApiError("O serviço de conexão via QR Code não retornou o ID da mensagem enviada.");
   return `evolution:${session.instanceName}:${id}`;
 }
 
@@ -1809,7 +1812,7 @@ router.post("/evolution/connection", async (req, res) => {
       return;
     }
     if (!process.env.SESSION_SECRET) {
-      res.status(500).json({ error: "SESSION_SECRET não está configurado para proteger a conexão Evolution." });
+      res.status(500).json({ error: "SESSION_SECRET não está configurado para proteger a conexão via QR Code." });
       return;
     }
     const serverUrl = input.serverUrl?.trim() || process.env.EVOLUTION_API_URL?.trim() || "";
@@ -1878,7 +1881,7 @@ router.post("/evolution/connection", async (req, res) => {
     res.json(evolutionConnectionResponse(session));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
-    const message = error instanceof Error ? error.message : "Não foi possível iniciar a conexão Evolution.";
+    const message = error instanceof Error ? error.message : "Não foi possível iniciar a conexão via QR Code.";
     logger.warn({ status, message }, "Evolution API connection setup failed");
     res.status(status).json({ error: message });
   }
@@ -1886,7 +1889,7 @@ router.post("/evolution/connection", async (req, res) => {
 
 router.post("/evolution/connection/qr", async (_req, res) => {
   if (!activeEvolutionSession) {
-    res.status(400).json({ error: "Configure a conexão Evolution antes de solicitar um QR Code." });
+    res.status(400).json({ error: "Configure a conexão via QR Code antes de solicitar um novo código." });
     return;
   }
   try {
@@ -2076,7 +2079,7 @@ router.get("/conversations/:conversationId/contact-profile", async (req, res): P
 
     const session = activeEvolutionSession;
     if (activeProvider !== "evolution" || !session?.connected) {
-      res.status(503).json({ error: "A conexão Evolution não está ativa." });
+      res.status(503).json({ error: "A conexão via QR Code não está ativa." });
       return;
     }
 
@@ -2228,7 +2231,7 @@ router.get("/conversations/:conversationId/contact-profile", async (req, res): P
     const status = error instanceof MetaApiError ? error.status : 502;
     const message = error instanceof Error
       ? error.message
-      : "Não foi possível consultar o perfil na Evolution.";
+      : "Não foi possível consultar o perfil pela conexão via QR Code.";
     req.log.warn({ err: error }, "Failed to fetch WhatsApp contact profile from Evolution");
     res.status(status).json({ error: message });
   }
@@ -2318,7 +2321,7 @@ router.get(
       }
       const session = activeEvolutionSession;
       if (!session) {
-        res.status(503).json({ error: "A sessão Evolution não está disponível para carregar a mídia." });
+        res.status(503).json({ error: "A conexão via QR Code não está disponível para carregar a mídia." });
         return;
       }
       const mediaResponse = await evolutionRequest<Record<string, unknown>>(
@@ -2338,12 +2341,12 @@ router.get(
         || stringValue(mediaData.mediaBase64);
       const base64 = encoded.replace(/^data:[^;,]+;base64,/, "");
       if (!base64) {
-        res.status(502).json({ error: "A Evolution API não retornou o conteúdo da mídia." });
+        res.status(502).json({ error: "O serviço de conexão via QR Code não retornou o conteúdo da mídia." });
         return;
       }
       const bytes = Buffer.from(base64, "base64");
       if (!bytes.length) {
-        res.status(502).json({ error: "O arquivo retornado pela Evolution API está vazio." });
+        res.status(502).json({ error: "O arquivo retornado pela conexão via QR Code está vazio." });
         return;
       }
       const mimeType =
@@ -2407,7 +2410,7 @@ router.post(
         return;
       }
       if (activeProvider !== "evolution" || !session?.connected) {
-        res.status(400).json({ error: "Reações estão disponíveis enquanto a conexão Evolution estiver ativa." });
+        res.status(400).json({ error: "Reações estão disponíveis enquanto a conexão via QR Code estiver ativa." });
         return;
       }
       if (target.messageType === "reaction") {
@@ -2437,7 +2440,7 @@ router.post(
           : target.direction === "outbound",
       };
       if (!reactionKey.id || !reactionKey.remoteJid) {
-        res.status(400).json({ error: "A Evolution API não possui os dados necessários para reagir a esta mensagem." });
+        res.status(400).json({ error: "A conexão via QR Code não possui os dados necessários para reagir a esta mensagem." });
         return;
       }
 
@@ -2511,14 +2514,14 @@ router.post("/conversations/:conversationId/messages", async (req, res) => {
     let message;
     if (activeProvider === "evolution") {
       if (!activeEvolutionSession?.connected) {
-        res.status(400).json({ error: "A sessão Evolution não está conectada. Leia o QR Code novamente." });
+        res.status(400).json({ error: "A conexão via QR Code não está ativa. Leia o código novamente." });
         return;
       }
       message = await storeOutboundEvolutionMessage(conversation, content.trim(), activeEvolutionSession);
     } else if (activeProvider === "cloud" && activeConnection) {
       message = await storeOutboundMessage(conversation, content.trim(), activeConnection);
     } else {
-      res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de enviar mensagens." });
+      res.status(400).json({ error: "Conecte a API oficial ou configure uma conexão via QR Code antes de enviar mensagens." });
       return;
     }
     res.status(201).json(messageResponse(message, conversation.id));
@@ -2555,14 +2558,14 @@ router.post(
       let message;
       if (activeProvider === "evolution") {
         if (!activeEvolutionSession?.connected) {
-          res.status(400).json({ error: "A sessão Evolution não está conectada. Leia o QR Code novamente." });
+          res.status(400).json({ error: "A conexão via QR Code não está ativa. Leia o código novamente." });
           return;
         }
         message = await storeOutboundEvolutionMediaMessage(conversation, req.file, caption, activeEvolutionSession);
       } else if (activeProvider === "cloud" && activeConnection) {
         message = await storeOutboundMediaMessage(conversation, req.file, caption, activeConnection);
       } else {
-        res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de enviar arquivos." });
+        res.status(400).json({ error: "Conecte a API oficial ou configure uma conexão via QR Code antes de enviar arquivos." });
         return;
       }
       res.status(201).json(messageResponse(message, conversation.id));
@@ -2580,11 +2583,11 @@ router.post("/conversations/start", async (req, res) => {
     const input = StartConversationBody.parse(req.body);
     const usingEvolution = activeProvider === "evolution";
     if (usingEvolution && !activeEvolutionSession?.connected) {
-      res.status(400).json({ error: "A sessão Evolution não está conectada. Leia o QR Code novamente." });
+      res.status(400).json({ error: "A conexão via QR Code não está ativa. Leia o código novamente." });
       return;
     }
     if (!usingEvolution && (activeProvider !== "cloud" || !activeConnection)) {
-      res.status(400).json({ error: "Conecte uma API oficial ou uma instância Evolution antes de iniciar conversas." });
+      res.status(400).json({ error: "Conecte a API oficial ou configure uma conexão via QR Code antes de iniciar conversas." });
       return;
     }
     if (!input.content?.trim() && !input.templateId) {
@@ -3006,7 +3009,7 @@ router.get("/webhook", (req, res) => {
 router.post("/evolution/webhook", async (req, res) => {
   const session = activeEvolutionSession;
   if (!session) {
-    res.status(401).json({ error: "Evolution API não está configurada." });
+    res.status(401).json({ error: "A conexão via QR Code não está configurada." });
     return;
   }
   const secret = process.env.SESSION_SECRET;
