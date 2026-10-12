@@ -379,6 +379,9 @@ export const ListConversationsResponseItem = zod.object({
   "reactionEmoji": zod.string().nullable()
 }),
   "unreadCount": zod.number().int(),
+  "labels": zod.array(zod.string()),
+  "archivedAt": zod.coerce.date().nullable(),
+  "isPinned": zod.boolean(),
   "updatedAt": zod.string()
 })
 export const ListConversationsResponse = zod.array(ListConversationsResponseItem)
@@ -617,6 +620,33 @@ export const DeleteConversationResponse = zod.object({
 
 
 /**
+ * @summary Update conversation labels, archive state, or pinned state
+ */
+export const UpdateConversationMetadataParams = zod.object({
+  "conversationId": zod.coerce.number().int()
+})
+
+export const updateConversationMetadataBodyLabelsItemMax = 32;
+
+export const updateConversationMetadataBodyLabelsMax = 12;
+
+
+
+export const UpdateConversationMetadataBody = zod.object({
+  "labels": zod.array(zod.string().min(1).max(updateConversationMetadataBodyLabelsItemMax)).max(updateConversationMetadataBodyLabelsMax),
+  "archived": zod.boolean(),
+  "pinned": zod.boolean()
+})
+
+export const UpdateConversationMetadataResponse = zod.object({
+  "success": zod.boolean(),
+  "labels": zod.array(zod.string()),
+  "archivedAt": zod.coerce.date().nullable(),
+  "isPinned": zod.boolean()
+})
+
+
+/**
  * @summary Send an image, video, audio, or document to a contact
  */
 export const SendConversationMediaParams = zod.object({
@@ -694,6 +724,9 @@ export const StartConversationResponse = zod.object({
   "reactionEmoji": zod.string().nullable()
 }),
   "unreadCount": zod.number().int(),
+  "labels": zod.array(zod.string()),
+  "archivedAt": zod.coerce.date().nullable(),
+  "isPinned": zod.boolean(),
   "updatedAt": zod.string()
 }),
   "message": zod.object({

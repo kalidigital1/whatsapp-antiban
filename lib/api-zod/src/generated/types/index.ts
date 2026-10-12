@@ -21,6 +21,8 @@ export * from './contactRemovalResult';
 export * from './conversation';
 export * from './conversationContactProfile';
 export * from './conversationConversationType';
+export * from './conversationMetadataInput';
+export * from './conversationMetadataResponse';
 export * from './dashboardActivity';
 export * from './dashboardActivityConversationType';
 export * from './dashboardActivityDirection';

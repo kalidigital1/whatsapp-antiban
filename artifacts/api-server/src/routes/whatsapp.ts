@@ -49,7 +49,7 @@ import {
   UpdateSavedReplyParams,
   UpdateSavedReplyResponse,
 } from "@workspace/api-zod";
-import { and, asc, desc, eq, inArray, isNull, like, notLike } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, notLike, or, sql } from "drizzle-orm";
 import {
   chatMessages,
   contacts,
@@ -119,6 +119,8 @@ let connectionsRestored = false;
 let connectionRestorePromise: Promise<void> | null = null;
 const eventClients = new Set<Response>();
 const evolutionMessageSyncTimestamps = new Map<string, number>();
+const evolutionConversationHistorySyncTimestamps = new Map<string, number>();
+const evolutionChatPinSyncTimestamps = new Map<string, number>();
 const evolutionMessageSyncRequests = new Map<string, Promise<void>>();
 const evolutionMessageSyncErrorLogAt = new Map<string, number>();
 const evolutionMessageSyncLogAt = new Map<string, number>();
@@ -136,6 +138,37 @@ const evolutionProfilePictureUrlRequests = new Map<string, Promise<string | null
 router.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
+});
+
+let conversationControlsSchemaPromise: Promise<void> | null = null;
+function ensureConversationControlsSchema(): Promise<void> {
+  if (!conversationControlsSchemaPromise) {
+    conversationControlsSchemaPromise = (async () => {
+      await db.execute(sql`
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS labels jsonb NOT NULL DEFAULT '[]'::jsonb
+      `);
+      await db.execute(sql`
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS archived_at timestamptz
+      `);
+      await db.execute(sql`
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false
+      `);
+    })();
+  }
+  return conversationControlsSchemaPromise.catch((error) => {
+    conversationControlsSchemaPromise = null;
+    throw error;
+  });
+}
+
+router.use((_req, res, next) => {
+  void ensureConversationControlsSchema().then(() => next()).catch((error) => {
+    logger.error({ err: error }, "Could not prepare conversation labels and archive fields");
+    res.status(500).json({ error: "Não foi possível preparar os controles das conversas." });
+  });
 });
 
 type ConversationEvent = {
@@ -679,32 +712,40 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
     const aliases = new Map<string, string>();
     let cacheDurationMs = 5 * 60_000;
     try {
-      const response = await evolutionRequest<unknown>(
-        session,
-        `/chat/findContacts/${encodeURIComponent(session.instanceName)}`,
-        {
-          method: "POST",
-          body: JSON.stringify({ where: {}, take: 1000, skip: 0 }),
-        },
-        8_000,
-      );
-      const root = asRecord(response);
-      const data = asRecord(root.data);
-      const collections = [
-        response,
-        root.contacts,
-        root.records,
-        root.result,
-        root.data,
-        root.results,
-        data.contacts,
-        data.records,
-        data.result,
-        data.results,
-      ].filter(Array.isArray);
-
-      for (const collection of collections) {
-        for (const value of collection) {
+      const pageSize = 1000;
+      for (let page = 0; page < 20; page += 1) {
+        const response = await evolutionRequest<unknown>(
+          session,
+          `/chat/findContacts/${encodeURIComponent(session.instanceName)}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ where: {}, take: pageSize, skip: page * pageSize }),
+          },
+          8_000,
+        );
+        const root = asRecord(response);
+        const data = asRecord(root.data);
+        const contactsContainer = asRecord(root.contacts);
+        const dataContactsContainer = asRecord(data.contacts);
+        const collectionCandidates = [
+          response,
+          root.contacts,
+          root.records,
+          root.result,
+          root.data,
+          root.results,
+          data.contacts,
+          data.records,
+          data.result,
+          data.results,
+          contactsContainer.records,
+          contactsContainer.results,
+          dataContactsContainer.records,
+          dataContactsContainer.results,
+        ];
+        const collection = collectionCandidates.find(Array.isArray);
+        const pageContacts = Array.isArray(collection) ? collection : [];
+        for (const value of pageContacts) {
           const contact = asRecord(value);
           const lidJids = [
             contact.id,
@@ -728,9 +769,18 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
             if (phone) aliases.set(lidJid, phone);
           }
         }
+        const total = Number(
+          root.total
+          ?? data.total
+          ?? contactsContainer.total
+          ?? dataContactsContainer.total,
+        );
+        if (pageContacts.length < pageSize || (Number.isFinite(total) && (page + 1) * pageSize >= total)) {
+          break;
+        }
       }
     } catch (error) {
-      cacheDurationMs = 30_000;
+      cacheDurationMs = aliases.size ? 60_000 : 30_000;
       const warningKey = `lid-aliases:${session.instanceName}`;
       const lastWarningAt = evolutionMessageSyncErrorLogAt.get(warningKey) ?? 0;
       if (Date.now() - lastWarningAt >= 60_000) {
@@ -776,6 +826,24 @@ function rememberEvolutionLidAlias(
     aliases,
     expiresAt: Date.now() + 5 * 60_000,
   });
+}
+
+function evolutionChatPinnedState(chat: Record<string, unknown>): boolean | null {
+  for (const field of ["isPinned", "pinned", "is_pinned"]) {
+    const value = chat[field];
+    if (typeof value === "boolean") return value;
+    if (value === 1 || value === 0) return value === 1;
+    if (typeof value === "string" && /^(true|false|1|0)$/i.test(value.trim())) {
+      return /^(true|1)$/i.test(value.trim());
+    }
+  }
+  for (const field of ["pinTimestamp", "pinnedAt", "pinTime"]) {
+    const value = chat[field];
+    const numeric = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return true;
+    if (typeof value === "string" && Number.isNaN(numeric) && !Number.isNaN(Date.parse(value))) return true;
+  }
+  return null;
 }
 
 function evolutionQrCode(body: Record<string, unknown>): string | null {
@@ -1692,6 +1760,9 @@ async function conversationResponse(
     id: conversation.id,
     conversationType: conversation.conversationType === "group" ? "group" : "direct",
     remoteJid: conversation.remoteJid,
+    labels: Array.isArray(conversation.labels) ? conversation.labels : [],
+    archivedAt: conversation.archivedAt?.toISOString() ?? null,
+    isPinned: conversation.isPinned,
     contact: {
       name: conversationContactDisplayName(conversation, contact),
       phoneNumber: await conversationPhoneNumber(conversation, contact),
@@ -2270,6 +2341,12 @@ async function getOrCreateEvolutionConversation(
             unreadCount: conversation.unreadCount + separateLidConversation.unreadCount,
             lastMessageAt: latestMessageAt,
             updatedAt: latestUpdatedAt,
+            labels: [...new Set([
+              ...(conversation.labels ?? []),
+              ...(separateLidConversation.labels ?? []),
+            ])].slice(0, 12),
+            archivedAt: conversation.archivedAt ?? separateLidConversation.archivedAt,
+            isPinned: conversation.isPinned || separateLidConversation.isPinned,
           })
           .where(eq(conversations.id, conversation.id));
         await tx
@@ -2638,6 +2715,257 @@ async function syncEvolutionRecentMessages(session: EvolutionSession): Promise<v
       evolutionMessageSyncRequests.delete(syncKey);
     }
   }
+}
+
+async function syncEvolutionConversationHistory(
+  session: EvolutionSession,
+  conversation: typeof conversations.$inferSelect,
+  contactName?: string,
+): Promise<void> {
+  const cacheKey = `${session.instanceName}:${conversation.id}`;
+  const lastSyncAt = evolutionConversationHistorySyncTimestamps.get(cacheKey) ?? 0;
+  if (Date.now() - lastSyncAt < 120_000) return;
+  if (!conversation.remoteJid || conversation.phoneNumberId !== `evolution:${session.instanceName}`) return;
+
+  const aliases = await loadEvolutionLidAliases(session);
+  const remoteJids = new Set([conversation.remoteJid]);
+  if (isEvolutionLid(conversation.remoteJid)) {
+    const phone = evolutionPhoneFromAlternateJid(aliases.get(conversation.remoteJid) ?? "");
+    if (phone) remoteJids.add(evolutionPhoneNumber(phone));
+  }
+  const pageSize = 1000;
+  let importedCount = 0;
+
+  for (const remoteJid of remoteJids) {
+    for (let page = 0; page < 10; page += 1) {
+      const response = await evolutionRequest<unknown>(
+        session,
+        `/chat/findMessages/${encodeURIComponent(session.instanceName)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            where: { key: { remoteJid } },
+            take: pageSize,
+            skip: page * pageSize,
+            orderBy: { messageTimestamp: "desc" },
+          }),
+        },
+        15_000,
+      );
+      const root = asRecord(response);
+      const data = asRecord(root.data);
+      const messagePage = asRecord(root.messages);
+      const nestedPage = asRecord(data.messages);
+      const candidates = [
+        response,
+        root.records,
+        messagePage.records,
+        data.records,
+        nestedPage.records,
+      ];
+      const candidateRecords = candidates.find(Array.isArray);
+      const records = Array.isArray(candidateRecords) ? candidateRecords.map(asRecord) : [];
+
+      for (const item of [...records].reverse()) {
+        const key = asRecord(item.key);
+        const rawId = stringValue(key.id) || stringValue(item.id);
+        const itemRemoteJid =
+          stringValue(key.remoteJid)
+          || stringValue(item.remoteJid)
+          || remoteJid;
+        const rawAlternateRemoteJid =
+          stringValue(key.remoteJidAlt)
+          || stringValue(item.remoteJidAlt);
+        const alternateRemoteJid = evolutionPhoneFromAlternateJid(rawAlternateRemoteJid)
+          ? rawAlternateRemoteJid
+          : aliases.get(itemRemoteJid) ?? "";
+        if (!rawId || !itemRemoteJid.includes("@")) continue;
+
+        const whatsappMessageId = `evolution:${session.instanceName}:${rawId}`;
+        const details = evolutionMessageDetails(item);
+        const fromMe = key.fromMe === true || item.fromMe === true;
+        if (details.messageType === "reaction" && fromMe && !details.reactionEmoji) continue;
+        const messageConversation = await getOrCreateEvolutionConversation(
+          itemRemoteJid,
+          itemRemoteJid.endsWith("@g.us")
+            ? stringValue(item.subject) || stringValue(item.groupName) || undefined
+            : stringValue(item.pushName) || stringValue(item.notifyName) || contactName,
+          session,
+          alternateRemoteJid,
+        );
+        const [stored] = await db
+          .select({ id: chatMessages.id, conversationId: chatMessages.conversationId })
+          .from(chatMessages)
+          .where(eq(chatMessages.whatsappMessageId, whatsappMessageId))
+          .limit(1);
+        if (stored) {
+          if (stored.conversationId !== messageConversation.id) {
+            await db
+              .update(chatMessages)
+              .set({ conversationId: messageConversation.id })
+              .where(eq(chatMessages.id, stored.id));
+          }
+          continue;
+        }
+
+        const rawTimestamp = Number(item.messageTimestamp ?? item.timestamp);
+        const createdAt = Number.isFinite(rawTimestamp) && rawTimestamp > 0
+          ? new Date(rawTimestamp * 1000)
+          : new Date();
+        const status = evolutionMessageStatus(item.status, fromMe);
+        const targetRawId = details.messageType === "reaction"
+          ? details.reactionTargetId
+          : details.replyTargetId;
+        let replyToMessageId: number | null = null;
+        if (targetRawId) {
+          const [target] = await db
+            .select({ id: chatMessages.id })
+            .from(chatMessages)
+            .where(and(
+              eq(chatMessages.conversationId, messageConversation.id),
+              eq(
+                chatMessages.whatsappMessageId,
+                `evolution:${session.instanceName}:${targetRawId}`,
+              ),
+            ))
+            .limit(1);
+          replyToMessageId = target?.id ?? null;
+        }
+
+        const [inserted] = await db
+          .insert(chatMessages)
+          .values({
+            conversationId: messageConversation.id,
+            whatsappMessageId,
+            direction: fromMe ? "outbound" : "inbound",
+            messageType: details.messageType,
+            content: details.content,
+            status,
+            providerPayload: details.providerPayload,
+            mediaMimeType: details.mediaMimeType,
+            mediaFileName: details.mediaFileName,
+            mediaCaption: details.mediaCaption,
+            replyToMessageId,
+            reactionEmoji: details.messageType === "reaction" ? details.reactionEmoji : null,
+            createdAt,
+          })
+          .onConflictDoNothing({ target: chatMessages.whatsappMessageId })
+          .returning({ id: chatMessages.id });
+        if (inserted) importedCount += 1;
+        const [latest] = await db
+          .select({ lastMessageAt: conversations.lastMessageAt })
+          .from(conversations)
+          .where(eq(conversations.id, messageConversation.id))
+          .limit(1);
+        if (!latest?.lastMessageAt || createdAt > latest.lastMessageAt) {
+          await db
+            .update(conversations)
+            .set({ lastMessageAt: createdAt, updatedAt: createdAt })
+            .where(eq(conversations.id, messageConversation.id));
+        }
+      }
+
+      if (records.length < pageSize) break;
+    }
+  }
+  evolutionConversationHistorySyncTimestamps.set(cacheKey, Date.now());
+  if (importedCount > 0) {
+    logger.info(
+      { instanceName: session.instanceName, conversationId: conversation.id, importedCount },
+      "QR Code conversation history synchronized",
+    );
+  }
+}
+
+async function syncEvolutionPinnedChats(session: EvolutionSession): Promise<void> {
+  const lastSyncAt = evolutionChatPinSyncTimestamps.get(session.instanceName) ?? 0;
+  if (Date.now() - lastSyncAt < 60_000) return;
+  const response = await evolutionRequest<unknown>(
+    session,
+    `/chat/findChats/${encodeURIComponent(session.instanceName)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ where: {}, take: 1000, skip: 0 }),
+    },
+    12_000,
+  );
+  const root = asRecord(response);
+  const data = asRecord(root.data);
+  const chatContainer = asRecord(root.chats);
+  const dataChatContainer = asRecord(data.chats);
+  const candidateCollections = [
+    response,
+    root.records,
+    root.chats,
+    root.result,
+    root.data,
+    data.records,
+    data.chats,
+    data.result,
+    chatContainer.records,
+    dataChatContainer.records,
+  ];
+  const collection = candidateCollections.find(Array.isArray);
+  const chats = Array.isArray(collection) ? collection.map(asRecord) : [];
+  const aliases = await loadEvolutionLidAliases(session);
+
+  for (const chat of chats) {
+    const pinned = evolutionChatPinnedState(chat);
+    if (pinned === null) continue;
+    const remoteJid = firstStringValue(
+      chat.id,
+      chat.remoteJid,
+      chat.jid,
+      asRecord(chat.key).remoteJid,
+    ) || "";
+    if (!remoteJid.includes("@")) continue;
+    let [existing] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(and(
+        eq(conversations.phoneNumberId, `evolution:${session.instanceName}`),
+        eq(conversations.remoteJid, remoteJid),
+      ))
+      .limit(1);
+    if (!existing && isEvolutionLid(remoteJid)) {
+      const alternatePhone = evolutionPhoneFromAlternateJid(
+        firstStringValue(chat.remoteJidAlt, chat.phoneNumber, aliases.get(remoteJid)) || "",
+      );
+      if (alternatePhone) {
+        const [matchingConversation] = await db
+          .select({ id: conversations.id })
+          .from(conversations)
+          .innerJoin(contacts, eq(conversations.contactId, contacts.id))
+          .where(and(
+            eq(conversations.phoneNumberId, `evolution:${session.instanceName}`),
+            eq(contacts.phoneNumber, alternatePhone),
+          ))
+          .limit(1);
+        existing = matchingConversation;
+      }
+    }
+    if (existing) {
+      await db
+        .update(conversations)
+        .set({ isPinned: pinned })
+        .where(eq(conversations.id, existing.id));
+    }
+  }
+  evolutionChatPinSyncTimestamps.set(session.instanceName, Date.now());
+}
+
+function scheduleEvolutionPinnedChatSync(session: EvolutionSession): void {
+  void syncEvolutionPinnedChats(session).catch((error) => {
+    const warningKey = `pinned-chats:${session.instanceName}`;
+    const lastWarningAt = evolutionMessageSyncErrorLogAt.get(warningKey) ?? 0;
+    if (Date.now() - lastWarningAt >= 60_000) {
+      evolutionMessageSyncErrorLogAt.set(warningKey, Date.now());
+      logger.warn(
+        { err: error, instanceName: session.instanceName },
+        "Could not load pinned chat state from the QR Code provider",
+      );
+    }
+  });
 }
 
 function scheduleEvolutionMessageSync(session: EvolutionSession): void {
@@ -3136,24 +3464,36 @@ router.delete("/evolution/connection", async (_req, res): Promise<void> => {
         request.catch(() => undefined),
       ),
     );
-    const qrMediaPayloads = await db
+    const mediaQuery = db
       .select({ providerPayload: chatMessages.providerPayload })
       .from(chatMessages)
-      .innerJoin(conversations, eq(chatMessages.conversationId, conversations.id))
-      .where(like(conversations.phoneNumberId, "evolution:%"));
+      .innerJoin(conversations, eq(chatMessages.conversationId, conversations.id));
+    const qrMediaPayloads = nextProvider === "none"
+      ? await mediaQuery
+      : await mediaQuery.where(or(
+          like(conversations.phoneNumberId, "evolution:%"),
+          like(conversations.remoteJid, "%@lid"),
+        ));
 
     await db.transaction(async (tx) => {
-      const qrConversationIds = tx
-        .select({ id: conversations.id })
-        .from(conversations)
-        .where(like(conversations.phoneNumberId, "evolution:%"));
-
-      await tx
-        .delete(chatMessages)
-        .where(inArray(chatMessages.conversationId, qrConversationIds));
-      await tx
-        .delete(conversations)
-        .where(like(conversations.phoneNumberId, "evolution:%"));
+      if (nextProvider === "none") {
+        const allConversationIds = tx
+          .select({ id: conversations.id })
+          .from(conversations);
+        await tx.delete(chatMessages).where(inArray(chatMessages.conversationId, allConversationIds));
+        await tx.delete(conversations);
+      } else {
+        const qrConversationFilter = or(
+          like(conversations.phoneNumberId, "evolution:%"),
+          like(conversations.remoteJid, "%@lid"),
+        );
+        const qrConversationIds = tx
+          .select({ id: conversations.id })
+          .from(conversations)
+          .where(qrConversationFilter);
+        await tx.delete(chatMessages).where(inArray(chatMessages.conversationId, qrConversationIds));
+        await tx.delete(conversations).where(qrConversationFilter);
+      }
       await tx
         .update(appSettings)
         .set({
@@ -3164,6 +3504,13 @@ router.delete("/evolution/connection", async (_req, res): Promise<void> => {
         .where(eq(appSettings.id, 1));
     });
     await deleteLocalMediaObjects(qrMediaPayloads.map((row) => row.providerPayload));
+    if (sessionToDisconnect) {
+      evolutionConversationHistorySyncTimestamps.forEach((_timestamp, key) => {
+        if (key.startsWith(`${sessionToDisconnect.instanceName}:`)) {
+          evolutionConversationHistorySyncTimestamps.delete(key);
+        }
+      });
+    }
   } catch (error) {
     activeEvolutionSession = sessionToDisconnect;
     activeProvider = previousProvider;
@@ -3354,12 +3701,13 @@ router.get("/conversations", async (req, res) => {
 
     if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
       scheduleEvolutionMessageSync(activeEvolutionSession);
+      scheduleEvolutionPinnedChatSync(activeEvolutionSession);
     }
     const rows = await db
       .select({ conversation: conversations, contact: contacts })
       .from(conversations)
       .innerJoin(contacts, eq(conversations.contactId, contacts.id))
-      .orderBy(desc(conversations.updatedAt));
+      .orderBy(desc(conversations.isPinned), desc(conversations.updatedAt));
     const result = await Promise.all(
       rows.map((row) => conversationResponse(row.conversation, row.contact)),
     );
@@ -3368,6 +3716,57 @@ router.get("/conversations", async (req, res) => {
     logger.error({ err: error }, "Failed to list WhatsApp conversations");
     res.status(500).json({ error: "Não foi possível carregar as conversas." });
   }
+});
+
+router.patch("/conversations/:conversationId/metadata", async (req, res): Promise<void> => {
+  const conversationId = Number(req.params.conversationId);
+  if (!Number.isSafeInteger(conversationId) || conversationId < 1) {
+    res.status(400).json({ error: "Conversa inválida." });
+    return;
+  }
+  const body = asRecord(req.body);
+  if (!Array.isArray(body.labels) || typeof body.archived !== "boolean" || typeof body.pinned !== "boolean") {
+    res.status(400).json({ error: "Informe as etiquetas e os estados de arquivamento e fixação." });
+    return;
+  }
+  const labels: string[] = [];
+  const seenLabels = new Set<string>();
+  for (const value of body.labels) {
+    if (typeof value !== "string") {
+      res.status(400).json({ error: "As etiquetas informadas são inválidas." });
+      return;
+    }
+    const label = value.trim().replace(/\s+/g, " ");
+    const normalized = label.toLocaleLowerCase("pt-BR");
+    if (!label || label.length > 32 || seenLabels.has(normalized)) continue;
+    seenLabels.add(normalized);
+    labels.push(label);
+    if (labels.length > 12) {
+      res.status(400).json({ error: "Cada conversa pode ter até 12 etiquetas." });
+      return;
+    }
+  }
+  const [existing] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Conversa não encontrada." });
+    return;
+  }
+  const archivedAt = body.archived ? new Date() : null;
+  const isPinned = body.pinned;
+  await db
+    .update(conversations)
+    .set({ labels, archivedAt, isPinned })
+    .where(eq(conversations.id, conversationId));
+  res.json({
+    success: true,
+    labels,
+    archivedAt: archivedAt?.toISOString() ?? null,
+    isPinned,
+  });
 });
 
 router.get("/conversations/:conversationId/contact-profile", async (req, res): Promise<void> => {
@@ -3601,7 +4000,27 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
     }
 
     if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
-      scheduleEvolutionMessageSync(activeEvolutionSession);
+      const [contact] = await db
+        .select({ name: contacts.name })
+        .from(contacts)
+        .where(eq(contacts.id, conversation.contactId))
+        .limit(1);
+      try {
+        await syncEvolutionConversationHistory(
+          activeEvolutionSession,
+          conversation,
+          contact?.name,
+        );
+      } catch (error) {
+        evolutionConversationHistorySyncTimestamps.set(
+          `${activeEvolutionSession.instanceName}:${conversation.id}`,
+          Date.now(),
+        );
+        req.log.warn(
+          { err: error, conversationId: conversation.id },
+          "Could not fetch older QR Code conversation messages",
+        );
+      }
     }
 
     const messages = await db
@@ -4916,6 +5335,7 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
           ?? chatPayload.conversationTimestamp
           ?? chatPayload.timestamp,
         );
+        const pinnedState = evolutionChatPinnedState(chatPayload);
         await db
           .update(conversations)
           .set({
@@ -4925,6 +5345,7 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
             ...(Number.isFinite(lastTimestamp) && lastTimestamp > 0
               ? { lastMessageAt: new Date(lastTimestamp * 1000) }
               : {}),
+            ...(pinnedState !== null ? { isPinned: pinnedState } : {}),
           })
           .where(eq(conversations.id, conversation.id));
       }

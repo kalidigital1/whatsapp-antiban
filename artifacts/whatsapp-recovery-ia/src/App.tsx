@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
+  Archive,
   ArrowLeft,
   BarChart3,
   Check,
@@ -22,13 +23,16 @@ import {
   Pencil,
   Phone,
   Plus,
+  Pin,
   QrCode,
   Search,
   Send,
   Settings,
   LayoutDashboard,
   ShieldCheck,
+  Sparkles,
   Smartphone,
+  Tag,
   Trash2,
   Upload,
   UserRound,
@@ -117,6 +121,34 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5 * 60 * 1000, refetchOnWindowFocus: false } },
 });
 const verifiedBadgePath = '/assets/SELO_META_VERIFIED_1789757214597.png';
+
+type ConversationMetadata = {
+  labels: string[];
+  archived: boolean;
+  pinned: boolean;
+};
+
+function useUpdateConversationMetadata() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ conversationId, data }: { conversationId: number; data: ConversationMetadata }) => {
+      const response = await fetch(`/api/conversations/${conversationId}/metadata`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: unknown };
+      if (!response.ok) {
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'Não foi possível atualizar a conversa.');
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+    },
+  });
+}
 
 function errorText(error: unknown) {
   if (!error) return 'Não foi possível concluir a operação.';
@@ -318,7 +350,24 @@ function Avatar({ name, size = 'normal', photoUrl }: { name: string; size?: 'nor
   );
 }
 
-function NavigationRail({ onSettings, connected, profilePictureUrl, profileName, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; profileName?: string | null; activeSection: 'inbox' | 'templates' | 'dashboard' | 'contacts'; onSectionChange: (section: 'inbox' | 'templates' | 'dashboard' | 'contacts') => void }) {
+function ImagePreviewDialog({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Visualização da imagem"
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <button type="button" className="absolute right-4 top-4 rounded-full p-2 text-white/80 hover:bg-white/10 hover:text-white" onClick={onClose} aria-label="Fechar imagem">
+        <X size={22} />
+      </button>
+      <img src={src} alt={alt} className="max-h-[90vh] max-w-[94vw] rounded-lg object-contain shadow-2xl" />
+    </div>
+  );
+}
+
+function NavigationRail({ onSettings, onZapBan, connected, profilePictureUrl, profileName, activeSection, onSectionChange }: { onSettings: () => void; onZapBan: () => void; connected: boolean; profilePictureUrl?: string | null; profileName?: string | null; activeSection: 'inbox' | 'templates' | 'dashboard' | 'contacts'; onSectionChange: (section: 'inbox' | 'templates' | 'dashboard' | 'contacts') => void }) {
   return (
     <aside className="wa-rail" aria-label="Navegação principal">
       <div className="rail-brand" aria-label="Meta Business Partner">
@@ -328,6 +377,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, profileName,
         <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'dashboard'} onClick={() => onSectionChange('dashboard')} aria-label="Dashboard" data-testid="rail-dashboard"><LayoutDashboard size={17} /><span className="rail-btn-label">Dashboard</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Envios" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Envios</span></button>
+        <button type="button" className="rail-btn" onClick={onZapBan} aria-label="ZapBan" data-testid="rail-zapban"><Sparkles size={17} /><span className="rail-btn-label">ZapBan</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'contacts'} onClick={() => onSectionChange('contacts')} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
       </nav>
       <div className="rail-bottom">
@@ -460,15 +510,19 @@ function Sidebar({
   profilePicturesEnabled: boolean;
 }) {
   const [search, setSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return conversations;
-    return conversations.filter((conversation) => (
-      conversation.contact.name.toLowerCase().includes(needle)
-      || conversation.contact.phoneNumber.includes(needle)
-      || conversation.lastMessage.content.toLowerCase().includes(needle)
-    ));
-  }, [conversations, search]);
+    return conversations
+      .filter((conversation) => Boolean(conversation.archivedAt) === showArchived)
+      .filter((conversation) => !needle || (
+        conversation.contact.name.toLowerCase().includes(needle)
+        || conversation.contact.phoneNumber.includes(needle)
+        || conversation.lastMessage.content.toLowerCase().includes(needle)
+        || (conversation.labels ?? []).some((label) => label.toLowerCase().includes(needle))
+      ))
+      .sort((left, right) => Number(right.isPinned) - Number(left.isPinned));
+  }, [conversations, search, showArchived]);
 
   return (
     <aside className="sidebar-panel" data-open={mobileOpen}>
@@ -492,6 +546,10 @@ function Sidebar({
           <input type="search" placeholder="Pesquisar" value={search} onChange={(event) => setSearch(event.target.value)} data-testid="input-search-conversations" aria-label="Pesquisar conversas" />
         </label>
       </div>
+      <div className="flex gap-1 px-3 pb-2" role="group" aria-label="Filtrar conversas">
+        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] transition ${!showArchived ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setShowArchived(false)} data-testid="button-active-conversations">Conversas</button>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] transition ${showArchived ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setShowArchived(true)} data-testid="button-archived-conversations">Arquivadas</button>
+      </div>
 
       <div className="conversation-list quiet-scroll">
         {loading && (
@@ -509,14 +567,16 @@ function Sidebar({
         )}
         {!loading && !error && filtered.length === 0 && (
           <div className="px-7 py-14 text-center" data-testid="state-conversations-empty">
-            {connected || search
+            {connected || search || showArchived
               ? <Inbox className="mx-auto mb-3 text-[#87938e]" size={30} strokeWidth={1.4} />
               : <Wifi className="mx-auto mb-3 text-[#75cf95]" size={28} strokeWidth={1.6} />}
             <p className="text-sm font-medium text-[#e3e9e6]">
-              {search ? 'Nenhuma conversa encontrada' : connected ? 'Sua caixa está vazia' : 'Conecte seu WhatsApp'}
+              {showArchived ? 'Nenhuma conversa arquivada' : search ? 'Nenhuma conversa encontrada' : connected ? 'Sua caixa está vazia' : 'Conecte seu WhatsApp'}
             </p>
             <p className="mt-1 text-xs leading-relaxed text-[#89958f]">
-              {search
+              {showArchived
+                ? 'As conversas arquivadas aparecerão aqui.'
+                : search
                 ? 'Tente buscar por outro nome ou telefone.'
                 : connected
                   ? 'Novas mensagens recebidas aparecerão aqui.'
@@ -537,7 +597,10 @@ function Sidebar({
             <div className="conversation-row-content">
               <div className="conversation-row-name">
                 <strong>{conversation.contact.name}</strong>
-                <span className="conversation-row-time">{formatDay(conversation.updatedAt)}</span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {conversation.isPinned && <Pin size={12} className="text-[#8fbc9c]" aria-label="Conversa fixada" />}
+                  <span className="conversation-row-time">{formatDay(conversation.updatedAt)}</span>
+                </span>
               </div>
               <div className="conversation-row-preview">
                 <p>
@@ -550,6 +613,11 @@ function Sidebar({
                 </p>
                 {conversation.unreadCount > 0 && <span className="unread-badge">{conversation.unreadCount}</span>}
               </div>
+              {(conversation.labels ?? []).length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {conversation.labels.map((label) => <span key={label} className="rounded-full border border-[#46544b] bg-[#222925] px-1.5 py-0.5 text-[9px] text-[#c0d2c5]">{label}</span>)}
+                </div>
+              )}
             </div>
           </button>
         ))}
@@ -624,6 +692,7 @@ function MessageBubble({
 }) {
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [mediaUnavailable, setMediaUnavailable] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const mediaUrl = message.mediaPreviewUrl || message.mediaUrl;
   const mediaMimeType = (message.mediaMimeType || '').split(';')[0].trim().toLowerCase();
   const outbound = message.direction === 'outbound';
@@ -659,7 +728,11 @@ function MessageBubble({
         {replyPreview && <div className="mb-1 border-l-2 border-[#62a477] pl-2 text-xs text-[#61736a] line-clamp-2">{replyPreview}</div>}
         {isMedia ? (
           <div className="message-media">
-            {mediaUrl && !mediaUnavailable && isImage && <img src={mediaUrl} alt={message.mediaCaption || message.content || 'Imagem do WhatsApp'} loading="lazy" onError={() => setMediaUnavailable(true)} />}
+            {mediaUrl && !mediaUnavailable && isImage && (
+              <button type="button" className="block max-w-full cursor-zoom-in" onClick={() => setImagePreview(mediaUrl)} aria-label="Abrir imagem em tamanho maior">
+                <img src={mediaUrl} alt={message.mediaCaption || message.content || 'Imagem do WhatsApp'} loading="lazy" onError={() => setMediaUnavailable(true)} />
+              </button>
+            )}
             {mediaUrl && !mediaUnavailable && isVideo && <video src={mediaUrl} controls preload="metadata" onError={() => setMediaUnavailable(true)} />}
             {mediaUrl && !mediaUnavailable && isAudio && <audio src={mediaUrl} controls preload="metadata" onError={() => setMediaUnavailable(true)} />}
             {mediaUrl && !mediaUnavailable && isPdf && <iframe src={mediaUrl} title={message.mediaFileName || 'Documento PDF do WhatsApp'} className="mt-2 h-64 w-full rounded-lg border-0" />}
@@ -733,6 +806,7 @@ function MessageBubble({
           </div>
         )}
       </div>
+      {imagePreview && <ImagePreviewDialog src={imagePreview} alt={message.mediaCaption || message.content || 'Imagem do WhatsApp'} onClose={() => setImagePreview(null)} />}
     </div>
   );
 }
@@ -824,6 +898,7 @@ function ContactProfilePanel({
     );
   };
   const [photoUnavailable, setPhotoUnavailable] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   useEffect(() => setPhotoUnavailable(false), [contactProfile?.profilePictureUrl]);
   const profileDetails: Array<[string, string | null]> = [
     ['Sobre', contactProfile?.about ?? null],
@@ -847,11 +922,11 @@ function ContactProfilePanel({
       </header>
       <div className="contact-profile-content quiet-scroll">
         <div className="contact-profile-hero">
-          <div className="avatar chat-contact-photo" aria-hidden="true">
-            {contactProfile?.profilePictureUrl && !photoUnavailable
-              ? <img src={contactProfile.profilePictureUrl} alt="" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
-              : initials(profileName)}
-          </div>
+          {contactProfile?.profilePictureUrl && !photoUnavailable
+            ? <button type="button" className="avatar chat-contact-photo cursor-zoom-in border-0 p-0" onClick={() => setPhotoPreview(contactProfile.profilePictureUrl!)} aria-label="Ampliar foto do perfil">
+                <img src={contactProfile.profilePictureUrl} alt="" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
+              </button>
+            : <div className="avatar chat-contact-photo" aria-hidden="true">{initials(profileName)}</div>}
           <strong>{profileName}</strong>
           <span>{groupConversation ? 'Grupo do WhatsApp' : phoneAvailable ? conversation.contact.phoneNumber : 'Telefone não disponibilizado'}</span>
         </div>
@@ -940,6 +1015,7 @@ function ContactProfilePanel({
           <p>{evolutionMode ? 'O perfil é consultado ao abrir este painel. Só mostramos informações que a conexão consegue obter; dados ocultos pelas configurações de privacidade não aparecem.' : conversation.conversationType === 'group' ? 'O nome e o identificador do grupo são sincronizados pela conexão do WhatsApp.' : 'O nome e o telefone são sincronizados pela conexão do WhatsApp.'}</p>
         </div>
       </div>
+      {photoPreview && <ImagePreviewDialog src={photoPreview} alt={`Foto de ${profileName}`} onClose={() => setPhotoPreview(null)} />}
     </aside>
   );
 }
@@ -951,6 +1027,7 @@ function ChatPanel({
   onBack,
   onSettings,
   onDeleteConversation,
+  onArchive,
   connectionLabel,
 }: {
   conversation: Conversation | undefined;
@@ -959,9 +1036,11 @@ function ChatPanel({
   onBack: () => void;
   onSettings: () => void;
   onDeleteConversation: () => void;
+  onArchive: () => void;
   connectionLabel: string;
 }) {
   const queryClient = useQueryClient();
+  const updateMetadata = useUpdateConversationMetadata();
   const [content, setContent] = useState('');
   const [optimistic, setOptimistic] = useState<DisplayChatMessage | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -971,6 +1050,8 @@ function ChatPanel({
   const [mediaPreviewByMessageId, setMediaPreviewByMessageId] = useState<Record<string, string>>({});
   const [optimisticConversationId, setOptimisticConversationId] = useState<number | null>(null);
   const [reactionError, setReactionError] = useState('');
+  const [labelDraft, setLabelDraft] = useState('');
+  const [metadataError, setMetadataError] = useState('');
   const messagesQuery = useListConversationMessages(conversation?.id ?? 0, {
     query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 5000 },
   });
@@ -1021,6 +1102,40 @@ function ChatPanel({
   const chatPhoneNumber = conversation && isDisplayablePhoneNumber(conversation.contact.phoneNumber)
     ? conversation.contact.phoneNumber
     : null;
+  const updateConversationSettings = (
+    nextLabels: string[],
+    archived = Boolean(conversation?.archivedAt),
+    pinned = Boolean(conversation?.isPinned),
+    afterSuccess?: () => void,
+  ) => {
+    if (!conversation) return;
+    setMetadataError('');
+    updateMetadata.mutate(
+      {
+        conversationId: conversation.id,
+        data: { labels: nextLabels, archived, pinned },
+      },
+      {
+        onSuccess: () => afterSuccess?.(),
+        onError: (error) => setMetadataError(errorText(error)),
+      },
+    );
+  };
+  const addConversationLabel = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const next = labelDraft.trim().replace(/\s+/g, ' ');
+    if (!conversation || !next || next.length > 32 || updateMetadata.isPending) return;
+    if ((conversation.labels ?? []).some((label) => label.toLowerCase() === next.toLowerCase())) {
+      setLabelDraft('');
+      return;
+    }
+    if ((conversation.labels ?? []).length >= 12) {
+      setMetadataError('Cada conversa pode ter até 12 etiquetas.');
+      return;
+    }
+    updateConversationSettings([...(conversation.labels ?? []), next]);
+    setLabelDraft('');
+  };
 
   useEffect(() => {
     if (!mediaFile) {
@@ -1111,9 +1226,60 @@ function ChatPanel({
           <div className="relative">
             <button type="button" className="action-btn" onClick={() => setMenuOpen((open) => !open)} data-testid="button-chat-menu" aria-label="Mais opções"><MoreVertical size={20} /></button>
             {menuOpen && (
-              <div className="absolute right-0 top-11 z-10 w-52 rounded-lg border border-[#4b514e] bg-[#272b29] p-2 shadow-2xl" data-testid="menu-chat-options">
+              <div className="absolute right-0 top-11 z-10 w-72 max-w-[85vw] rounded-lg border border-[#4b514e] bg-[#272b29] p-2 shadow-2xl" data-testid="menu-chat-options">
                  <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserRound size={14} /> Dados do contato</button>
                 <div className="border-t border-[#404643] px-2 pb-1 pt-2 text-[11px] text-[#eef3ef]">{conversation.conversationType === 'group' ? 'Grupo do WhatsApp' : chatPhoneNumber || 'Número não disponível'}</div>
+                <div className="mt-1 border-t border-[#404643] px-2 pb-2 pt-2">
+                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-[#d6e1da]"><Tag size={13} /> Etiquetas</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(conversation.labels ?? []).map((label) => (
+                      <span key={label} className="inline-flex items-center gap-1 rounded-full border border-[#46544b] bg-[#222925] px-2 py-1 text-[10px] text-[#c0d2c5]">
+                        {label}
+                        <button type="button" className="text-[#9aa79f] hover:text-white" aria-label={`Remover etiqueta ${label}`} onClick={() => updateConversationSettings((conversation.labels ?? []).filter((item) => item !== label))}><X size={11} /></button>
+                      </span>
+                    ))}
+                    {(conversation.labels ?? []).length === 0 && <span className="text-[10px] text-[#87938e]">Sem etiquetas</span>}
+                  </div>
+                  <form className="mt-2 flex gap-1.5" onSubmit={addConversationLabel}>
+                    <input
+                      className="min-w-0 flex-1 rounded-md border border-[#414945] bg-[#1d211f] px-2 py-1.5 text-[11px] text-[#e5ece8] outline-none focus:border-[#71a881]"
+                      value={labelDraft}
+                      onChange={(event) => setLabelDraft(event.target.value)}
+                      maxLength={32}
+                      placeholder="Nova etiqueta"
+                      aria-label="Nova etiqueta"
+                      disabled={updateMetadata.isPending}
+                    />
+                    <button type="submit" className="rounded-md px-2 text-[#a9d7b6] hover:bg-white/5" aria-label="Adicionar etiqueta" disabled={!labelDraft.trim() || updateMetadata.isPending}><Plus size={15} /></button>
+                  </form>
+                  {metadataError && <p className="mt-1 text-[10px] text-[#efa8a0]" role="alert">{metadataError}</p>}
+                </div>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]"
+                  disabled={updateMetadata.isPending}
+                  onClick={() => updateConversationSettings(
+                    conversation.labels ?? [],
+                    Boolean(conversation.archivedAt),
+                    !conversation.isPinned,
+                    () => setMenuOpen(false),
+                  )}
+                >
+                  <Pin size={14} /> {conversation.isPinned ? 'Desafixar conversa' : 'Fixar conversa'}
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]"
+                  disabled={updateMetadata.isPending}
+                  onClick={() => updateConversationSettings(
+                    conversation.labels ?? [],
+                    !conversation.archivedAt,
+                    Boolean(conversation.isPinned),
+                    () => { setMenuOpen(false); onArchive(); },
+                  )}
+                >
+                  <Archive size={14} /> {conversation.archivedAt ? 'Desarquivar conversa' : 'Arquivar conversa'}
+                </button>
                   <button type="button" className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#efaaa2] hover:bg-[#432725]" onClick={() => { setMenuOpen(false); onDeleteConversation(); }} data-testid="button-delete-conversation"><Trash2 size={14} /> Apagar conversa da inbox</button>
               </div>
             )}
@@ -1275,6 +1441,11 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
     setFormError('');
     disconnect.mutate(undefined, {
       onSuccess: async () => {
+        queryClient.removeQueries({
+          predicate: (query) => query.queryKey.some(
+            (part) => typeof part === 'string' && /conversation|message/i.test(part),
+          ),
+        });
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() }),
           queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() }),
@@ -1297,6 +1468,7 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
   };
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    queryClient.clear();
     window.location.reload();
   };
 
@@ -2389,6 +2561,7 @@ function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [mobileListOpen, setMobileListOpen] = useState(true);
+  const [zapBanOpen, setZapBanOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<'inbox' | 'templates' | 'dashboard' | 'contacts'>('inbox');
   const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
   const [deleteError, setDeleteError] = useState('');
@@ -2420,7 +2593,8 @@ function Home() {
   }, []);
 
   useEffect(() => {
-    if (selectedId === null && conversations.length > 0) setSelectedId(conversations[0].id);
+    const firstActiveConversation = conversations.find((item) => !item.archivedAt);
+    if (selectedId === null && firstActiveConversation) setSelectedId(firstActiveConversation.id);
     if (selectedId !== null && !conversations.some((item) => item.id === selectedId)) setSelectedId(null);
   }, [conversations, selectedId]);
 
@@ -2448,6 +2622,7 @@ function Home() {
       <div className={`inbox-shell ${activeSection === 'dashboard' ? 'dashboard-shell' : ''}`} data-mobile-list-open={activeSection === 'inbox' ? mobileListOpen : undefined}>
         <NavigationRail
           onSettings={() => setSettingsOpen(true)}
+          onZapBan={() => setZapBanOpen(true)}
           connected={chatConnected}
           profilePictureUrl={displayConnection?.phoneNumbers.find((phone) => phone.id === displayConnection.selectedPhoneNumberId)?.profilePictureUrl}
           profileName={displayConnection?.phoneNumbers.find((phone) => phone.id === displayConnection.selectedPhoneNumberId)?.verifiedName}
@@ -2464,7 +2639,7 @@ function Home() {
           <>
             <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} profilePicturesEnabled={evolutionMode} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
-            <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'API oficial da Meta'} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
+             <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'API oficial da Meta'} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onArchive={() => { setSelectedId(null); setMobileListOpen(true); }} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>
         )}
       </div>
@@ -2478,6 +2653,7 @@ function Home() {
       />}
       {newConversationOpen && <NewConversationDialog onClose={() => setNewConversationOpen(false)} onCreated={(conversation) => { setNewConversationOpen(false); setSelectedId(conversation.id); setMobileListOpen(false); }} />}
       {conversationToDelete && <DeleteConversationDialog conversation={conversationToDelete} pending={deleteConversation.isPending} error={deleteError} onClose={() => { if (!deleteConversation.isPending) { setConversationToDelete(null); setDeleteError(''); } }} onConfirm={confirmDeleteConversation} />}
+      {zapBanOpen && <SavedReplyHighlights conversationId={null} disabled manageOnly onClose={() => setZapBanOpen(false)} />}
     </main>
   );
 }

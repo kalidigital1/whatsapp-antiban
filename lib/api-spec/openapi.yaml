@@ -628,6 +628,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /conversations/{conversationId}/metadata:
+    patch:
+      operationId: updateConversationMetadata
+      tags: [whatsapp]
+      summary: Update conversation labels, archive state, or pinned state
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationMetadataInput"
+      responses:
+        "200":
+          description: Updated conversation metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationMetadataResponse"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "400":
+          description: Invalid metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /conversations/{conversationId}/media:
     post:
       operationId: sendConversationMedia
@@ -1446,9 +1482,48 @@ components:
           $ref: "#/components/schemas/ChatMessage"
         unreadCount:
           type: integer
+        labels:
+          type: array
+          items:
+            type: string
+        archivedAt:
+          type: ["string", "null"]
+          format: date-time
+        isPinned:
+          type: boolean
         updatedAt:
           type: string
-      required: [id, conversationType, remoteJid, contact, profilePictureUrl, lastMessage, unreadCount, updatedAt]
+      required: [id, conversationType, remoteJid, contact, profilePictureUrl, lastMessage, unreadCount, labels, archivedAt, isPinned, updatedAt]
+    ConversationMetadataInput:
+      type: object
+      properties:
+        labels:
+          type: array
+          maxItems: 12
+          items:
+            type: string
+            minLength: 1
+            maxLength: 32
+        archived:
+          type: boolean
+        pinned:
+          type: boolean
+      required: [labels, archived, pinned]
+    ConversationMetadataResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        labels:
+          type: array
+          items:
+            type: string
+        archivedAt:
+          type: ["string", "null"]
+          format: date-time
+        isPinned:
+          type: boolean
+      required: [success, labels, archivedAt, isPinned]
     ChatMessage:
       type: object
       properties:

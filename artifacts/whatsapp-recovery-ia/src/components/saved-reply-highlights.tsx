@@ -74,9 +74,13 @@ function kindLabel(kind: SavedKind): string {
 export function SavedReplyHighlights({
   conversationId,
   disabled,
+  manageOnly = false,
+  onClose,
 }: {
-  conversationId: number;
+  conversationId: number | null;
   disabled: boolean;
+  manageOnly?: boolean;
+  onClose?: () => void;
 }) {
   const queryClient = useQueryClient();
   const savedQuery = useListSavedReplies();
@@ -85,7 +89,7 @@ export function SavedReplyHighlights({
   const updateSavedReply = useUpdateSavedReply();
   const deleteSavedReply = useDeleteSavedReply();
   const requestUploadUrl = useRequestUploadUrl();
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(manageOnly);
   const [formKind, setFormKind] = useState<FormKind>("text");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -97,13 +101,17 @@ export function SavedReplyHighlights({
 
   const replies = savedQuery.data ?? [];
   const sending = sendSavedReply.isPending || sendingId !== null;
+  const closeDialog = () => {
+    setDialogOpen(false);
+    onClose?.();
+  };
 
   const refreshSavedReplies = () => {
     void queryClient.invalidateQueries({ queryKey: getListSavedRepliesQueryKey() });
   };
 
   const send = (savedReplyId: number) => {
-    if (disabled || sending) return;
+    if (disabled || sending || manageOnly || conversationId === null) return;
     setError("");
     setSendingId(savedReplyId);
     sendSavedReply.mutate(
@@ -254,7 +262,7 @@ export function SavedReplyHighlights({
       }
       await queryClient.invalidateQueries({ queryKey: getListSavedRepliesQueryKey() });
       resetForm();
-      setDialogOpen(false);
+      closeDialog();
     } catch (saveError) {
       setError(displayError(saveError));
     } finally {
@@ -276,7 +284,7 @@ export function SavedReplyHighlights({
 
   return (
     <>
-      <div className="saved-highlights" aria-label="Destaques para envio rápido">
+      {!manageOnly && <div className="saved-highlights" aria-label="Destaques para envio rápido">
         {replies.map((reply) => (
           <button
             type="button"
@@ -304,7 +312,7 @@ export function SavedReplyHighlights({
           <Plus size={16} />
         </button>
         {savedQuery.isLoading && <span className="saved-highlight-loading"><LoaderCircle size={14} className="animate-spin" /></span>}
-      </div>
+      </div>}
       {error && <p className="saved-highlight-error" role="alert">{error}</p>}
 
       {dialogOpen && (
@@ -312,7 +320,7 @@ export function SavedReplyHighlights({
           className="modal-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !busy) setDialogOpen(false);
+            if (event.target === event.currentTarget && !busy) closeDialog();
           }}
         >
           <section
@@ -324,10 +332,10 @@ export function SavedReplyHighlights({
           >
             <header className="saved-replies-header">
               <div>
-                <h2 id="saved-replies-title">Destaques</h2>
-                <p>Toque em um destaque no chat para enviar imediatamente.</p>
+                <h2 id="saved-replies-title">{manageOnly ? 'ZapBan' : 'Destaques'}</h2>
+                <p>{manageOnly ? 'Gerencie suas mensagens em destaque.' : 'Toque em um destaque no chat para enviar imediatamente.'}</p>
               </div>
-              <button type="button" className="action-btn" onClick={() => setDialogOpen(false)} disabled={busy} aria-label="Fechar destaques">
+              <button type="button" className="action-btn" onClick={closeDialog} disabled={busy} aria-label="Fechar destaques">
                 <X size={19} />
               </button>
             </header>
@@ -408,7 +416,7 @@ export function SavedReplyHighlights({
                 )}
                 {error && <p className="saved-reply-form-error" role="alert">{error}</p>}
                 <div className="saved-reply-form-actions">
-                  <button type="button" className="saved-reply-cancel" onClick={() => { resetForm(); setDialogOpen(false); }} disabled={busy}>Fechar</button>
+                  <button type="button" className="saved-reply-cancel" onClick={() => { resetForm(); closeDialog(); }} disabled={busy}>Fechar</button>
                   <button type="submit" className="saved-reply-save" disabled={busy || createSavedReply.isPending || updateSavedReply.isPending}>
                     {busy ? <LoaderCircle size={15} className="animate-spin" /> : editingId === null ? <Plus size={15} /> : <Send size={15} />}
                     {busy ? "Salvando" : "Salvar"}

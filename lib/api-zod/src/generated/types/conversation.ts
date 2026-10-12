@@ -19,5 +19,9 @@ export interface Conversation {
   profilePictureUrl: string | null;
   lastMessage: ChatMessage;
   unreadCount: number;
+  labels: string[];
+  /** @nullable */
+  archivedAt: Date | null;
+  isPinned: boolean;
   updatedAt: string;
 }

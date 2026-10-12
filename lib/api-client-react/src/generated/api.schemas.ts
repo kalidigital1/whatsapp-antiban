@@ -409,7 +409,30 @@ export interface Conversation {
   profilePictureUrl: string | null;
   lastMessage: ChatMessage;
   unreadCount: number;
+  labels: string[];
+  /** @nullable */
+  archivedAt: string | null;
+  isPinned: boolean;
   updatedAt: string;
+}
+
+export interface ConversationMetadataInput {
+  /**
+     * @maxItems 12
+     * @items.minLength 1
+     * @items.maxLength 32
+     */
+  labels: string[];
+  archived: boolean;
+  pinned: boolean;
+}
+
+export interface ConversationMetadataResponse {
+  success: boolean;
+  labels: string[];
+  /** @nullable */
+  archivedAt: string | null;
+  isPinned: boolean;
 }
 
 export interface MessageReactionInput {

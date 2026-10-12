@@ -31,6 +31,8 @@ import type {
   ContactRemovalResult,
   Conversation,
   ConversationContactProfile,
+  ConversationMetadataInput,
+  ConversationMetadataResponse,
   DashboardReportResponse,
   ErrorResponse,
   EvolutionConnectionInput,
@@ -2192,6 +2194,95 @@ export const useDeleteConversation = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getDeleteConversationMutationOptions(options));
+    }
+
+export const getUpdateConversationMetadataUrl = (conversationId: number,) => {
+
+
+
+
+  return `/api/conversations/${conversationId}/metadata`
+}
+
+/**
+ * @summary Update conversation labels, archive state, or pinned state
+ */
+export const updateConversationMetadata = async (conversationId: number,
+    conversationMetadataInput: ConversationMetadataInput, options?: Parameters<typeof customFetch>[1]): Promise<ConversationMetadataResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ConversationMetadataResponse>(getUpdateConversationMetadataUrl(conversationId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(conversationMetadataInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateConversationMetadataMutationKey = () => ['updateConversationMetadata'] as const;
+
+export const getUpdateConversationMetadataMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConversationMetadata>>, TError,UpdateConversationMetadataMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateConversationMetadata>>, TError,UpdateConversationMetadataMutationVariables, TContext> => {
+
+const mutationKey = getUpdateConversationMetadataMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateConversationMetadata>>, UpdateConversationMetadataMutationVariables> = (props) => {
+          const {conversationId,data} = props ?? {};
+
+          return  updateConversationMetadata(conversationId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateConversationMetadataMutationResult = NonNullable<Awaited<ReturnType<typeof updateConversationMetadata>>>
+    export type UpdateConversationMetadataMutationBody = BodyType<ConversationMetadataInput>
+    export type UpdateConversationMetadataMutationError = ErrorType<ErrorResponse>
+    export type UpdateConversationMetadataMutationVariables = {conversationId: number;data: BodyType<ConversationMetadataInput>}
+
+    /**
+ * @summary Update conversation labels, archive state, or pinned state
+ */
+export const useUpdateConversationMetadata = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConversationMetadata>>, TError,UpdateConversationMetadataMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateConversationMetadata>>,
+        TError,
+        UpdateConversationMetadataMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateConversationMetadataMutationOptions(options));
     }
 
 export const getSendConversationMediaUrl = (conversationId: number,) => {
