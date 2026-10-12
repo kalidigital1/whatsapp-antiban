@@ -38,7 +38,7 @@ import {
   EvolutionConnectionStatus,
   UpdateEvolutionProfileNameBody,
 } from "@workspace/api-zod";
-import { and, asc, desc, eq, inArray, isNull, like } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, notLike } from "drizzle-orm";
 import {
   chatMessages,
   contacts,
@@ -2973,18 +2973,41 @@ router.post("/connection", async (req, res) => {
 });
 
 router.delete("/connection", async (_req, res) => {
+  const previousConnection = activeConnection;
+  const previousProvider = activeProvider;
+  const nextProvider = activeEvolutionSession?.connected ? "evolution" : "none";
+
   activeConnection = null;
-  activeProvider = activeEvolutionSession?.connected ? "evolution" : "none";
-  await db
-    .update(appSettings)
-    .set({
-      whatsappAccessTokenEncrypted: null,
-      whatsappBusinessAccountId: null,
-      whatsappSelectedPhoneNumberId: null,
-      whatsappActiveProvider: activeProvider,
-      updatedAt: new Date(),
-    })
-    .where(eq(appSettings.id, 1));
+  activeProvider = nextProvider;
+  try {
+    await db.transaction(async (tx) => {
+      const cloudConversationIds = tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(notLike(conversations.phoneNumberId, "evolution:%"));
+
+      await tx
+        .delete(chatMessages)
+        .where(inArray(chatMessages.conversationId, cloudConversationIds));
+      await tx
+        .delete(conversations)
+        .where(notLike(conversations.phoneNumberId, "evolution:%"));
+      await tx
+        .update(appSettings)
+        .set({
+          whatsappAccessTokenEncrypted: null,
+          whatsappBusinessAccountId: null,
+          whatsappSelectedPhoneNumberId: null,
+          whatsappActiveProvider: nextProvider,
+          updatedAt: new Date(),
+        })
+        .where(eq(appSettings.id, 1));
+    });
+  } catch (error) {
+    activeConnection = previousConnection;
+    activeProvider = previousProvider;
+    throw error;
+  }
   res.json({ success: true });
 });
 
@@ -3016,8 +3039,27 @@ router.get("/events", (req, res) => {
   res.on("close", cleanup);
 });
 
-router.get("/conversations", async (_req, res) => {
+router.get("/conversations", async (req, res) => {
   try {
+    if (activeProvider === "none") {
+      const [orphanedConversation] = await db
+        .select({ id: conversations.id })
+        .from(conversations)
+        .limit(1);
+      if (orphanedConversation) {
+        await db.transaction(async (tx) => {
+          const allConversationIds = tx
+            .select({ id: conversations.id })
+            .from(conversations);
+          await tx
+            .delete(chatMessages)
+            .where(inArray(chatMessages.conversationId, allConversationIds));
+          await tx.delete(conversations);
+        });
+        req.log.info("Cleared orphaned WhatsApp chat history while disconnected");
+      }
+    }
+
     if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
       scheduleEvolutionMessageSync(activeEvolutionSession);
     }

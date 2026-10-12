@@ -1155,8 +1155,19 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
   };
 
   const disconnectNow = () => {
+    const confirmed = window.confirm(
+      'Desconectar apagará permanentemente as conversas, mensagens e mídias desta conexão no Antiban. Os contatos serão mantidos. Deseja continuar?',
+    );
+    if (!confirmed) return;
+
+    setFormError('');
     disconnect.mutate(undefined, {
-      onSuccess: () => void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() }),
+      onSuccess: async () => {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() }),
+          queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() }),
+        ]);
+      },
       onError: (error) => setFormError(errorText(error)),
     });
   };
