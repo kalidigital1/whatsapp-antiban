@@ -792,7 +792,16 @@ function ContactProfilePanel({
     },
   });
   const contactProfile = contactProfileQuery.data;
-  const profileName = contactProfile?.profileName || conversation.contact.name;
+  const rawProfileName = contactProfile?.profileName || '';
+  const remoteJid = conversation.remoteJid || '';
+  const rawProfileNameIsLid = remoteJid.toLowerCase().endsWith('@lid')
+    && (
+      rawProfileName.trim() === remoteJid
+      || rawProfileName.replace(/\D/g, '') === remoteJid.split('@')[0].replace(/\D/g, '')
+    );
+  const profileName = rawProfileName && !rawProfileNameIsLid
+    ? rawProfileName
+    : conversation.contact.name;
   const contactIsSaved = savedLocally || (contactsQuery.data ?? []).some(
     (contact) => sameContactPhone(contact.phoneNumber, conversation.contact.phoneNumber),
   );
@@ -1009,6 +1018,9 @@ function ChatPanel({
       )),
   );
   const sending = sendMessage.isPending || sendMedia.isPending;
+  const chatPhoneNumber = conversation && isDisplayablePhoneNumber(conversation.contact.phoneNumber)
+    ? conversation.contact.phoneNumber
+    : null;
 
   useEffect(() => {
     if (!mediaFile) {
@@ -1087,11 +1099,11 @@ function ChatPanel({
         <Avatar name={conversation.contact.name} size="large" />
         <div className="chat-contact-meta">
           <h2 className="chat-contact-name" data-testid={`text-contact-name-${conversation.id}`}>{conversation.contact.name}</h2>
-          <p className="chat-contact-status">{conversation.conversationType === 'group' ? 'Grupo do WhatsApp' : conversation.contact.phoneNumber}</p>
+          <p className="chat-contact-status">{conversation.conversationType === 'group' ? 'Grupo do WhatsApp' : chatPhoneNumber || 'Número não disponível'}</p>
         </div>
         <div className="chat-header-actions">
-          {conversation.conversationType !== 'group' && !conversation.contact.phoneNumber.includes('@') && <>
-            <button type="button" className="action-btn" onClick={() => { window.location.href = `tel:${conversation.contact.phoneNumber}`; }} data-testid="button-call-contact" aria-label="Ligar para contato"><Phone size={19} /></button>
+          {conversation.conversationType !== 'group' && chatPhoneNumber && <>
+            <button type="button" className="action-btn" onClick={() => { window.location.href = `tel:${chatPhoneNumber}`; }} data-testid="button-call-contact" aria-label="Ligar para contato"><Phone size={19} /></button>
             <button type="button" className="action-btn" onClick={() => undefined} data-testid="button-video-contact" aria-label="Iniciar chamada de vídeo"><Video size={19} /></button>
           </>}
            <button type="button" className="action-btn" onClick={() => setProfileOpen((open) => !open)} data-testid="button-contact-profile" aria-label="Ver perfil do cliente"><UserRound size={19} /></button>
@@ -1101,7 +1113,7 @@ function ChatPanel({
             {menuOpen && (
               <div className="absolute right-0 top-11 z-10 w-52 rounded-lg border border-[#4b514e] bg-[#272b29] p-2 shadow-2xl" data-testid="menu-chat-options">
                  <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserRound size={14} /> Dados do contato</button>
-                <div className="border-t border-[#404643] px-2 pb-1 pt-2 text-[11px] text-[#eef3ef]">{conversation.contact.phoneNumber}</div>
+                <div className="border-t border-[#404643] px-2 pb-1 pt-2 text-[11px] text-[#eef3ef]">{conversation.conversationType === 'group' ? 'Grupo do WhatsApp' : chatPhoneNumber || 'Número não disponível'}</div>
                   <button type="button" className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#efaaa2] hover:bg-[#432725]" onClick={() => { setMenuOpen(false); onDeleteConversation(); }} data-testid="button-delete-conversation"><Trash2 size={14} /> Apagar conversa da inbox</button>
               </div>
             )}

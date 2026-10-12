@@ -5,5 +5,5 @@
 - [WhatsApp phone matching](whatsapp-phone-matching.md) — match local Brazilian numbers with their DDI form so inbound replies stay in the original conversation.
 - [Evolution parity](whatsapp-evolution-parity.md) — prioritize WhatsApp Web-like chat features supported by Evolution and state provider limitations clearly.
 - [Dashboard visual direction](dashboard-theme.md) — default to a sober light theme with neutral surfaces and muted green accents.
-- [Contact removal and history](contact-archive.md) — remove contacts from the address book without deleting their WhatsApp conversations or messages.
+- [Contact saving and history](contact-archive.md) — keep inbound Evolution contacts unsaved until explicit save; never expose or interpret LID identifiers as phone numbers.
 - [WhatsApp disconnect cleanup](qr-disconnect-cleanup.md) — remove the disconnected provider's chat history and keep contacts plus any still-active provider's history.

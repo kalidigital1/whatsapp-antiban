@@ -377,6 +377,12 @@ function isEvolutionLid(value: unknown): boolean {
   return stringValue(value).trim().toLowerCase().endsWith("@lid");
 }
 
+function evolutionValueString(value: unknown): string {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+}
+
 function evolutionPhoneFromAlternateJid(value: string): string | null {
   const candidate = value.trim();
   if (/@(?:s\.whatsapp\.net|c\.us)$/i.test(candidate)) {
@@ -714,7 +720,7 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
             contact.remoteJidAlt,
             contact.phone,
             contact.whatsappNumber,
-          ].map((candidate) => evolutionPhoneFromAlternateJid(stringValue(candidate)))
+          ].map((candidate) => evolutionPhoneFromAlternateJid(evolutionValueString(candidate)))
             .filter((candidate): candidate is string => Boolean(candidate));
           for (const lidJid of lidJids) {
             const lidDigits = normalizePhone(lidJid.split("@")[0]);
@@ -759,7 +765,7 @@ function rememberEvolutionLidAlias(
 ): void {
   const lidJid = stringValue(lidJidValue).trim();
   if (!isEvolutionLid(lidJid)) return;
-  const phone = evolutionPhoneFromAlternateJid(stringValue(phoneValue));
+  const phone = evolutionPhoneFromAlternateJid(evolutionValueString(phoneValue));
   const lidDigits = normalizePhone(lidJid.split("@")[0]);
   if (!phone || phone === lidDigits) return;
 
@@ -2174,7 +2180,16 @@ async function getOrCreateEvolutionConversation(
   } else {
     const phoneNumber = normalizePhone(rawPhone);
     if (/^\d{8,15}$/.test(phoneNumber)) {
+      const existingPhoneContact = await findContactByPhone(phoneNumber);
       contact = await getOrCreateContact(phoneNumber, name);
+      if (!existingPhoneContact) {
+        const [conversationOnlyContact] = await db
+          .update(contacts)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(eq(contacts.id, contact.id))
+          .returning();
+        contact = conversationOnlyContact ?? contact;
+      }
     } else {
       const [existing] = await db
         .select()
@@ -2203,6 +2218,14 @@ async function getOrCreateEvolutionConversation(
           .returning();
         contact = created;
       }
+      if (isEvolutionLid(remoteJid) && !contact.deletedAt) {
+        const [conversationOnlyContact] = await db
+          .update(contacts)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(eq(contacts.id, contact.id))
+          .returning();
+        contact = conversationOnlyContact ?? contact;
+      }
     }
   }
 
@@ -2217,6 +2240,90 @@ async function getOrCreateEvolutionConversation(
       ),
     )
     .limit(1);
+  if (conversation && isEvolutionLid(remoteJid)) {
+    const [separateLidConversation] = await db
+      .select()
+      .from(conversations)
+      .where(and(
+        eq(conversations.phoneNumberId, providerPhoneNumberId),
+        eq(conversations.remoteJid, remoteJid),
+      ))
+      .limit(1);
+    if (separateLidConversation && separateLidConversation.id !== conversation.id) {
+      const latestMessageAt = [
+        conversation.lastMessageAt,
+        separateLidConversation.lastMessageAt,
+      ].filter((date): date is Date => date !== null)
+        .sort((first, second) => second.getTime() - first.getTime())[0] ?? null;
+      const latestUpdatedAt = new Date(Math.max(
+        conversation.updatedAt.getTime(),
+        separateLidConversation.updatedAt.getTime(),
+      ));
+      await db.transaction(async (tx) => {
+        await tx
+          .update(chatMessages)
+          .set({ conversationId: conversation.id })
+          .where(eq(chatMessages.conversationId, separateLidConversation.id));
+        await tx
+          .update(conversations)
+          .set({
+            unreadCount: conversation.unreadCount + separateLidConversation.unreadCount,
+            lastMessageAt: latestMessageAt,
+            updatedAt: latestUpdatedAt,
+          })
+          .where(eq(conversations.id, conversation.id));
+        await tx
+          .delete(conversations)
+          .where(eq(conversations.id, separateLidConversation.id));
+      });
+      const [mergedConversation] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, conversation.id))
+        .limit(1);
+      conversation = mergedConversation ?? conversation;
+    }
+  }
+  if (!conversation && isEvolutionLid(remoteJid)) {
+    [conversation] = await db
+      .select()
+      .from(conversations)
+      .where(and(
+        eq(conversations.phoneNumberId, providerPhoneNumberId),
+        eq(conversations.remoteJid, remoteJid),
+      ))
+      .limit(1);
+    if (conversation && conversation.contactId !== contact.id) {
+      const previousContactId = conversation.contactId;
+      const [relinked] = await db
+        .update(conversations)
+        .set({ contactId: contact.id })
+        .where(eq(conversations.id, conversation.id))
+        .returning();
+      conversation = relinked ?? conversation;
+
+      const [previousContact] = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, previousContactId))
+        .limit(1);
+      if (
+        previousContact
+        && previousContact.id !== contact.id
+        && (
+          isEvolutionLid(previousContact.phoneNumber)
+          || normalizePhone(previousContact.phoneNumber)
+            === normalizePhone(remoteJid.split("@")[0])
+        )
+        && !previousContact.deletedAt
+      ) {
+        await db
+          .update(contacts)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(eq(contacts.id, previousContact.id));
+      }
+    }
+  }
   if (!conversation) {
     [conversation] = await db
       .select()
@@ -4186,19 +4293,15 @@ router.get("/contacts", async (_req, res) => {
       })
       .from(conversations)
       .innerJoin(contacts, eq(conversations.contactId, contacts.id));
-    const unresolvedLidContactIds = new Set(
+    const lidIdentifiers = new Set(
       linkedConversations
-        .filter((row) => {
-          if (!isEvolutionLid(row.remoteJid)) return false;
-          return normalizePhone(row.phoneNumber)
-            === normalizePhone(stringValue(row.remoteJid).split("@")[0]);
-        })
-        .map((row) => row.contactId),
+        .filter((row) => isEvolutionLid(row.remoteJid))
+        .map((row) => normalizePhone(stringValue(row.remoteJid).split("@")[0])),
     );
     res.json(ListContactsResponse.parse(savedContacts
       .filter((contact) => (
         /^\d{8,15}$/.test(normalizePhone(contact.phoneNumber))
-        && !unresolvedLidContactIds.has(contact.id)
+        && !lidIdentifiers.has(normalizePhone(contact.phoneNumber))
       ))
       .map((contact) => ({
       name: contact.name,
@@ -4682,6 +4785,7 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         updateData.profilePicUrl,
         updateInstance.profilePictureUrl,
       )) || session.profilePictureUrl;
+      const previousPhoneNumber = session.phoneNumber;
       session.phoneNumber = phoneNumberFromJid(firstStringValue(
         update.wuid,
         update.ownerJid,
@@ -4696,6 +4800,9 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         body.ownerJid,
         body.owner,
       )) || session.phoneNumber;
+      if (session.phoneNumber !== previousPhoneNumber) {
+        evolutionLidAliasCache.delete(session.instanceName);
+      }
       const qr = evolutionQrCode(update);
       if (qr) session.qrCode = qr;
       try {
@@ -4728,7 +4835,7 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
           contactPayload.number,
           contactPayload.remoteJidAlt,
           contactPayload.phone,
-        ].map((candidate) => evolutionPhoneFromAlternateJid(stringValue(candidate)))
+        ].map((candidate) => evolutionPhoneFromAlternateJid(evolutionValueString(candidate)))
           .filter((candidate): candidate is string => Boolean(candidate));
         const phoneFromJid = [
           jid,
@@ -4745,7 +4852,14 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
 
         if (lidJid && phoneNumber) rememberEvolutionLidAlias(session, lidJid, phoneNumber);
         if (phoneNumber && /^\d{8,15}$/.test(phoneNumber)) {
-          await getOrCreateContact(phoneNumber, profileName || undefined);
+          const existingPhoneContact = await findContactByPhone(phoneNumber);
+          const contact = await getOrCreateContact(phoneNumber, profileName || undefined);
+          if (!existingPhoneContact && contact) {
+            await db
+              .update(contacts)
+              .set({ deletedAt: new Date(), updatedAt: new Date() })
+              .where(eq(contacts.id, contact.id));
+          }
         } else if (lidJid) {
           const [existing] = await db
             .select()
