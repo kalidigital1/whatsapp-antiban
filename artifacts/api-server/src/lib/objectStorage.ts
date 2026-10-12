@@ -265,7 +265,7 @@ export class ObjectStorageService {
     }
     if (process.env.DYNO || process.env.HEROKU_APP_NAME) {
       throw new ObjectStorageConfigurationError(
-        "Configure Cloudflare R2 in Heroku before uploading files.",
+        "Configure R2_ACCOUNT_ID, R2_BUCKET_NAME, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY in Heroku before uploading files.",
       );
     }
     return "replit";
