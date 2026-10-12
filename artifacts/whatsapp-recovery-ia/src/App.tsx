@@ -177,7 +177,6 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         <div className="login-brand">
           <img src="/assets/antiban-logo-white.png" alt="Antiban" />
         </div>
-        <p className="login-kicker text-[#ffffff]">GO PLAYGROUND</p>
         <h1>Acesse sua central</h1>
         <p className="login-copy">Entre para gerenciar suas conversas e acompanhar seus clientes.</p>
         <form className="login-form" onSubmit={submit}>
