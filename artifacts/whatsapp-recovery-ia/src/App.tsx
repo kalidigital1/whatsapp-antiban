@@ -2298,7 +2298,7 @@ function Home() {
 
   useEffect(() => {
     if (selectedId === null && conversations.length > 0) setSelectedId(conversations[0].id);
-    if (selectedId !== null && conversations.length > 0 && !conversations.some((item) => item.id === selectedId)) setSelectedId(null);
+    if (selectedId !== null && !conversations.some((item) => item.id === selectedId)) setSelectedId(null);
   }, [conversations, selectedId]);
 
   const confirmDeleteConversation = () => {

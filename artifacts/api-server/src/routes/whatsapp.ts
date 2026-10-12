@@ -38,7 +38,7 @@ import {
   EvolutionConnectionStatus,
   UpdateEvolutionProfileNameBody,
 } from "@workspace/api-zod";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like } from "drizzle-orm";
 import {
   chatMessages,
   contacts,
@@ -2845,28 +2845,64 @@ router.post("/evolution/profile-name", async (req, res): Promise<void> => {
   }
 });
 
-router.delete("/evolution/connection", async (_req, res) => {
-  if (activeEvolutionSession) {
+router.delete("/evolution/connection", async (_req, res): Promise<void> => {
+  const sessionToDisconnect = activeEvolutionSession;
+  const previousProvider = activeProvider;
+  const nextProvider = activeConnection ? "cloud" : "none";
+
+  // Stop new QR syncs/webhooks from repopulating history while it is cleared.
+  activeEvolutionSession = null;
+  activeProvider = nextProvider;
+
+  try {
+    await Promise.all(
+      [...evolutionMessageSyncRequests.values()].map((request) =>
+        request.catch(() => undefined),
+      ),
+    );
+
+    await db.transaction(async (tx) => {
+      const qrConversationIds = tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(like(conversations.phoneNumberId, "evolution:%"));
+
+      await tx
+        .delete(chatMessages)
+        .where(inArray(chatMessages.conversationId, qrConversationIds));
+      await tx
+        .delete(conversations)
+        .where(like(conversations.phoneNumberId, "evolution:%"));
+      await tx
+        .update(appSettings)
+        .set({
+          whatsappEvolutionConfigEncrypted: null,
+          whatsappActiveProvider: nextProvider,
+          updatedAt: new Date(),
+        })
+        .where(eq(appSettings.id, 1));
+    });
+  } catch (error) {
+    activeEvolutionSession = sessionToDisconnect;
+    activeProvider = previousProvider;
+    throw error;
+  }
+
+  if (sessionToDisconnect) {
     try {
       await evolutionRequest(
-        activeEvolutionSession,
-        `/instance/logout/${encodeURIComponent(activeEvolutionSession.instanceName)}`,
+        sessionToDisconnect,
+        `/instance/logout/${encodeURIComponent(sessionToDisconnect.instanceName)}`,
         { method: "DELETE" },
       );
     } catch (error) {
-      logger.warn({ err: error, instanceName: activeEvolutionSession.instanceName }, "Evolution API logout failed; clearing local connection");
+      logger.warn(
+        { err: error, instanceName: sessionToDisconnect.instanceName },
+        "QR Code logout failed after local history and connection cleanup",
+      );
     }
   }
-  activeEvolutionSession = null;
-  activeProvider = activeConnection ? "cloud" : "none";
-  await db
-    .update(appSettings)
-    .set({
-      whatsappEvolutionConfigEncrypted: null,
-      whatsappActiveProvider: activeProvider,
-      updatedAt: new Date(),
-    })
-    .where(eq(appSettings.id, 1));
+
   res.json({ success: true });
 });
 

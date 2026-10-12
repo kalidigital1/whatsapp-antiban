@@ -12,6 +12,7 @@ import {
 import {
   getGetConnectionQueryKey,
   getGetEvolutionConnectionQueryKey,
+  getListConversationsQueryKey,
   useConnectEvolutionWhatsApp,
   useDisconnectEvolutionWhatsApp,
   useGetEvolutionConnection,
@@ -80,9 +81,17 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
   };
 
   const disconnectNow = () => {
+    const confirmed = window.confirm(
+      "Desconectar apagará permanentemente as conversas, mensagens e mídias desta conexão via QR Code no Antiban. Os contatos serão mantidos. Deseja continuar?",
+    );
+    if (!confirmed) return;
+
     setActionError("");
     disconnect.mutate(undefined, {
-      onSuccess: () => invalidateConnections(),
+      onSuccess: async () => {
+        invalidateConnections();
+        await queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+      },
       onError: () => setActionError("Não foi possível desconectar. Tente novamente."),
     });
   };
