@@ -1190,12 +1190,12 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
           {connectionMethod === 'evolution' ? <EvolutionConnectionPanel onGoToConversations={onGoToConversations} /> : <>
           {connectionQuery.isLoading && <div className="space-y-3" data-testid="state-connection-loading"><div className="skeleton h-12 rounded-lg" /><div className="skeleton h-12 rounded-lg" /></div>}
           {connectionQuery.isError && <div className="status-note" data-testid="state-connection-error"><AlertCircle size={16} /> Não foi possível consultar o status atual da conexão.</div>}
-          <div className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-4 ${isConnected ? 'border-[#397a52] bg-[#1b3024]' : 'border-[#806638] bg-[#332b1e]'}`} data-testid="status-connection" aria-live="polite">
+          <div className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-4 ${isConnected ? 'border-[#397a52] bg-[#1b3024]' : 'border-[#39413d] bg-[#1c211e]'}`} data-testid="status-connection" aria-live="polite">
             <div className="flex min-w-0 items-center gap-3">
-              <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-full ${isConnected ? 'bg-[#285b3a] text-[#7be59b]' : 'bg-[#5a451f] text-[#ffd477]'}`}><Wifi size={19} /></div>
+              <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border backdrop-blur-md ${isConnected ? 'border-[#397a52] bg-white/[0.04] text-[#7be59b]' : 'border-white/[0.10] bg-white/[0.035] text-[#e8c77f]'}`}><Wifi size={19} /></div>
               <p className="text-sm font-semibold text-[#eef3ef]">{isConnected ? 'WhatsApp conectado' : 'Conexão pendente'}</p>
             </div>
-            <span className={`flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold tracking-[.08em] ${isConnected ? 'border-[#4e9867] bg-[#21462f] text-[#8af0aa]' : 'border-[#a07a37] bg-[#493719] text-[#ffdc8d]'}`}>
+            <span className={`connection-status-chip ${isConnected ? 'is-active' : 'is-pending'}`}>
               <span className="dot" />{isConnected ? (evolutionActive ? 'CONECTADA' : 'ATIVA') : 'PENDENTE'}
             </span>
           </div>
