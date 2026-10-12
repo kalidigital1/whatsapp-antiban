@@ -289,15 +289,17 @@ async function restoreActiveConnection() {
       if (!settings) return;
       const hasCloudConfig = Boolean(settings.whatsappAccessTokenEncrypted && settings.whatsappBusinessAccountId);
       const hasEvolutionConfig = Boolean(settings.whatsappEvolutionConfigEncrypted);
-      activeProvider = settings.whatsappActiveProvider === "evolution" && hasEvolutionConfig
-        ? "evolution"
-        : settings.whatsappActiveProvider === "cloud" && hasCloudConfig
-          ? "cloud"
-          : hasCloudConfig
+      activeProvider = settings.whatsappActiveProvider === "none"
+        ? "none"
+        : settings.whatsappActiveProvider === "evolution" && hasEvolutionConfig
+          ? "evolution"
+          : settings.whatsappActiveProvider === "cloud" && hasCloudConfig
             ? "cloud"
-            : hasEvolutionConfig
-              ? "evolution"
-              : "none";
+            : hasCloudConfig
+              ? "cloud"
+              : hasEvolutionConfig
+                ? "evolution"
+                : "none";
       if (!activeConnection && settings.whatsappAccessTokenEncrypted && settings.whatsappBusinessAccountId) {
         try {
           const accessToken = decryptWhatsAppToken(settings.whatsappAccessTokenEncrypted);
@@ -1220,7 +1222,7 @@ function evolutionConnectionResponse(session: EvolutionSession | null): Evolutio
 function connectionStatus(req: Request) {
   const connection = activeConnection;
   return GetConnectionResponse.parse({
-    connected: Boolean(connection),
+    connected: activeProvider === "cloud" && Boolean(connection),
     businessAccountId: connection?.businessAccountId ?? null,
     phoneNumbers: connection?.phoneNumbers ?? [],
     selectedPhoneNumberId: connection?.selectedPhoneNumberId ?? null,
@@ -1727,6 +1729,58 @@ async function deleteLocalMediaObjects(payloads: unknown[]): Promise<void> {
       logger.warn({ err: error, path }, "Could not remove saved chat media from private storage");
     }
   }));
+}
+
+async function clearConversationHistory(scope: "all" | "evolution"): Promise<void> {
+  await Promise.all(
+    [...evolutionMessageSyncRequests.values()].map((request) =>
+      request.catch(() => undefined),
+    ),
+  );
+
+  const evolutionFilter = or(
+    like(conversations.phoneNumberId, "evolution:%"),
+    like(conversations.remoteJid, "%@lid"),
+  );
+  const filter = scope === "evolution" ? evolutionFilter : undefined;
+  const existingRows = filter
+    ? await db.select({ id: conversations.id }).from(conversations).where(filter).limit(1)
+    : await db.select({ id: conversations.id }).from(conversations).limit(1);
+  if (existingRows.length === 0) {
+    evolutionConversationHistorySyncTimestamps.clear();
+    return;
+  }
+
+  const mediaQuery = db
+    .select({ providerPayload: chatMessages.providerPayload })
+    .from(chatMessages)
+    .innerJoin(conversations, eq(chatMessages.conversationId, conversations.id));
+  const mediaRows = filter ? await mediaQuery.where(filter) : await mediaQuery;
+
+  await db.transaction(async (tx) => {
+    if (filter) {
+      const scopedConversationIds = tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(filter);
+      await tx
+        .delete(chatMessages)
+        .where(inArray(chatMessages.conversationId, scopedConversationIds));
+      await tx.delete(conversations).where(filter);
+      return;
+    }
+
+    const allConversationIds = tx
+      .select({ id: conversations.id })
+      .from(conversations);
+    await tx
+      .delete(chatMessages)
+      .where(inArray(chatMessages.conversationId, allConversationIds));
+    await tx.delete(conversations);
+  });
+
+  await deleteLocalMediaObjects(mediaRows.map((row) => row.providerPayload));
+  evolutionConversationHistorySyncTimestamps.clear();
 }
 
 async function conversationResponse(
@@ -3168,6 +3222,7 @@ router.get("/connection", (req, res) => {
 
 router.get("/evolution/connection", async (req, res) => {
   const session = activeEvolutionSession;
+  const wasConnected = Boolean(session?.connected);
   const previousMetadata = session
     ? JSON.stringify([session.phoneNumber, session.profileName, session.profilePictureUrl ?? null])
     : null;
@@ -3191,6 +3246,21 @@ router.get("/evolution/connection", async (req, res) => {
       } catch (error) {
         logger.warn({ err: error, instanceName: session.instanceName }, "Could not persist WhatsApp profile metadata");
       }
+    }
+    if (
+      activeProvider === "evolution"
+      && !session.connected
+      && session.state.toLowerCase() !== "unreachable"
+    ) {
+      try {
+        await clearConversationHistory("all");
+      } catch (error) {
+        logger.error({ err: error, instanceName: session.instanceName }, "Could not clear WhatsApp history after QR disconnection");
+        res.status(500).json({ error: "Não foi possível limpar o histórico após desconectar o WhatsApp." });
+        return;
+      }
+    } else if (wasConnected && !session.connected) {
+      req.log.info({ instanceName: session.instanceName }, "WhatsApp QR connection went offline");
     }
   }
   res.json(evolutionConnectionResponse(session));
@@ -3352,25 +3422,36 @@ router.post("/evolution/connection", async (req, res) => {
     }
     await setEvolutionWebhook(session, req);
     await refreshEvolutionSession(session, true);
-    const encryptedConfig = encryptEvolutionConfig(evolutionConfigPayload(session));
-    await db
-      .insert(appSettings)
-      .values({
-        id: 1,
-        whatsappEvolutionConfigEncrypted: encryptedConfig,
-        whatsappActiveProvider: "evolution",
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: appSettings.id,
-        set: {
+    const previousSession = activeEvolutionSession;
+    const previousProvider = activeProvider;
+    activeEvolutionSession = null;
+    activeProvider = "none";
+    try {
+      await clearConversationHistory("all");
+      const encryptedConfig = encryptEvolutionConfig(evolutionConfigPayload(session));
+      await db
+        .insert(appSettings)
+        .values({
+          id: 1,
           whatsappEvolutionConfigEncrypted: encryptedConfig,
           whatsappActiveProvider: "evolution",
           updatedAt: new Date(),
-        },
-      });
-    activeEvolutionSession = session;
-    activeProvider = "evolution";
+        })
+        .onConflictDoUpdate({
+          target: appSettings.id,
+          set: {
+            whatsappEvolutionConfigEncrypted: encryptedConfig,
+            whatsappActiveProvider: "evolution",
+            updatedAt: new Date(),
+          },
+        });
+      activeEvolutionSession = session;
+      activeProvider = "evolution";
+    } catch (error) {
+      activeEvolutionSession = previousSession;
+      activeProvider = previousProvider;
+      throw error;
+    }
     res.json(evolutionConnectionResponse(session));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
@@ -3676,37 +3757,35 @@ router.get("/events", (req, res) => {
 
 router.get("/conversations", async (req, res) => {
   try {
-    if (activeProvider === "none") {
-      const [orphanedConversation] = await db
-        .select({ id: conversations.id })
-        .from(conversations)
-        .limit(1);
-      if (orphanedConversation) {
-        const mediaPayloads = await db
-          .select({ providerPayload: chatMessages.providerPayload })
-          .from(chatMessages);
-        await db.transaction(async (tx) => {
-          const allConversationIds = tx
-            .select({ id: conversations.id })
-            .from(conversations);
-          await tx
-            .delete(chatMessages)
-            .where(inArray(chatMessages.conversationId, allConversationIds));
-          await tx.delete(conversations);
-        });
-        await deleteLocalMediaObjects(mediaPayloads.map((row) => row.providerPayload));
-        req.log.info("Cleared orphaned WhatsApp chat history while disconnected");
-      }
+    if (
+      activeProvider === "none"
+      || (activeProvider === "evolution" && !activeEvolutionSession?.connected)
+    ) {
+      await clearConversationHistory("all");
+      res.json(ListConversationsResponse.parse([]));
+      return;
     }
 
     if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
       scheduleEvolutionMessageSync(activeEvolutionSession);
       scheduleEvolutionPinnedChatSync(activeEvolutionSession);
     }
+
+    const activePhoneNumberId = activeProvider === "evolution" && activeEvolutionSession?.connected
+      ? `evolution:${activeEvolutionSession.instanceName}`
+      : activeProvider === "cloud" && activeConnection
+        ? activeConnection.selectedPhoneNumberId
+        : null;
+    if (!activePhoneNumberId) {
+      res.json(ListConversationsResponse.parse([]));
+      return;
+    }
+
     const rows = await db
       .select({ conversation: conversations, contact: contacts })
       .from(conversations)
       .innerJoin(contacts, eq(conversations.contactId, contacts.id))
+      .where(eq(conversations.phoneNumberId, activePhoneNumberId))
       .orderBy(desc(conversations.isPinned), desc(conversations.updatedAt));
     const result = await Promise.all(
       rows.map((row) => conversationResponse(row.conversation, row.contact)),

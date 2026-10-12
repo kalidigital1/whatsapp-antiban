@@ -510,12 +510,18 @@ function Sidebar({
   profilePicturesEnabled: boolean;
 }) {
   const [search, setSearch] = useState('');
-  const [showArchived, setShowArchived] = useState(false);
+  const [listView, setListView] = useState<'direct' | 'groups' | 'archived'>('direct');
   const archivedCount = conversations.filter((conversation) => Boolean(conversation.archivedAt)).length;
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return conversations
-      .filter((conversation) => Boolean(conversation.archivedAt) === showArchived)
+      .filter((conversation) => {
+        if (listView === 'archived') return Boolean(conversation.archivedAt);
+        if (conversation.archivedAt) return false;
+        return listView === 'groups'
+          ? conversation.conversationType === 'group'
+          : conversation.conversationType !== 'group';
+      })
       .filter((conversation) => !needle || (
         conversation.contact.name.toLowerCase().includes(needle)
         || conversation.contact.phoneNumber.includes(needle)
@@ -523,7 +529,7 @@ function Sidebar({
         || (conversation.labels ?? []).some((label) => label.toLowerCase().includes(needle))
       ))
       .sort((left, right) => Number(right.isPinned) - Number(left.isPinned));
-  }, [conversations, search, showArchived]);
+  }, [conversations, search, listView]);
 
   return (
     <aside className="sidebar-panel" data-open={mobileOpen}>
@@ -548,8 +554,9 @@ function Sidebar({
         </label>
       </div>
       <div className="flex gap-1 px-3 pb-2" role="group" aria-label="Filtrar conversas">
-        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] transition ${!showArchived ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setShowArchived(false)} data-testid="button-active-conversations">Conversas</button>
-        <button type="button" className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] transition ${showArchived ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setShowArchived(true)} data-testid="button-archived-conversations" aria-label={`Arquivadas, ${archivedCount}`} title={`${archivedCount} conversa${archivedCount === 1 ? '' : 's'} arquivada${archivedCount === 1 ? '' : 's'}`}>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] transition ${listView === 'direct' ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setListView('direct')} data-testid="button-active-conversations">Conversas</button>
+        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] transition ${listView === 'groups' ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setListView('groups')} data-testid="button-group-conversations">Grupos</button>
+        <button type="button" className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] transition ${listView === 'archived' ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setListView('archived')} data-testid="button-archived-conversations" aria-label={`Arquivadas, ${archivedCount}`} title={`${archivedCount} conversa${archivedCount === 1 ? '' : 's'} arquivada${archivedCount === 1 ? '' : 's'}`}>
           Arquivadas
           <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#3b4941] px-1 text-[9px] font-semibold leading-none text-[#d5e5da]">{archivedCount}</span>
         </button>
@@ -571,17 +578,27 @@ function Sidebar({
         )}
         {!loading && !error && filtered.length === 0 && (
           <div className="px-7 py-14 text-center" data-testid="state-conversations-empty">
-            {connected || search || showArchived
+            {connected || search || listView !== 'direct'
               ? <Inbox className="mx-auto mb-3 text-[#87938e]" size={30} strokeWidth={1.4} />
               : <Wifi className="mx-auto mb-3 text-[#75cf95]" size={28} strokeWidth={1.6} />}
             <p className="text-sm font-medium text-[#e3e9e6]">
-              {showArchived ? 'Nenhuma conversa arquivada' : search ? 'Nenhuma conversa encontrada' : connected ? 'Sua caixa está vazia' : 'Conecte seu WhatsApp'}
+              {search
+                ? 'Nenhuma conversa encontrada'
+                : listView === 'archived'
+                  ? 'Nenhuma conversa arquivada'
+                  : listView === 'groups'
+                    ? 'Nenhum grupo por aqui'
+                    : connected
+                      ? 'Sua caixa está vazia'
+                      : 'Conecte seu WhatsApp'}
             </p>
             <p className="mt-1 text-xs leading-relaxed text-[#89958f]">
-              {showArchived
+              {listView === 'archived'
                 ? 'As conversas arquivadas aparecerão aqui.'
                 : search
-                ? 'Tente buscar por outro nome ou telefone.'
+                  ? 'Tente buscar por outro nome ou telefone.'
+                  : listView === 'groups'
+                    ? 'Os grupos sincronizados pelo WhatsApp aparecerão aqui.'
                 : connected
                   ? 'Novas mensagens recebidas aparecerão aqui.'
                   : 'Conecte seu número para carregar suas conversas.'}
@@ -1465,9 +1482,10 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
       onSuccess: async () => {
         queryClient.removeQueries({
           predicate: (query) => query.queryKey.some(
-            (part) => typeof part === 'string' && /conversation|message/i.test(part),
+            (part) => typeof part === 'string' && /message/i.test(part),
           ),
         });
+        queryClient.setQueryData(getListConversationsQueryKey(), []);
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() }),
           queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() }),

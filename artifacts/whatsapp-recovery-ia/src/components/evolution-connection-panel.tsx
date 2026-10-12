@@ -54,6 +54,15 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
     invalidateEvolution();
     void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() });
   };
+  const clearConversationCache = async () => {
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey.some(
+        (part) => typeof part === "string" && /message/i.test(part),
+      ),
+    });
+    queryClient.setQueryData(getListConversationsQueryKey(), []);
+    await queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+  };
 
   const generateQr = () => {
     setActionError("");
@@ -62,6 +71,7 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
         onSuccess: (updatedConnection) => {
           queryClient.setQueryData(getGetEvolutionConnectionQueryKey(), updatedConnection);
           invalidateEvolution();
+          void clearConversationCache();
         },
         onError: () => setActionError("Não foi possível gerar o QR Code. Tente novamente."),
       });
@@ -71,9 +81,10 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
     connect.mutate(
       { data: { instanceName: `antiban-${Date.now().toString(36)}` } },
       {
-        onSuccess: (newConnection) => {
+        onSuccess: async (newConnection) => {
           queryClient.setQueryData(getGetEvolutionConnectionQueryKey(), newConnection);
           invalidateConnections();
+          await clearConversationCache();
         },
         onError: () => setActionError("Não foi possível gerar o QR Code. Tente novamente."),
       },
@@ -90,7 +101,7 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
     disconnect.mutate(undefined, {
       onSuccess: async () => {
         invalidateConnections();
-        await queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+        await clearConversationCache();
       },
       onError: () => setActionError("Não foi possível desconectar. Tente novamente."),
     });
