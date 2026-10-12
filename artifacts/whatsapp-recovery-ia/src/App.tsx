@@ -1155,7 +1155,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
         <div className="space-y-5 p-5">
           <div className="connection-method-tabs" role="tablist" aria-label="Método de conexão do WhatsApp">
             <button type="button" role="tab" aria-selected={connectionMethod === 'cloud'} className={connectionMethod === 'cloud' ? 'is-active' : ''} onClick={() => setConnectionMethod('cloud')} data-testid="tab-whatsapp-cloud">API Oficial{isConnected && !evolutionActive && <span>Ativa</span>}</button>
-            <button type="button" role="tab" aria-selected={connectionMethod === 'evolution'} className={connectionMethod === 'evolution' ? 'is-active' : ''} onClick={() => setConnectionMethod('evolution')} data-testid="tab-whatsapp-evolution"><QrCode size={15} /> Conectar via QR Code{evolutionActive && <span>Ativa</span>}</button>
+            <button type="button" role="tab" aria-selected={connectionMethod === 'evolution'} className={connectionMethod === 'evolution' ? 'is-active' : ''} onClick={() => setConnectionMethod('evolution')} data-testid="tab-whatsapp-evolution"><QrCode size={15} /> QR Code{evolutionActive && <span>Ativa</span>}</button>
           </div>
           {connectionMethod === 'evolution' ? <EvolutionConnectionPanel /> : <>
           {connectionQuery.isLoading && <div className="space-y-3" data-testid="state-connection-loading"><div className="skeleton h-12 rounded-lg" /><div className="skeleton h-12 rounded-lg" /></div>}
