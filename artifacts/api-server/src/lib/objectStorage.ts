@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { File, Storage } from "@google-cloud/storage";
 import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import {
   canAccessObject,
   setObjectAclPolicy,
   type ObjectAclPolicy,
@@ -9,6 +16,52 @@ import {
 } from "./objectAcl";
 
 const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+const R2_ENV_KEYS = [
+  "R2_ACCOUNT_ID",
+  "R2_BUCKET_NAME",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+] as const;
+
+type R2Environment = {
+  accountId: string;
+  bucketName: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+};
+
+type ObjectMetadata = {
+  size?: number;
+  contentType?: string;
+};
+
+class R2ObjectEntityFile {
+  constructor(
+    private readonly client: S3Client,
+    private readonly bucketName: string,
+    private readonly key: string,
+  ) {}
+
+  async getMetadata(): Promise<[ObjectMetadata]> {
+    const response = await this.client.send(new HeadObjectCommand({
+      Bucket: this.bucketName,
+      Key: this.key,
+    }));
+    return [{
+      size: response.ContentLength,
+      contentType: response.ContentType,
+    }];
+  }
+
+  async download(): Promise<[Buffer]> {
+    const response = await this.client.send(new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: this.key,
+    }));
+    if (!response.Body) throw new ObjectNotFoundError();
+    return [Buffer.from(await response.Body.transformToByteArray())];
+  }
+}
 
 export const objectStorageClient = new Storage({
   credentials: {
@@ -36,6 +89,36 @@ export class ObjectNotFoundError extends Error {
 }
 
 export class ObjectStorageService {
+  private r2Client: S3Client | null = null;
+
+  getUploadMode(): "direct" | "server" {
+    return this.getBackend() === "r2" ? "server" : "direct";
+  }
+
+  async saveObjectEntityFile(buffer: Buffer, contentType: string): Promise<string> {
+    const objectName = `uploads/${randomUUID()}`;
+    if (this.getBackend() === "r2") {
+      const { bucketName } = this.getR2Environment();
+      await this.getR2Client().send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: objectName,
+        Body: buffer,
+        ContentType: contentType,
+        CacheControl: "private, max-age=300",
+      }));
+      return `/objects/${objectName}`;
+    }
+
+    const { bucketName, objectName: gcsObjectName } = parseObjectPath(
+      `${this.getPrivateObjectDir()}/${objectName}`,
+    );
+    await objectStorageClient.bucket(bucketName).file(gcsObjectName).save(buffer, {
+      resumable: false,
+      metadata: { contentType },
+    });
+    return `/objects/${objectName}`;
+  }
+
   getPrivateObjectDir(): string {
     const directory = process.env.PRIVATE_OBJECT_DIR?.trim() || "";
     if (!directory) throw new Error("Private object storage is not configured.");
@@ -43,6 +126,9 @@ export class ObjectStorageService {
   }
 
   async getObjectEntityUploadURL(): Promise<string> {
+    if (this.getBackend() !== "replit") {
+      throw new Error("Use the authenticated server upload route for this storage provider.");
+    }
     const { bucketName, objectName } = parseObjectPath(
       `${this.getPrivateObjectDir()}/uploads/${randomUUID()}`,
     );
@@ -58,12 +144,20 @@ export class ObjectStorageService {
     return `/objects/${pathname.slice(privateDir.length)}`;
   }
 
-  async getObjectEntityFile(objectPath: string): Promise<File> {
-    if (!objectPath.startsWith("/objects/")) throw new ObjectNotFoundError();
-    const objectNameFromPath = objectPath.slice("/objects/".length);
-    if (!objectNameFromPath || objectNameFromPath.split("/").includes("..")) {
-      throw new ObjectNotFoundError();
+  async getObjectEntityFile(objectPath: string): Promise<File | R2ObjectEntityFile> {
+    const objectNameFromPath = objectKeyFromPath(objectPath);
+    if (this.getBackend() === "r2") {
+      const { bucketName } = this.getR2Environment();
+      const file = new R2ObjectEntityFile(this.getR2Client(), bucketName, objectNameFromPath);
+      try {
+        await file.getMetadata();
+      } catch (error) {
+        if (isObjectNotFound(error)) throw new ObjectNotFoundError();
+        throw error;
+      }
+      return file;
     }
+
     const { bucketName, objectName } = parseObjectPath(
       `${this.getPrivateObjectDir()}/${objectNameFromPath}`,
     );
@@ -76,6 +170,20 @@ export class ObjectStorageService {
   async copyObjectEntityFile(objectPath: string): Promise<string> {
     const source = await this.getObjectEntityFile(objectPath);
     const relativePath = `uploads/${randomUUID()}`;
+    if (source instanceof R2ObjectEntityFile) {
+      const { bucketName } = this.getR2Environment();
+      const [metadata] = await source.getMetadata();
+      const [buffer] = await source.download();
+      await this.getR2Client().send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: relativePath,
+        Body: buffer,
+        ...(metadata.contentType ? { ContentType: metadata.contentType } : {}),
+        CacheControl: "private, max-age=300",
+      }));
+      return `/objects/${relativePath}`;
+    }
+
     const { bucketName, objectName } = parseObjectPath(
       `${this.getPrivateObjectDir()}/${relativePath}`,
     );
@@ -84,11 +192,30 @@ export class ObjectStorageService {
   }
 
   async deleteObjectEntityFile(objectPath: string): Promise<void> {
+    if (this.getBackend() === "r2") {
+      const { bucketName } = this.getR2Environment();
+      await this.getR2Client().send(new DeleteObjectCommand({
+        Bucket: bucketName,
+        Key: objectKeyFromPath(objectPath),
+      }));
+      return;
+    }
     const file = await this.getObjectEntityFile(objectPath);
+    if (!(file instanceof File)) throw new ObjectNotFoundError();
     await file.delete();
   }
 
-  async downloadObject(file: File): Promise<Response> {
+  async downloadObject(file: File | R2ObjectEntityFile): Promise<Response> {
+    if (file instanceof R2ObjectEntityFile) {
+      const [[metadata], [buffer]] = await Promise.all([file.getMetadata(), file.download()]);
+      return new Response(new Uint8Array(buffer), {
+        headers: {
+          "Content-Type": metadata.contentType || "application/octet-stream",
+          "Cache-Control": "private, max-age=300",
+          ...(metadata.size !== undefined ? { "Content-Length": String(metadata.size) } : {}),
+        },
+      });
+    }
     const [metadata] = await file.getMetadata();
     const nodeStream = file.createReadStream();
     return new Response(Readable.toWeb(nodeStream) as ReadableStream, {
@@ -104,7 +231,11 @@ export class ObjectStorageService {
     objectPath: string,
     aclPolicy: ObjectAclPolicy,
   ): Promise<void> {
-    await setObjectAclPolicy(await this.getObjectEntityFile(objectPath), aclPolicy);
+    const file = await this.getObjectEntityFile(objectPath);
+    if (!(file instanceof File)) {
+      throw new Error("Object ACL policies are not supported by Cloudflare R2.");
+    }
+    await setObjectAclPolicy(file, aclPolicy);
   }
 
   async canAccessObjectEntity({
@@ -122,6 +253,55 @@ export class ObjectStorageService {
       requestedPermission: requestedPermission ?? ObjectPermission.READ,
     });
   }
+
+  private getBackend(): "r2" | "replit" {
+    const providedKeys = R2_ENV_KEYS.filter((key) => Boolean(process.env[key]?.trim()));
+    if (providedKeys.length === R2_ENV_KEYS.length) return "r2";
+    if (providedKeys.length > 0) {
+      const missing = R2_ENV_KEYS.filter((key) => !process.env[key]?.trim());
+      throw new ObjectStorageConfigurationError(
+        `Configure the missing Cloudflare R2 settings: ${missing.join(", ")}.`,
+      );
+    }
+    if (process.env.DYNO || process.env.HEROKU_APP_NAME) {
+      throw new ObjectStorageConfigurationError(
+        "Configure Cloudflare R2 in Heroku before uploading files.",
+      );
+    }
+    return "replit";
+  }
+
+  private getR2Environment(): R2Environment {
+    const accountId = process.env.R2_ACCOUNT_ID?.trim();
+    const bucketName = process.env.R2_BUCKET_NAME?.trim();
+    const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
+    const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
+    if (!accountId || !bucketName || !accessKeyId || !secretAccessKey) {
+      throw new ObjectStorageConfigurationError(
+        "Configure R2_ACCOUNT_ID, R2_BUCKET_NAME, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY.",
+      );
+    }
+    return { accountId, bucketName, accessKeyId, secretAccessKey };
+  }
+
+  private getR2Client(): S3Client {
+    if (this.r2Client) return this.r2Client;
+    const { accountId, accessKeyId, secretAccessKey } = this.getR2Environment();
+    this.r2Client = new S3Client({
+      region: "auto",
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+      forcePathStyle: true,
+      credentials: { accessKeyId, secretAccessKey },
+    });
+    return this.r2Client;
+  }
+}
+
+export class ObjectStorageConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ObjectStorageConfigurationError";
+  }
 }
 
 function parseObjectPath(path: string): { bucketName: string; objectName: string } {
@@ -131,6 +311,23 @@ function parseObjectPath(path: string): { bucketName: string; objectName: string
   const objectName = parts.slice(2).join("/");
   if (!bucketName || !objectName) throw new Error("Invalid object storage path.");
   return { bucketName, objectName };
+}
+
+function objectKeyFromPath(objectPath: string): string {
+  if (!objectPath.startsWith("/objects/")) throw new ObjectNotFoundError();
+  const key = objectPath.slice("/objects/".length);
+  if (!key || key.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new ObjectNotFoundError();
+  }
+  return key;
+}
+
+function isObjectNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return candidate.$metadata?.httpStatusCode === 404
+    || candidate.name === "NotFound"
+    || candidate.name === "NoSuchKey";
 }
 
 async function signObjectURL({

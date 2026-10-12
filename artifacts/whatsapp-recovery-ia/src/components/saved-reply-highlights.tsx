@@ -36,6 +36,19 @@ function displayError(error: unknown): string {
   return "Não foi possível concluir a ação.";
 }
 
+async function uploadResponseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload: unknown = await response.json();
+    if (payload && typeof payload === "object" && "error" in payload) {
+      const message = (payload as { error?: unknown }).error;
+      if (typeof message === "string" && message.trim()) return message;
+    }
+  } catch {
+    // Use the status-based message below when the response is not JSON.
+  }
+  return `${fallback} (HTTP ${response.status}).`;
+}
+
 function kindFromFile(file: File): SavedKind {
   if (file.type.startsWith("image/")) return "image";
   if (file.type.startsWith("video/")) return "video";
@@ -184,21 +197,55 @@ export function SavedReplyHighlights({
           return;
         }
         const contentType = file.type || "application/octet-stream";
-        const upload = await requestUploadUrl.mutateAsync({
-          data: { name: file.name, size: file.size, contentType },
-        });
-        const uploadResponse = await fetch(upload.uploadURL, {
-          method: "PUT",
-          headers: { "Content-Type": contentType },
-          body: file,
-        });
-        if (!uploadResponse.ok) throw new Error("Não foi possível carregar o arquivo.");
+        const modeResponse = await fetch("/api/storage/upload-mode");
+        if (!modeResponse.ok) {
+          throw new Error(await uploadResponseError(modeResponse, "Não foi possível preparar o envio do arquivo"));
+        }
+        const modePayload: unknown = await modeResponse.json();
+        if (!modePayload || typeof modePayload !== "object" || !("mode" in modePayload)) {
+          throw new Error("O servidor retornou um modo de envio inválido.");
+        }
+
+        let objectPath: string;
+        if ((modePayload as { mode?: unknown }).mode === "server") {
+          const formData = new FormData();
+          formData.append("file", file, file.name);
+          const uploadResponse = await fetch("/api/storage/uploads", {
+            method: "POST",
+            body: formData,
+          });
+          if (!uploadResponse.ok) {
+            throw new Error(await uploadResponseError(uploadResponse, "Não foi possível salvar o arquivo"));
+          }
+          const uploadPayload: unknown = await uploadResponse.json();
+          const uploadedPath = uploadPayload && typeof uploadPayload === "object" && "objectPath" in uploadPayload
+            ? (uploadPayload as { objectPath?: unknown }).objectPath
+            : null;
+          if (typeof uploadedPath !== "string" || !uploadedPath.startsWith("/objects/uploads/")) {
+            throw new Error("O servidor não confirmou o armazenamento do arquivo.");
+          }
+          objectPath = uploadedPath;
+        } else if ((modePayload as { mode?: unknown }).mode === "direct") {
+          const upload = await requestUploadUrl.mutateAsync({
+            data: { name: file.name, size: file.size, contentType },
+          });
+          const uploadResponse = await fetch(upload.uploadURL, {
+            method: "PUT",
+            headers: { "Content-Type": contentType },
+            body: file,
+          });
+          if (!uploadResponse.ok) throw new Error("Não foi possível carregar o arquivo.");
+          objectPath = upload.objectPath;
+        } else {
+          throw new Error("O servidor retornou um modo de envio não suportado.");
+        }
+
         const kind: SavedKind = formKind === "audio" ? "audio" : kindFromFile(file);
         await createSavedReply.mutateAsync({
           data: {
             title: cleanTitle,
             kind,
-            objectPath: upload.objectPath,
+            objectPath,
             mediaMimeType: contentType,
             mediaFileName: file.name,
             sizeBytes: file.size,
