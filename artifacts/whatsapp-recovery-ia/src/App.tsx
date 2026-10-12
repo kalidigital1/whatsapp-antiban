@@ -1087,7 +1087,7 @@ function DeleteConversationDialog({
   );
 }
 
-function SettingsDialog({ onClose }: { onClose: () => void }) {
+function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void; onGoToConversations: () => void }) {
   const queryClient = useQueryClient();
   const connectionQuery = useGetConnection({ query: { refetchInterval: 10000, queryKey: getGetConnectionQueryKey() } });
   const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 10000, queryKey: getGetEvolutionConnectionQueryKey() } });
@@ -1157,7 +1157,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
             <button type="button" role="tab" aria-selected={connectionMethod === 'cloud'} className={connectionMethod === 'cloud' ? 'is-active' : ''} onClick={() => setConnectionMethod('cloud')} data-testid="tab-whatsapp-cloud">API Oficial{isConnected && !evolutionActive && <span>Ativa</span>}</button>
             <button type="button" role="tab" aria-selected={connectionMethod === 'evolution'} className={connectionMethod === 'evolution' ? 'is-active' : ''} onClick={() => setConnectionMethod('evolution')} data-testid="tab-whatsapp-evolution"><QrCode size={15} /> QR Code{evolutionActive && <span>Ativa</span>}</button>
           </div>
-          {connectionMethod === 'evolution' ? <EvolutionConnectionPanel /> : <>
+          {connectionMethod === 'evolution' ? <EvolutionConnectionPanel onGoToConversations={onGoToConversations} /> : <>
           {connectionQuery.isLoading && <div className="space-y-3" data-testid="state-connection-loading"><div className="skeleton h-12 rounded-lg" /><div className="skeleton h-12 rounded-lg" /></div>}
           {connectionQuery.isError && <div className="status-note" data-testid="state-connection-error"><AlertCircle size={16} /> Não foi possível consultar o status atual da conexão.</div>}
           <div className={`flex items-center justify-between rounded-lg border p-4 ${isConnected ? 'border-[#35684b] bg-[#1b3024]' : 'border-[#685330] bg-[#332b1e]'}`} data-testid="status-connection">
@@ -2173,7 +2173,14 @@ function Home() {
           </>
         )}
       </div>
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog
+        onClose={() => setSettingsOpen(false)}
+        onGoToConversations={() => {
+          setActiveSection('inbox');
+          setMobileListOpen(true);
+          setSettingsOpen(false);
+        }}
+      />}
       {newConversationOpen && <NewConversationDialog onClose={() => setNewConversationOpen(false)} onCreated={(conversation) => { setNewConversationOpen(false); setSelectedId(conversation.id); setMobileListOpen(false); }} />}
       {conversationToDelete && <DeleteConversationDialog conversation={conversationToDelete} pending={deleteConversation.isPending} error={deleteError} onClose={() => { if (!deleteConversation.isPending) { setConversationToDelete(null); setDeleteError(''); } }} onConfirm={confirmDeleteConversation} />}
     </main>

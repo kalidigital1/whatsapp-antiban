@@ -4,6 +4,7 @@ import {
   AlertCircle,
   Check,
   Loader2,
+  MessageCircle,
   QrCode,
   RefreshCw,
   X,
@@ -20,6 +21,7 @@ import type { EvolutionConnectionStatus } from "@workspace/api-client-react";
 
 type EvolutionConnectionPanelProps = {
   onClose?: () => void;
+  onGoToConversations: () => void;
 };
 
 function qrImageSource(qrCode: string) {
@@ -27,7 +29,7 @@ function qrImageSource(qrCode: string) {
   return `data:image/png;base64,${qrCode}`;
 }
 
-export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelProps) {
+export function EvolutionConnectionPanel({ onClose, onGoToConversations }: EvolutionConnectionPanelProps) {
   const queryClient = useQueryClient();
   const connectionQuery = useGetEvolutionConnection({
     query: {
@@ -144,6 +146,9 @@ export function EvolutionConnectionPanel({ onClose }: EvolutionConnectionPanelPr
             <button type="button" className="evolution-disconnect-button" onClick={disconnectNow} disabled={disconnect.isPending} data-testid="button-disconnect-evolution">
               {disconnect.isPending ? <Loader2 size={14} className="animate-spin" /> : null}
               {disconnect.isPending ? "Desconectando..." : "Desconectar"}
+            </button>
+            <button type="button" className="btn-ghost w-full" onClick={onGoToConversations} data-testid="button-go-conversations">
+              <MessageCircle size={16} /> Ir para conversas
             </button>
           </div>
         )}
