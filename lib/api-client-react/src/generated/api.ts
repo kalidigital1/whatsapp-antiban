@@ -565,6 +565,80 @@ export const useConnectEvolutionWhatsApp = <TError = ErrorType<ErrorResponse>,
       return useMutation(getConnectEvolutionWhatsAppMutationOptions(options));
     }
 
+export const getDisconnectEvolutionWhatsAppUrl = () => {
+
+
+
+
+  return `/api/evolution/connection`
+}
+
+/**
+ * @summary Disconnect the Evolution API instance from this inbox
+ */
+export const disconnectEvolutionWhatsApp = async ( options?: Parameters<typeof customFetch>[1]): Promise<SuccessResponse> => {
+
+  return customFetch<SuccessResponse>(getDisconnectEvolutionWhatsAppUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDisconnectEvolutionWhatsAppMutationKey = () => ['disconnectEvolutionWhatsApp'] as const;
+
+export const getDisconnectEvolutionWhatsAppMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext> => {
+
+const mutationKey = getDisconnectEvolutionWhatsAppMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, void> = () => {
+
+
+          return  disconnectEvolutionWhatsApp(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DisconnectEvolutionWhatsAppMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>>
+
+    export type DisconnectEvolutionWhatsAppMutationError = ErrorType<unknown>
+
+
+    /**
+ * @summary Disconnect the Evolution API instance from this inbox
+ */
+export const useDisconnectEvolutionWhatsApp = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDisconnectEvolutionWhatsAppMutationOptions(options));
+    }
+
 export const getGetEvolutionProfilePictureUrl = (params?: GetEvolutionProfilePictureParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -648,80 +722,6 @@ export function useGetEvolutionProfilePicture<TData = Awaited<ReturnType<typeof 
 
 
 
-
-export const getDisconnectEvolutionWhatsAppUrl = () => {
-
-
-
-
-  return `/api/evolution/profile-picture`
-}
-
-/**
- * @summary Disconnect the Evolution API instance from this inbox
- */
-export const disconnectEvolutionWhatsApp = async ( options?: Parameters<typeof customFetch>[1]): Promise<SuccessResponse> => {
-
-  return customFetch<SuccessResponse>(getDisconnectEvolutionWhatsAppUrl(),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-
-export const getDisconnectEvolutionWhatsAppMutationKey = () => ['disconnectEvolutionWhatsApp'] as const;
-
-export const getDisconnectEvolutionWhatsAppMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext> => {
-
-const mutationKey = getDisconnectEvolutionWhatsAppMutationKey();
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, void> = () => {
-
-
-          return  disconnectEvolutionWhatsApp(requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DisconnectEvolutionWhatsAppMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>>
-
-    export type DisconnectEvolutionWhatsAppMutationError = ErrorType<unknown>
-
-
-    /**
- * @summary Disconnect the Evolution API instance from this inbox
- */
-export const useDisconnectEvolutionWhatsApp = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof disconnectEvolutionWhatsApp>>,
-        TError,
-        void,
-        TContext
-      > => {
-      return useMutation(getDisconnectEvolutionWhatsAppMutationOptions(options));
-    }
 
 export const getRefreshEvolutionQrUrl = () => {
 

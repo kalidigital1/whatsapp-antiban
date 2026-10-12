@@ -107,6 +107,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: disconnectEvolutionWhatsApp
+      tags: [whatsapp]
+      summary: Disconnect the Evolution API instance from this inbox
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
   /evolution/profile-picture:
     get:
       operationId: getEvolutionProfilePicture
@@ -151,17 +162,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-    delete:
-      operationId: disconnectEvolutionWhatsApp
-      tags: [whatsapp]
-      summary: Disconnect the Evolution API instance from this inbox
-      responses:
-        "200":
-          description: Disconnected
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SuccessResponse"
   /evolution/connection/qr:
     post:
       operationId: refreshEvolutionQr

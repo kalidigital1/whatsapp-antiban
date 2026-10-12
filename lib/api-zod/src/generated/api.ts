@@ -123,6 +123,14 @@ export const ConnectEvolutionWhatsAppResponse = zod.object({
 
 
 /**
+ * @summary Disconnect the Evolution API instance from this inbox
+ */
+export const DisconnectEvolutionWhatsAppResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
  * @summary Load a WhatsApp profile picture through the connected QR session
  */
 export const getEvolutionProfilePictureQueryNumberMax = 128;
@@ -134,14 +142,6 @@ export const GetEvolutionProfilePictureQueryParams = zod.object({
 })
 
 export const GetEvolutionProfilePictureResponse = zod.unknown()
-
-
-/**
- * @summary Disconnect the Evolution API instance from this inbox
- */
-export const DisconnectEvolutionWhatsAppResponse = zod.object({
-  "success": zod.boolean()
-})
 
 
 /**
