@@ -35,17 +35,18 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
 
 3. Configure as variáveis no Heroku Config Vars:
 
-   - `DATABASE_URL`: fornecida pelo Heroku Postgres.
+   - `DATABASE_URL`: fornecida pelo Heroku Postgres, se esse add-on for usado.
+   - `EXTERNAL_DATABASE_URL`: opcional; use para conectar uma NeonDB ou outro PostgreSQL externo. Ela tem prioridade sobre `DATABASE_URL`.
    - `SESSION_SECRET`: valor aleatório longo para assinar as sessões.
    - `APP_LOGIN_PASSWORD`: senha do login da aplicação.
    - `WHATSAPP_WEBHOOK_VERIFY_TOKEN`: token escolhido no painel da Meta.
    - `WHATSAPP_GRAPH_VERSION`: opcional; o padrão do projeto é `v23.0`.
    - `WHATSAPP_ESTIMATED_COST_PER_MESSAGE`: opcional.
    - `WHATSAPP_ESTIMATED_COST_CURRENCY`: opcional; o padrão é `BRL`.
-    - `EVOLUTION_API_URL`: URL base do serviço usado para conectar pelo QR Code.
-    - `EVOLUTION_API_KEY`: chave desse serviço, mantida somente nas Config Vars.
+   - `EVOLUTION_API_URL`: URL base do serviço usado para conectar pelo QR Code.
+   - `EVOLUTION_API_KEY`: chave desse serviço, mantida somente nas Config Vars.
 
-    Os dados da conta WhatsApp conectada são configurados pela tela de configurações e persistidos no banco. Os valores guardados nos Secrets do Replit não são copiados para o Heroku; configure-os novamente nas Config Vars do app.
+   Os dados da conta WhatsApp conectada são configurados pela tela de configurações e persistidos no banco. Os valores guardados nos Secrets do Replit não são copiados para o Heroku; configure-os novamente nas Config Vars do app. Não substitua a `DATABASE_URL` gerenciada pelo Replit para apontar à Neon.
 
 4. O Heroku instala a versão de pnpm declarada em `packageManager`, executa o build pelo `heroku-postbuild` e roda o `release` do `Procfile` para aplicar o schema do banco antes de iniciar o dyno web. O `drizzle-kit` precisa permanecer disponível nas dependências de produção para essa etapa.
 5. No painel da Meta, configure o callback para:
