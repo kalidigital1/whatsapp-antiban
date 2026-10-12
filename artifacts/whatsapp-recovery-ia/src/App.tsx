@@ -1029,6 +1029,7 @@ function ChatPanel({
   connected,
   evolutionMode,
   onBack,
+  onCloseConversation,
   onSettings,
   onDeleteConversation,
   onArchive,
@@ -1038,6 +1039,7 @@ function ChatPanel({
   connected: boolean;
   evolutionMode: boolean;
   onBack: () => void;
+  onCloseConversation: () => void;
   onSettings: () => void;
   onDeleteConversation: () => void;
   onArchive: () => void;
@@ -1230,50 +1232,23 @@ function ChatPanel({
           <div className="relative">
             <button type="button" className="action-btn" onClick={() => setMenuOpen((open) => !open)} data-testid="button-chat-menu" aria-label="Mais opções"><MoreVertical size={20} /></button>
             {menuOpen && (
-              <div className="absolute right-0 top-11 z-10 w-72 max-w-[85vw] rounded-lg border border-[#4b514e] bg-[#272b29] p-2 shadow-2xl" data-testid="menu-chat-options">
-                 <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserRound size={14} /> Dados do contato</button>
-                <div className="border-t border-[#404643] px-2 pb-1 pt-2 text-[11px] text-[#eef3ef]">{conversation.conversationType === 'group' ? 'Grupo do WhatsApp' : chatPhoneNumber || 'Número não disponível'}</div>
-                <div className="mt-1 border-t border-[#404643] px-2 pb-2 pt-2">
-                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-[#d6e1da]"><Tag size={13} /> Etiquetas</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(conversation.labels ?? []).map((label) => (
-                      <span key={label} className="inline-flex items-center gap-1 rounded-full border border-[#46544b] bg-[#222925] px-2 py-1 text-[10px] text-[#c0d2c5]">
-                        {label}
-                        <button type="button" className="text-[#9aa79f] hover:text-white" aria-label={`Remover etiqueta ${label}`} onClick={() => updateConversationSettings((conversation.labels ?? []).filter((item) => item !== label))}><X size={11} /></button>
-                      </span>
-                    ))}
-                    {(conversation.labels ?? []).length === 0 && <span className="text-[10px] text-[#87938e]">Sem etiquetas</span>}
-                  </div>
-                  <form className="mt-2 flex gap-1.5" onSubmit={addConversationLabel}>
-                    <input
-                      className="min-w-0 flex-1 rounded-md border border-[#414945] bg-[#1d211f] px-2 py-1.5 text-[11px] text-[#e5ece8] outline-none focus:border-[#71a881]"
-                      value={labelDraft}
-                      onChange={(event) => setLabelDraft(event.target.value)}
-                      maxLength={32}
-                      placeholder="Nova etiqueta"
-                      aria-label="Nova etiqueta"
-                      disabled={updateMetadata.isPending}
-                    />
-                    <button type="submit" className="rounded-md px-2 text-[#a9d7b6] hover:bg-white/5" aria-label="Adicionar etiqueta" disabled={!labelDraft.trim() || updateMetadata.isPending}><Plus size={15} /></button>
-                  </form>
-                  {metadataError && <p className="mt-1 text-[10px] text-[#efa8a0]" role="alert">{metadataError}</p>}
-                </div>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]"
-                  disabled={updateMetadata.isPending}
-                  onClick={() => updateConversationSettings(
-                    conversation.labels ?? [],
-                    Boolean(conversation.archivedAt),
-                    !conversation.isPinned,
-                    () => setMenuOpen(false),
-                  )}
-                >
-                  <Pin size={14} /> {conversation.isPinned ? 'Desafixar conversa' : 'Fixar conversa'}
+              <div
+                className="absolute right-0 top-11 z-20 w-80 max-w-[88vw] overflow-hidden rounded-[14px] border border-[#48514c] bg-[#111512]/95 p-1.5 text-[#e9eeeb] shadow-2xl backdrop-blur-xl"
+                data-testid="menu-chat-options"
+                role="menu"
+                aria-label="Ações da conversa"
+              >
+                <button type="button" role="menuitem" className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-white/[0.07]" onClick={() => { setMenuOpen(false); onCloseConversation(); }}>
+                  <X size={18} className="shrink-0 text-[#c3cbc6]" /> Fechar conversa
                 </button>
+                <button type="button" role="menuitem" className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-white/[0.07]" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}>
+                  <UserRound size={18} className="shrink-0 text-[#c3cbc6]" /> {conversation.conversationType === 'group' ? 'Dados do grupo' : 'Dados do contato'}
+                </button>
+                <div className="mx-2 my-1 border-t border-white/10" />
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#c0cac4] hover:bg-[#303533]"
+                  role="menuitem"
+                  className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-white/[0.07] disabled:opacity-50"
                   disabled={updateMetadata.isPending}
                   onClick={() => updateConversationSettings(
                     conversation.labels ?? [],
@@ -1282,9 +1257,52 @@ function ChatPanel({
                     () => { setMenuOpen(false); onArchive(); },
                   )}
                 >
-                  <Archive size={14} /> {conversation.archivedAt ? 'Desarquivar conversa' : 'Arquivar conversa'}
+                  <Archive size={18} className="shrink-0 text-[#c3cbc6]" /> {conversation.archivedAt ? 'Desarquivar' : 'Arquivar'}
                 </button>
-                  <button type="button" className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-[#efaaa2] hover:bg-[#432725]" onClick={() => { setMenuOpen(false); onDeleteConversation(); }} data-testid="button-delete-conversation"><Trash2 size={14} /> Apagar conversa da inbox</button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-white/[0.07] disabled:opacity-50"
+                  disabled={updateMetadata.isPending}
+                  onClick={() => updateConversationSettings(
+                    conversation.labels ?? [],
+                    Boolean(conversation.archivedAt),
+                    !conversation.isPinned,
+                    () => setMenuOpen(false),
+                  )}
+                >
+                  <Pin size={18} className="shrink-0 text-[#c3cbc6]" /> {conversation.isPinned ? 'Desafixar' : 'Fixar'}
+                </button>
+                <div className="mx-2 my-1 border-t border-white/10" />
+                <div className="px-3 py-2">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#b8c3bc]"><Tag size={15} /> Etiquetas</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(conversation.labels ?? []).map((label) => (
+                      <span key={label} className="inline-flex items-center gap-1 rounded-full border border-[#46544b] bg-[#222925] px-2 py-1 text-[10px] text-[#c0d2c5]">
+                        {label}
+                        <button type="button" className="text-[#9aa79f] hover:text-white" aria-label={`Remover etiqueta ${label}`} onClick={() => updateConversationSettings((conversation.labels ?? []).filter((item) => item !== label))}><X size={11} /></button>
+                      </span>
+                    ))}
+                    {(conversation.labels ?? []).length === 0 && <span className="text-[11px] text-[#87938e]">Nenhuma etiqueta</span>}
+                  </div>
+                  <form className="mt-2 flex gap-1.5" onSubmit={addConversationLabel}>
+                    <input
+                      className="min-w-0 flex-1 rounded-md border border-[#414945] bg-[#1d211f] px-2 py-1.5 text-xs text-[#e5ece8] outline-none focus:border-[#71a881]"
+                      value={labelDraft}
+                      onChange={(event) => setLabelDraft(event.target.value)}
+                      maxLength={32}
+                      placeholder="Adicionar etiqueta"
+                      aria-label="Adicionar etiqueta"
+                      disabled={updateMetadata.isPending}
+                    />
+                    <button type="submit" className="rounded-md px-2 text-[#a9d7b6] hover:bg-white/5" aria-label="Adicionar etiqueta" disabled={!labelDraft.trim() || updateMetadata.isPending}><Plus size={16} /></button>
+                  </form>
+                  {metadataError && <p className="mt-1 text-[11px] text-[#efa8a0]" role="alert">{metadataError}</p>}
+                </div>
+                <div className="mx-2 my-1 border-t border-white/10" />
+                <button type="button" role="menuitem" className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-[#efaaa2] hover:bg-[#432725]/50" onClick={() => { setMenuOpen(false); onDeleteConversation(); }} data-testid="button-delete-conversation">
+                  <Trash2 size={18} className="shrink-0" /> Apagar conversa
+                </button>
               </div>
             )}
           </div>
@@ -2566,6 +2584,7 @@ function Home() {
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [mobileListOpen, setMobileListOpen] = useState(true);
   const [zapBanOpen, setZapBanOpen] = useState(false);
+  const [conversationManuallyClosed, setConversationManuallyClosed] = useState(false);
   const [activeSection, setActiveSection] = useState<'inbox' | 'templates' | 'dashboard' | 'contacts'>('inbox');
   const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
   const [deleteError, setDeleteError] = useState('');
@@ -2598,9 +2617,11 @@ function Home() {
 
   useEffect(() => {
     const firstActiveConversation = conversations.find((item) => !item.archivedAt);
-    if (selectedId === null && firstActiveConversation) setSelectedId(firstActiveConversation.id);
+    if (selectedId === null && firstActiveConversation && !conversationManuallyClosed) {
+      setSelectedId(firstActiveConversation.id);
+    }
     if (selectedId !== null && !conversations.some((item) => item.id === selectedId)) setSelectedId(null);
-  }, [conversations, selectedId]);
+  }, [conversations, selectedId, conversationManuallyClosed]);
 
   const confirmDeleteConversation = () => {
     if (!conversationToDelete || deleteConversation.isPending) return;
@@ -2641,9 +2662,9 @@ function Home() {
               ? <ContactsWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} />
               : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} profilePicturesEnabled={evolutionMode} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setConversationManuallyClosed(false); setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} profilePicturesEnabled={evolutionMode} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
-             <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'API oficial da Meta'} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onArchive={() => { setSelectedId(null); setMobileListOpen(true); }} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
+              <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'API oficial da Meta'} onBack={() => setMobileListOpen(true)} onCloseConversation={() => { setConversationManuallyClosed(true); setSelectedId(null); setMobileListOpen(true); }} onSettings={() => setSettingsOpen(true)} onArchive={() => { setSelectedId(null); setMobileListOpen(true); }} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>
         )}
       </div>
@@ -2655,7 +2676,7 @@ function Home() {
           setSettingsOpen(false);
         }}
       />}
-      {newConversationOpen && <NewConversationDialog onClose={() => setNewConversationOpen(false)} onCreated={(conversation) => { setNewConversationOpen(false); setSelectedId(conversation.id); setMobileListOpen(false); }} />}
+      {newConversationOpen && <NewConversationDialog onClose={() => setNewConversationOpen(false)} onCreated={(conversation) => { setNewConversationOpen(false); setConversationManuallyClosed(false); setSelectedId(conversation.id); setMobileListOpen(false); }} />}
       {conversationToDelete && <DeleteConversationDialog conversation={conversationToDelete} pending={deleteConversation.isPending} error={deleteError} onClose={() => { if (!deleteConversation.isPending) { setConversationToDelete(null); setDeleteError(''); } }} onConfirm={confirmDeleteConversation} />}
       {zapBanOpen && <SavedReplyHighlights conversationId={null} disabled manageOnly onClose={() => setZapBanOpen(false)} />}
     </main>
