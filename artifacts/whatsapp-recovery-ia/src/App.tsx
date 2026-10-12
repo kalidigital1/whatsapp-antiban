@@ -400,24 +400,26 @@ function ConnectedProfile({ connection, connectionLabel, onSettings, canEditProf
               {name}
               {connection?.connected && <img className="verified-badge" src={verifiedBadgePath} alt="Meta Verified" />}
             </strong>
-            {canEditProfileName && connection?.connected && (
-              <button
-                type="button"
-                className="profile-name-edit-button"
-                onClick={() => { setNameDraft(name); setNameFeedback(null); setEditingName(true); }}
-                aria-label="Editar nome do perfil do WhatsApp"
-                title="Editar nome do perfil"
-                data-testid="button-edit-connected-profile-name"
-              >
-                <Pencil size={12} />
-              </button>
-            )}
           </div>
         )}
         <p data-testid="text-connected-phone">{subtitle}</p>
         {nameFeedback && <small className={`profile-name-feedback ${nameFeedback.error ? 'is-error' : ''}`} role={nameFeedback.error ? 'alert' : 'status'}>{nameFeedback.text}</small>}
       </div>
-      <button type="button" className="action-btn profile-action" onClick={onSettings} aria-label="Abrir perfil e configurações" data-testid="button-open-profile"><Settings size={18} /></button>
+      <div className="profile-card-actions">
+        {canEditProfileName && connection?.connected && !editingName && (
+          <button
+            type="button"
+            className="profile-name-edit-button"
+            onClick={() => { setNameDraft(name); setNameFeedback(null); setEditingName(true); }}
+            aria-label="Editar nome do perfil do WhatsApp"
+            title="Editar nome do perfil"
+            data-testid="button-edit-connected-profile-name"
+          >
+            <Pencil size={12} />
+          </button>
+        )}
+        <button type="button" className="action-btn profile-action" onClick={onSettings} aria-label="Abrir perfil e configurações" data-testid="button-open-profile"><Settings size={18} /></button>
+      </div>
     </div>
   );
 }

@@ -353,7 +353,9 @@ function safeWhatsAppPictureUrl(value: unknown): string | null {
 
 function phoneNumberFromJid(value: unknown): string | null {
   const identifier = stringValue(value).trim();
-  const number = identifier.split("@")[0];
+  const [user, domain] = identifier.split("@", 2);
+  if (domain?.toLowerCase() === "lid") return null;
+  const number = user.split(":")[0].replace(/^\+/, "");
   return /^\d{8,15}$/.test(number) ? number : null;
 }
 
@@ -862,7 +864,14 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
         instance.profileName,
         instance.profile_name,
         instance.pushName,
+        instance.push_name,
+        instance.notifyName,
+        instance.notify_name,
         matchedRecord?.profileName,
+        matchedRecord?.pushName,
+        matchedRecord?.push_name,
+        matchedRecord?.notifyName,
+        matchedRecord?.notify_name,
       );
       if (profileName) session.profileName = profileName;
 
@@ -871,6 +880,8 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
         instance.owner,
         instance.wuid,
         matchedRecord?.ownerJid,
+        matchedRecord?.owner,
+        matchedRecord?.wuid,
       ));
       if (phoneNumber) session.phoneNumber = phoneNumber;
     } catch (error) {
@@ -966,14 +977,28 @@ async function refreshEvolutionSession(
     instance.ownerJid,
     instance.owner,
     instance.wuid,
+    stateBody.ownerJid,
+    stateBody.owner,
     stateBody.wuid,
+    stateData.ownerJid,
+    stateData.owner,
+    stateData.wuid,
   )) || session.phoneNumber;
   session.profileName = firstStringValue(
     instance.profileName,
     instance.profile_name,
     instance.pushName,
+    instance.push_name,
+    instance.notifyName,
+    instance.notify_name,
     stateBody.profileName,
+    stateBody.profile_name,
+    stateBody.pushName,
+    stateBody.push_name,
     stateData.profileName,
+    stateData.profile_name,
+    stateData.pushName,
+    stateData.push_name,
   ) || session.profileName;
   if (session.connected) {
     session.qrCode = null;
@@ -987,10 +1012,14 @@ async function refreshEvolutionSession(
     );
     session.qrCode = evolutionQrCode(qrBody);
     const qrInstance = asRecord(qrBody.instance);
-    session.phoneNumber =
-      stringValue(qrInstance.ownerJid).split("@")[0]
-      || stringValue(qrInstance.owner)
-      || session.phoneNumber;
+    session.phoneNumber = phoneNumberFromJid(firstStringValue(
+      qrInstance.ownerJid,
+      qrInstance.owner,
+      qrInstance.wuid,
+      qrBody.ownerJid,
+      qrBody.owner,
+      qrBody.wuid,
+    )) || session.phoneNumber;
   }
 }
 
@@ -4076,10 +4105,16 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
       session.phoneNumber = phoneNumberFromJid(firstStringValue(
         update.wuid,
         update.ownerJid,
+        update.owner,
         updateData.wuid,
         updateData.ownerJid,
+        updateData.owner,
         updateInstance.ownerJid,
         updateInstance.owner,
+        updateInstance.wuid,
+        body.wuid,
+        body.ownerJid,
+        body.owner,
       )) || session.phoneNumber;
       const qr = evolutionQrCode(update);
       if (qr) session.qrCode = qr;
