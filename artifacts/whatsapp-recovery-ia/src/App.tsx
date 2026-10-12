@@ -508,9 +508,19 @@ function Sidebar({
         )}
         {!loading && !error && filtered.length === 0 && (
           <div className="px-7 py-14 text-center" data-testid="state-conversations-empty">
-            <Inbox className="mx-auto mb-3 text-[#87938e]" size={30} strokeWidth={1.4} />
-            <p className="text-sm font-medium text-[#e3e9e6]">{search ? 'Nenhuma conversa encontrada' : 'Sua caixa está vazia'}</p>
-            <p className="mt-1 text-xs leading-relaxed text-[#89958f]">{search ? 'Tente buscar por outro nome ou telefone.' : 'Novas mensagens recebidas aparecerão aqui.'}</p>
+            {connected || search
+              ? <Inbox className="mx-auto mb-3 text-[#87938e]" size={30} strokeWidth={1.4} />
+              : <Wifi className="mx-auto mb-3 text-[#75cf95]" size={28} strokeWidth={1.6} />}
+            <p className="text-sm font-medium text-[#e3e9e6]">
+              {search ? 'Nenhuma conversa encontrada' : connected ? 'Sua caixa está vazia' : 'Conecte seu WhatsApp'}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-[#89958f]">
+              {search
+                ? 'Tente buscar por outro nome ou telefone.'
+                : connected
+                  ? 'Novas mensagens recebidas aparecerão aqui.'
+                  : 'Escolha API Oficial ou QR Code para carregar suas conversas.'}
+            </p>
           </div>
         )}
         {!loading && filtered.map((conversation) => (
@@ -546,7 +556,7 @@ function Sidebar({
       <footer className="border-t border-[#292e2c] px-5 py-3">
         <button type="button" className="flex w-full items-center gap-2 text-left text-[11px] text-[#89958f] hover:text-[#eaf1ed]" onClick={onSettings} data-testid="button-sidebar-connection">
           <Wifi size={14} className={connected ? 'text-[#48c976]' : 'text-[#dfb76d]'} />
-          {connected ? connectionLabel : 'Configure sua conexão'}
+          {connected ? connectionLabel : 'Conectar WhatsApp'}
           <span className="ml-auto">›</span>
         </button>
       </footer>
@@ -554,7 +564,7 @@ function Sidebar({
   );
 }
 
-function ChatEmpty({ connected, onSettings, onOpenConversations }: { connected: boolean; onSettings: () => void; onOpenConversations: () => void }) {
+function ChatEmpty({ connected, connectionLabel, onSettings, onOpenConversations }: { connected: boolean; connectionLabel: string; onSettings: () => void; onOpenConversations: () => void }) {
   return (
     <div className="empty-chat" data-testid="state-chat-empty">
       <div className="empty-chat-card rise-in">
@@ -562,9 +572,27 @@ function ChatEmpty({ connected, onSettings, onOpenConversations }: { connected: 
           <ArrowLeft size={16} /> Ver conversas
         </button>
         <img className="empty-chat-logo" src="/assets/antiban-logo-white.png" alt="Antiban" />
-        <p>Selecione uma conversa à esquerda ou inicie uma nova conversa para responder aos seus clientes.</p>
-        {!connected && <button type="button" className="btn-primary mt-6" onClick={onSettings} data-testid="button-empty-connect"><Settings size={16} /> Configurar conexão</button>}
-        <div className="mt-7 flex items-center justify-center gap-2 text-[10px] uppercase tracking-[.12em] text-[#7f8d87]"><ShieldCheck size={14} /> API oficial da Meta</div>
+        {connected ? (
+          <>
+            <p>Selecione uma conversa à esquerda ou inicie uma nova conversa para responder aos seus clientes.</p>
+            <div className="mt-7 flex items-center justify-center gap-2 text-[10px] uppercase tracking-[.12em] text-[#7f8d87]">
+              <ShieldCheck size={14} /> {connectionLabel}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="empty-chat-connection-badge"><Wifi size={14} /> CONEXÃO NECESSÁRIA</div>
+            <h2 className="empty-chat-title">Conecte seu WhatsApp</h2>
+            <p>Escolha como conectar e vincule seu número para carregar as conversas.</p>
+            <div className="empty-chat-steps">
+              <div className="empty-chat-step"><span>01</span><p>Escolha <strong>API Oficial</strong> ou <strong>QR Code</strong></p></div>
+              <div className="empty-chat-step"><span>02</span><p>Conecte o número para receber mensagens</p></div>
+            </div>
+            <button type="button" className="btn-primary mt-5" onClick={onSettings} data-testid="button-empty-connect">
+              <Settings size={16} /> Configurar conexão
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -845,6 +873,7 @@ function ChatPanel({
   onBack,
   onSettings,
   onDeleteConversation,
+  connectionLabel,
 }: {
   conversation: Conversation | undefined;
   connected: boolean;
@@ -852,6 +881,7 @@ function ChatPanel({
   onBack: () => void;
   onSettings: () => void;
   onDeleteConversation: () => void;
+  connectionLabel: string;
 }) {
   const queryClient = useQueryClient();
   const [content, setContent] = useState('');
@@ -979,7 +1009,7 @@ function ChatPanel({
     sendMessage.mutate({ conversationId: conversation.id, data: { content: messageContent } }, { onSuccess: onTextSuccess, onError });
   };
 
-  if (!conversation) return <ChatEmpty connected={connected} onSettings={onSettings} onOpenConversations={onBack} />;
+  if (!conversation) return <ChatEmpty connected={connected} connectionLabel={connectionLabel} onSettings={onSettings} onOpenConversations={onBack} />;
 
   return (
     <section className="chat-area" data-testid="panel-chat">
@@ -2352,7 +2382,7 @@ function Home() {
           <>
             <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} profilePicturesEnabled={evolutionMode} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
-            <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
+            <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'API oficial da Meta'} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>
         )}
       </div>
