@@ -205,8 +205,9 @@ export function SavedReplyHighlights({
           },
         });
       }
-      refreshSavedReplies();
+      await queryClient.invalidateQueries({ queryKey: getListSavedRepliesQueryKey() });
       resetForm();
+      setDialogOpen(false);
     } catch (saveError) {
       setError(displayError(saveError));
     } finally {
