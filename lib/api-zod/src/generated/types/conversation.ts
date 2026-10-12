@@ -15,6 +15,8 @@ export interface Conversation {
   /** @nullable */
   remoteJid: string | null;
   contact: Contact;
+  /** @nullable */
+  profilePictureUrl: string | null;
   lastMessage: ChatMessage;
   unreadCount: number;
   updatedAt: string;

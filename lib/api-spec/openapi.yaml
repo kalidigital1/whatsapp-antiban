@@ -107,6 +107,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /evolution/profile-picture:
+    get:
+      operationId: getEvolutionProfilePicture
+      tags: [whatsapp]
+      summary: Load a WhatsApp profile picture through the connected QR session
+      parameters:
+        - name: number
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        "200":
+          description: Profile picture image
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: No profile picture is available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: QR Code connection is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "400":
+          description: Invalid WhatsApp profile identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: The profile picture could not be loaded from the provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     delete:
       operationId: disconnectEvolutionWhatsApp
       tags: [whatsapp]
@@ -1090,13 +1134,15 @@ components:
           type: ["string", "null"]
         contact:
           $ref: "#/components/schemas/Contact"
+        profilePictureUrl:
+          type: ["string", "null"]
         lastMessage:
           $ref: "#/components/schemas/ChatMessage"
         unreadCount:
           type: integer
         updatedAt:
           type: string
-      required: [id, conversationType, remoteJid, contact, lastMessage, unreadCount, updatedAt]
+      required: [id, conversationType, remoteJid, contact, profilePictureUrl, lastMessage, unreadCount, updatedAt]
     ChatMessage:
       type: object
       properties:

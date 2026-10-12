@@ -123,6 +123,20 @@ export const ConnectEvolutionWhatsAppResponse = zod.object({
 
 
 /**
+ * @summary Load a WhatsApp profile picture through the connected QR session
+ */
+export const getEvolutionProfilePictureQueryNumberMax = 128;
+
+
+
+export const GetEvolutionProfilePictureQueryParams = zod.object({
+  "number": zod.coerce.string().max(getEvolutionProfilePictureQueryNumberMax).optional()
+})
+
+export const GetEvolutionProfilePictureResponse = zod.unknown()
+
+
+/**
  * @summary Disconnect the Evolution API instance from this inbox
  */
 export const DisconnectEvolutionWhatsAppResponse = zod.object({
@@ -184,6 +198,7 @@ export const ListConversationsResponseItem = zod.object({
   "name": zod.string(),
   "phoneNumber": zod.string()
 }),
+  "profilePictureUrl": zod.string().nullable(),
   "lastMessage": zod.object({
   "id": zod.number().int(),
   "direction": zod.enum(['inbound', 'outbound']),
@@ -498,6 +513,7 @@ export const StartConversationResponse = zod.object({
   "name": zod.string(),
   "phoneNumber": zod.string()
 }),
+  "profilePictureUrl": zod.string().nullable(),
   "lastMessage": zod.object({
   "id": zod.number().int(),
   "direction": zod.enum(['inbound', 'outbound']),

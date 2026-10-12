@@ -306,6 +306,8 @@ export interface Conversation {
   /** @nullable */
   remoteJid: string | null;
   contact: Contact;
+  /** @nullable */
+  profilePictureUrl: string | null;
   lastMessage: ChatMessage;
   unreadCount: number;
   updatedAt: string;
@@ -538,6 +540,13 @@ export interface TemplateDispatchResult {
   currency: string;
   results: TemplateDispatchRecipient[];
 }
+
+export type GetEvolutionProfilePictureParams = {
+/**
+ * @maxLength 128
+ */
+number?: string;
+};
 
 export type GetDashboardReportParams = {
 period: GetDashboardReportPeriod;

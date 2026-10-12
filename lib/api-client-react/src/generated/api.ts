@@ -36,6 +36,7 @@ import type {
   EvolutionProfileNameInput,
   ExportDashboardReportCsvParams,
   GetDashboardReportParams,
+  GetEvolutionProfilePictureParams,
   HealthStatus,
   MediaInput,
   MessageInput,
@@ -562,12 +563,96 @@ export const useConnectEvolutionWhatsApp = <TError = ErrorType<ErrorResponse>,
       return useMutation(getConnectEvolutionWhatsAppMutationOptions(options));
     }
 
+export const getGetEvolutionProfilePictureUrl = (params?: GetEvolutionProfilePictureParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/evolution/profile-picture?${stringifiedParams}` : `/api/evolution/profile-picture`
+}
+
+/**
+ * @summary Load a WhatsApp profile picture through the connected QR session
+ */
+export const getEvolutionProfilePicture = async (params?: GetEvolutionProfilePictureParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getGetEvolutionProfilePictureUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEvolutionProfilePictureQueryKey = (params?: GetEvolutionProfilePictureParams,) => {
+    return [
+    `/api/evolution/profile-picture`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetEvolutionProfilePictureQueryOptions = <TData = Awaited<ReturnType<typeof getEvolutionProfilePicture>>, TError = ErrorType<ErrorResponse>>(params?: GetEvolutionProfilePictureParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEvolutionProfilePicture>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEvolutionProfilePictureQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEvolutionProfilePicture>>> = ({ signal }) => getEvolutionProfilePicture(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEvolutionProfilePicture>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEvolutionProfilePictureQueryResult = NonNullable<Awaited<ReturnType<typeof getEvolutionProfilePicture>>>
+export type GetEvolutionProfilePictureQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Load a WhatsApp profile picture through the connected QR session
+ */
+
+export function useGetEvolutionProfilePicture<TData = Awaited<ReturnType<typeof getEvolutionProfilePicture>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetEvolutionProfilePictureParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEvolutionProfilePicture>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEvolutionProfilePictureQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getDisconnectEvolutionWhatsAppUrl = () => {
 
 
 
 
-  return `/api/evolution/connection`
+  return `/api/evolution/profile-picture`
 }
 
 /**

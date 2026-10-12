@@ -37,6 +37,7 @@ export * from './exportDashboardReportCsvParams';
 export * from './exportDashboardReportCsvPeriod';
 export * from './getDashboardReportParams';
 export * from './getDashboardReportPeriod';
+export * from './getEvolutionProfilePictureParams';
 export * from './healthStatus';
 export * from './mediaInput';
 export * from './messageInput';

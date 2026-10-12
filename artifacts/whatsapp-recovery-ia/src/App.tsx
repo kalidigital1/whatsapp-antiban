@@ -300,10 +300,14 @@ function ConversationPreviewStatus({ status }: { status: string }) {
   return <Check className="message-status-icon status-sent" size={15} strokeWidth={2.2} />;
 }
 
-function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'large' }) {
+function Avatar({ name, size = 'normal', photoUrl }: { name: string; size?: 'normal' | 'large'; photoUrl?: string | null }) {
+  const [photoUnavailable, setPhotoUnavailable] = useState(false);
+  useEffect(() => setPhotoUnavailable(false), [photoUrl]);
   return (
     <div className={`${size === 'large' ? 'chat-contact-photo' : ''} avatar`} aria-hidden="true">
-      {initials(name || 'WA')}
+      {photoUrl && !photoUnavailable
+        ? <img src={photoUrl} alt="" loading="lazy" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
+        : initials(name || 'WA')}
     </div>
   );
 }
@@ -425,6 +429,7 @@ function Sidebar({
   onCloseMobile,
   connectionLabel,
   canEditProfileName,
+  profilePicturesEnabled,
 }: {
   conversations: Conversation[];
   selectedId: number | null;
@@ -441,6 +446,7 @@ function Sidebar({
   onCloseMobile: () => void;
   connectionLabel: string;
   canEditProfileName: boolean;
+  profilePicturesEnabled: boolean;
 }) {
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
@@ -506,7 +512,7 @@ function Sidebar({
             onClick={() => { setSelectedId(conversation.id); onCloseMobile(); }}
             data-testid={`conversation-${conversation.id}`}
           >
-            <Avatar name={conversation.contact.name} />
+            <Avatar name={conversation.contact.name} photoUrl={profilePicturesEnabled ? conversation.profilePictureUrl : null} />
             <div className="conversation-row-content">
               <div className="conversation-row-name">
                 <strong>{conversation.contact.name}</strong>
@@ -2167,7 +2173,7 @@ function Home() {
               ? <ContactsWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} />
               : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} profilePicturesEnabled={evolutionMode} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
             <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} onBack={() => setMobileListOpen(true)} onSettings={() => setSettingsOpen(true)} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>

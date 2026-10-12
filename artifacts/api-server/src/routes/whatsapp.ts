@@ -54,6 +54,8 @@ const router: IRouter = Router();
 const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v23.0";
 const metaRequestTimeoutMs = 15_000;
 const profilePictureRefreshIntervalMs = 60_000;
+const profilePictureUrlCacheMs = 60_000;
+const profilePictureMaxBytes = 5 * 1024 * 1024;
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
@@ -108,6 +110,11 @@ const evolutionLidAliasCache = new Map<string, {
   expiresAt: number;
 }>();
 const evolutionLidAliasRequests = new Map<string, Promise<Map<string, string>>>();
+const evolutionProfilePictureUrlCache = new Map<string, {
+  url: string | null;
+  expiresAt: number;
+}>();
+const evolutionProfilePictureUrlRequests = new Map<string, Promise<string | null>>();
 
 router.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
@@ -197,6 +204,32 @@ function decryptEvolutionConfig(value: string) {
   ]).toString("utf8");
 }
 
+function evolutionConfigPayload(session: EvolutionSession) {
+  return JSON.stringify({
+    serverUrl: session.serverUrl,
+    apiKey: session.apiKey,
+    instanceName: session.instanceName,
+    phoneNumber: session.phoneNumber,
+    profileName: session.profileName,
+    profilePictureUrl: session.profilePictureUrl ?? null,
+  });
+}
+
+async function persistEvolutionSession(session: EvolutionSession): Promise<void> {
+  await db
+    .update(appSettings)
+    .set({
+      whatsappEvolutionConfigEncrypted: encryptEvolutionConfig(evolutionConfigPayload(session)),
+      updatedAt: new Date(),
+    })
+    .where(eq(appSettings.id, 1));
+}
+
+function evolutionProfilePicturePath(number?: string | null): string {
+  const query = number ? `?number=${encodeURIComponent(number)}` : "";
+  return `/api/evolution/profile-picture${query}`;
+}
+
 async function restoreActiveConnection() {
   if (connectionsRestored) return;
   if (connectionRestorePromise) return connectionRestorePromise;
@@ -236,17 +269,21 @@ async function restoreActiveConnection() {
         }
       }
       if (!activeEvolutionSession && settings.whatsappEvolutionConfigEncrypted) {
-        const config = JSON.parse(decryptEvolutionConfig(settings.whatsappEvolutionConfigEncrypted)) as EvolutionConfig;
+        const storedConfig = asRecord(JSON.parse(decryptEvolutionConfig(settings.whatsappEvolutionConfigEncrypted)));
         activeEvolutionSession = {
-          ...config,
+          serverUrl: stringValue(storedConfig.serverUrl),
+          apiKey: stringValue(storedConfig.apiKey),
+          instanceName: stringValue(storedConfig.instanceName),
           connected: false,
           state: "connecting",
-          phoneNumber: null,
-          profileName: null,
+          phoneNumber: phoneNumberFromJid(storedConfig.phoneNumber),
+          profileName: firstStringValue(storedConfig.profileName),
+          profilePictureUrl: safeWhatsAppPictureUrl(storedConfig.profilePictureUrl),
           qrCode: null,
         };
         try {
           await refreshEvolutionSession(activeEvolutionSession, false);
+          await persistEvolutionSession(activeEvolutionSession);
         } catch (error) {
           logger.warn({ err: error }, "Could not refresh Evolution API connection state");
         }
@@ -290,6 +327,22 @@ function safeHttpUrl(value: unknown): string | null {
   try {
     const url = new URL(candidate);
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeWhatsAppPictureUrl(value: unknown): string | null {
+  const candidate = safeHttpUrl(value);
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    const hostname = url.hostname.toLowerCase();
+    const trustedDomains = ["whatsapp.net", "fbcdn.net", "fbsbx.com"];
+    return trustedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+      ? url.toString()
+      : null;
   } catch {
     return null;
   }
@@ -669,6 +722,62 @@ function evolutionQrCode(body: Record<string, unknown>): string | null {
   return value.startsWith("data:image/") ? value : `data:image/png;base64,${value}`;
 }
 
+function evolutionPictureUrlFromResponse(response: unknown): string | null {
+  const record = asRecord(response);
+  const data = asRecord(record.data);
+  const profile = asRecord(record.profile);
+  return safeWhatsAppPictureUrl(firstStringValue(
+    record.profilePictureUrl,
+    record.profile_picture_url,
+    record.profilePicUrl,
+    record.pictureUrl,
+    record.picture,
+    record.url,
+    data.profilePictureUrl,
+    data.profile_picture_url,
+    data.profilePicUrl,
+    data.pictureUrl,
+    data.picture,
+    data.url,
+    profile.profilePictureUrl,
+    profile.profile_picture_url,
+    profile.profilePicUrl,
+    profile.pictureUrl,
+    profile.picture,
+    profile.url,
+  ));
+}
+
+async function getEvolutionPictureUrl(session: EvolutionSession, whatsappId: string): Promise<string | null> {
+  const cacheKey = `${session.instanceName}:${whatsappId}`;
+  const cached = evolutionProfilePictureUrlCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+  const pending = evolutionProfilePictureUrlRequests.get(cacheKey);
+  if (pending) return pending;
+
+  const request = (async () => {
+    const response = await evolutionRequest<unknown>(
+      session,
+      `/chat/fetchProfilePictureUrl/${encodeURIComponent(session.instanceName)}`,
+      { method: "POST", body: JSON.stringify({ number: whatsappId }) },
+    );
+    const url = evolutionPictureUrlFromResponse(response);
+    evolutionProfilePictureUrlCache.set(cacheKey, {
+      url,
+      expiresAt: Date.now() + profilePictureUrlCacheMs,
+    });
+    return url;
+  })();
+  evolutionProfilePictureUrlRequests.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    if (evolutionProfilePictureUrlRequests.get(cacheKey) === request) {
+      evolutionProfilePictureUrlRequests.delete(cacheKey);
+    }
+  }
+}
+
 async function refreshConnectedProfileMetadata(session: EvolutionSession): Promise<void> {
   const now = Date.now();
   const shouldRefreshMetadata = now - (session.profileMetadataFetchedAt ?? 0) >= 60_000;
@@ -745,35 +854,7 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
   if (now - (session.profilePictureFetchedAt ?? 0) >= profilePictureRefreshIntervalMs) {
     session.profilePictureFetchedAt = now;
     try {
-      const response = await evolutionRequest<unknown>(
-        session,
-        `/chat/fetchProfilePictureUrl/${encodedInstance}`,
-        { method: "POST", body: JSON.stringify({ number: ownWhatsAppId }) },
-      );
-      const record = asRecord(response);
-      const data = asRecord(record.data);
-      const profile = asRecord(record.profile);
-      const pictureUrl = safeHttpUrl(firstStringValue(
-        record.profilePictureUrl,
-        record.profile_picture_url,
-        record.profilePicUrl,
-        record.pictureUrl,
-        record.picture,
-        record.url,
-        data.profilePictureUrl,
-        data.profile_picture_url,
-        data.profilePicUrl,
-        data.pictureUrl,
-        data.picture,
-        data.url,
-        profile.profilePictureUrl,
-        profile.profile_picture_url,
-        profile.profilePicUrl,
-        profile.pictureUrl,
-        profile.picture,
-        profile.url,
-      ));
-      session.profilePictureUrl = pictureUrl;
+      session.profilePictureUrl = await getEvolutionPictureUrl(session, ownWhatsAppId);
     } catch (error) {
       logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile photo");
     }
@@ -884,7 +965,9 @@ function evolutionConnectionResponse(session: EvolutionSession | null): Evolutio
     instanceName: session?.instanceName ?? null,
     phoneNumber: session?.phoneNumber ?? null,
     profileName: session?.profileName ?? null,
-    profilePictureUrl: session?.profilePictureUrl ?? null,
+    profilePictureUrl: session?.connected
+      ? evolutionProfilePicturePath(session.phoneNumber)
+      : null,
     qrCode: session?.qrCode ?? null,
     defaultServerUrlConfigured: Boolean(process.env.EVOLUTION_API_URL?.trim()),
     defaultApiKeyConfigured: Boolean(process.env.EVOLUTION_API_KEY?.trim()),
@@ -1402,6 +1485,9 @@ async function conversationResponse(
       name: contactDisplayName(contact),
       phoneNumber: contact.phoneNumber,
     },
+    profilePictureUrl: activeProvider === "evolution" && activeEvolutionSession?.connected
+      ? evolutionProfilePicturePath(conversation.remoteJid || contact.phoneNumber)
+      : null,
     lastMessage: lastMessage ? messageResponse(lastMessage, conversation.id) : fallback,
     unreadCount: conversation.unreadCount,
     updatedAt: conversation.updatedAt.toISOString(),
@@ -2354,6 +2440,9 @@ router.get("/connection", (req, res) => {
 
 router.get("/evolution/connection", async (req, res) => {
   const session = activeEvolutionSession;
+  const previousMetadata = session
+    ? JSON.stringify([session.phoneNumber, session.profileName, session.profilePictureUrl ?? null])
+    : null;
   if (session) {
     try {
       await ensureEvolutionWebhook(session, req);
@@ -2367,8 +2456,105 @@ router.get("/evolution/connection", async (req, res) => {
       session.connected = false;
       logger.warn({ err: error, instanceName: session.instanceName }, "Evolution API state check failed");
     }
+    const currentMetadata = JSON.stringify([session.phoneNumber, session.profileName, session.profilePictureUrl ?? null]);
+    if (session.connected && previousMetadata !== currentMetadata) {
+      try {
+        await persistEvolutionSession(session);
+      } catch (error) {
+        logger.warn({ err: error, instanceName: session.instanceName }, "Could not persist WhatsApp profile metadata");
+      }
+    }
   }
   res.json(evolutionConnectionResponse(session));
+});
+
+router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
+  const session = activeEvolutionSession;
+  if (activeProvider !== "evolution" || !session?.connected) {
+    res.status(503).json({ error: "A conexão via QR Code não está ativa." });
+    return;
+  }
+
+  const queryNumber = Array.isArray(req.query.number) ? req.query.number[0] : req.query.number;
+  const requestedNumber = typeof queryNumber === "string" && queryNumber.trim()
+    ? queryNumber.trim()
+    : session.phoneNumber
+      ? `${session.phoneNumber}@s.whatsapp.net`
+      : "";
+  const validNumber = /^\+?\d{7,15}$/.test(requestedNumber)
+    || /^[\w.:-]{1,80}@(s\.whatsapp\.net|c\.us|g\.us|lid)$/i.test(requestedNumber);
+  if (!validNumber) {
+    res.status(400).json({ error: "Identificador de perfil inválido." });
+    return;
+  }
+  const whatsappId = requestedNumber.includes("@")
+    ? requestedNumber
+    : `${normalizePhone(requestedNumber)}@s.whatsapp.net`;
+
+  try {
+    const pictureUrl = await getEvolutionPictureUrl(session, whatsappId);
+    if (!pictureUrl) {
+      res.status(404).json({ error: "A foto de perfil não está disponível." });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const imageResponse = await fetch(pictureUrl, {
+        signal: controller.signal,
+        redirect: "error",
+        headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/*" },
+      });
+      if (!imageResponse.ok) {
+        res.status(404).json({ error: "A foto de perfil não está disponível." });
+        return;
+      }
+      const contentType = imageResponse.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
+      const supportedImageType = ["image/jpeg", "image/png", "image/webp", "image/avif", "image/gif"].includes(contentType);
+      const contentLength = Number(imageResponse.headers.get("content-length") || 0);
+      if (!supportedImageType || contentLength > profilePictureMaxBytes) {
+        res.status(502).json({ error: "A imagem de perfil retornada não é válida." });
+        return;
+      }
+      const reader = imageResponse.body?.getReader();
+      if (!reader) {
+        res.status(502).json({ error: "A imagem de perfil retornada não é válida." });
+        return;
+      }
+      const chunks: Uint8Array[] = [];
+      let totalBytes = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        totalBytes += value.byteLength;
+        if (totalBytes > profilePictureMaxBytes) {
+          await reader.cancel();
+          res.status(502).json({ error: "A imagem de perfil retornada é muito grande." });
+          return;
+        }
+        chunks.push(value);
+      }
+      if (totalBytes === 0) {
+        res.status(502).json({ error: "A imagem de perfil retornada não é válida." });
+        return;
+      }
+      const image = Buffer.concat(chunks, totalBytes);
+      res
+        .status(200)
+        .set({
+          "Cache-Control": "private, max-age=300",
+          "Content-Type": contentType,
+          "X-Content-Type-Options": "nosniff",
+        })
+        .send(image);
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    req.log.warn({ err: error, instanceName: session.instanceName }, "Could not proxy WhatsApp profile picture");
+    res.status(502).json({ error: "Não foi possível carregar a foto do perfil." });
+  }
 });
 
 router.post("/evolution/connection", async (req, res) => {
@@ -2423,11 +2609,7 @@ router.post("/evolution/connection", async (req, res) => {
     }
     await setEvolutionWebhook(session, req);
     await refreshEvolutionSession(session, true);
-    const encryptedConfig = encryptEvolutionConfig(JSON.stringify({
-      serverUrl: session.serverUrl,
-      apiKey: session.apiKey,
-      instanceName: session.instanceName,
-    }));
+    const encryptedConfig = encryptEvolutionConfig(evolutionConfigPayload(session));
     await db
       .insert(appSettings)
       .values({
@@ -2462,6 +2644,13 @@ router.post("/evolution/connection/qr", async (_req, res) => {
   }
   try {
     await refreshEvolutionSession(activeEvolutionSession, true);
+    if (activeEvolutionSession.connected) {
+      try {
+        await persistEvolutionSession(activeEvolutionSession);
+      } catch (error) {
+        logger.warn({ err: error, instanceName: activeEvolutionSession.instanceName }, "Could not persist WhatsApp profile metadata after QR refresh");
+      }
+    }
     res.json(evolutionConnectionResponse(activeEvolutionSession));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
@@ -2499,6 +2688,11 @@ router.post("/evolution/profile-name", async (req, res): Promise<void> => {
       },
     );
     session.profileName = name;
+    try {
+      await persistEvolutionSession(session);
+    } catch (error) {
+      req.log.warn({ err: error, instanceName: session.instanceName }, "Could not persist the updated WhatsApp profile name");
+    }
     res.json(evolutionConnectionResponse(session));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 502;
@@ -2702,11 +2896,7 @@ router.get("/conversations/:conversationId/contact-profile", async (req, res): P
         ? contact.phoneNumber
         : `${normalizePhone(contact.phoneNumber)}@s.whatsapp.net`);
     const instance = encodeURIComponent(session.instanceName);
-    const pictureRequest = evolutionRequest<Record<string, unknown>>(
-      session,
-      `/chat/fetchProfilePictureUrl/${instance}`,
-      { method: "POST", body: JSON.stringify({ number: whatsappId }) },
-    );
+    const pictureRequest = getEvolutionPictureUrl(session, whatsappId);
     const profileRequest = conversation.conversationType === "group"
       ? Promise.resolve<Record<string, unknown>>({})
       : evolutionRequest<Record<string, unknown>>(
@@ -2723,9 +2913,6 @@ router.get("/conversations/:conversationId/contact-profile", async (req, res): P
       throw pictureResult.reason;
     }
 
-    const pictureRecords = pictureResult.status === "fulfilled"
-      ? [pictureResult.value, asRecord(pictureResult.value.data)]
-      : [];
     const profileRoot = profileResult.status === "fulfilled" ? profileResult.value : {};
     const profileData = asRecord(profileRoot.data);
     const records = [
@@ -2782,21 +2969,20 @@ router.get("/conversations/:conversationId/contact-profile", async (req, res): P
       }
       return null;
     };
-    const pictureUrl = firstText(
-      [...pictureRecords, ...records],
+    const fallbackPictureUrl = safeWhatsAppPictureUrl(firstText(
+      records,
       ["profilePictureUrl", "profile_picture_url", "pictureUrl", "picture", "profilePicUrl"],
-    );
-    let safePictureUrl: string | null = null;
-    if (pictureUrl) {
-      try {
-        const parsedUrl = new URL(pictureUrl);
-        if (parsedUrl.protocol === "https:" || parsedUrl.protocol === "http:") {
-          safePictureUrl = parsedUrl.toString();
-        }
-      } catch {
-        safePictureUrl = null;
-      }
+    ));
+    const pictureUrl = pictureResult.status === "fulfilled" && pictureResult.value
+      ? pictureResult.value
+      : fallbackPictureUrl;
+    if (pictureUrl && (pictureResult.status === "rejected" || !pictureResult.value)) {
+      evolutionProfilePictureUrlCache.set(`${session.instanceName}:${whatsappId}`, {
+        url: pictureUrl,
+        expiresAt: Date.now() + profilePictureUrlCacheMs,
+      });
     }
+    const safePictureUrl = pictureUrl ? evolutionProfilePicturePath(whatsappId) : null;
 
     const addressValue = records
       .map((record) => record.businessAddress ?? record.business_address ?? record.address)
@@ -3736,6 +3922,11 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
       )) || session.phoneNumber;
       const qr = evolutionQrCode(update);
       if (qr) session.qrCode = qr;
+      try {
+        await persistEvolutionSession(session);
+      } catch (error) {
+        req.log.warn({ err: error, instanceName: session.instanceName }, "Could not persist WhatsApp connection profile metadata");
+      }
     }
 
     if (["contacts.set", "contacts.upsert", "contacts.update"].includes(event)) {
