@@ -519,7 +519,7 @@ function Sidebar({
                 ? 'Tente buscar por outro nome ou telefone.'
                 : connected
                   ? 'Novas mensagens recebidas aparecerão aqui.'
-                  : 'Escolha API Oficial ou QR Code para carregar suas conversas.'}
+                  : 'Conecte seu número para carregar suas conversas.'}
             </p>
           </div>
         )}
@@ -585,8 +585,8 @@ function ChatEmpty({ connected, connectionLabel, onSettings, onOpenConversations
             <h2 className="empty-chat-title">Conecte seu WhatsApp</h2>
             <p>Escolha como conectar e vincule seu número para carregar as conversas.</p>
             <div className="empty-chat-steps">
-              <div className="empty-chat-step"><span>01</span><p>Escolha <strong>API Oficial</strong> ou <strong>QR Code</strong></p></div>
-              <div className="empty-chat-step"><span>02</span><p>Conecte o número para receber mensagens</p></div>
+              <div className="empty-chat-step"><span>01</span><p>Abra as configurações de conexão</p></div>
+              <div className="empty-chat-step"><span>02</span><p>Conclua a conexão do seu número</p></div>
             </div>
             <button type="button" className="btn-primary mt-5" onClick={onSettings} data-testid="button-empty-connect">
               <Settings size={16} /> Configurar conexão
