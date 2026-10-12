@@ -6,4 +6,4 @@
 - [Evolution parity](whatsapp-evolution-parity.md) — prioritize WhatsApp Web-like chat features supported by Evolution and state provider limitations clearly.
 - [Dashboard visual direction](dashboard-theme.md) — default to a sober light theme with neutral surfaces and muted green accents.
 - [Contact saving and history](contact-archive.md) — keep inbound Evolution contacts unsaved until explicit save; never expose or interpret LID identifiers as phone numbers.
-- [WhatsApp disconnect cleanup](qr-disconnect-cleanup.md) — remove the disconnected provider's chat history and keep contacts plus any still-active provider's history.
+- [WhatsApp disconnect cleanup](qr-disconnect-cleanup.md) — when a number is removed or replaced, keep contacts and login but clear all chats and avoid provider auto-fallback.

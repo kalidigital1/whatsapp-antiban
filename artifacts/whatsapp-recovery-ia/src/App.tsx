@@ -1441,7 +1441,7 @@ function DeleteConversationDialog({
 function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void; onGoToConversations: () => void }) {
   const queryClient = useQueryClient();
   const connectionQuery = useGetConnection({ query: { refetchInterval: 10000, queryKey: getGetConnectionQueryKey() } });
-  const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 10000, queryKey: getGetEvolutionConnectionQueryKey() } });
+  const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 4000, queryKey: getGetEvolutionConnectionQueryKey() } });
   const connection = connectionQuery.data;
   const evolutionActive = Boolean(evolutionConnectionQuery.data?.active);
   const [accessToken, setAccessToken] = useState('');
@@ -1466,7 +1466,19 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
     setFormError('');
     if (!accessToken.trim() || !businessAccountId.trim()) { setFormError('Informe o token de acesso e o ID da conta comercial.'); return; }
     connect.mutate({ data: { accessToken: accessToken.trim(), businessAccountId: businessAccountId.trim() } }, {
-      onSuccess: () => { setAccessToken(''); void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() }); },
+      onSuccess: async (updatedConnection) => {
+        setAccessToken('');
+        if (connection?.selectedPhoneNumberId !== updatedConnection.selectedPhoneNumberId || evolutionActive) {
+          queryClient.removeQueries({
+            predicate: (query) => query.queryKey.some(
+              (part) => typeof part === 'string' && /message/i.test(part),
+            ),
+          });
+          queryClient.setQueryData(getListConversationsQueryKey(), []);
+          await queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+        }
+        await queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() });
+      },
       onError: (error) => setFormError(errorText(error)),
     });
   };
@@ -2632,6 +2644,18 @@ function Home() {
       events.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (!evolutionConnection?.active || evolutionConnection.connected) return;
+    queryClient.setQueryData(getListConversationsQueryKey(), []);
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey.some(
+        (part) => typeof part === 'string' && /message/i.test(part),
+      ),
+    });
+    setSelectedId(null);
+    setMobileListOpen(true);
+  }, [evolutionConnection?.active, evolutionConnection?.connected]);
 
   useEffect(() => {
     const firstActiveConversation = conversations.find((item) => !item.archivedAt);

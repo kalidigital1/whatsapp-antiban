@@ -1219,6 +1219,14 @@ function evolutionConnectionResponse(session: EvolutionSession | null): Evolutio
   });
 }
 
+function isKnownEvolutionDisconnectedState(state: string | null): boolean {
+  const normalizedState = state?.trim().toLowerCase() ?? "";
+  return normalizedState.length > 0
+    && normalizedState !== "open"
+    && normalizedState !== "unknown"
+    && normalizedState !== "unreachable";
+}
+
 function connectionStatus(req: Request) {
   const connection = activeConnection;
   return GetConnectionResponse.parse({
@@ -3250,7 +3258,7 @@ router.get("/evolution/connection", async (req, res) => {
     if (
       activeProvider === "evolution"
       && !session.connected
-      && session.state.toLowerCase() !== "unreachable"
+      && isKnownEvolutionDisconnectedState(session.state)
     ) {
       try {
         await clearConversationHistory("all");
@@ -3462,21 +3470,34 @@ router.post("/evolution/connection", async (req, res) => {
 });
 
 router.post("/evolution/connection/qr", async (_req, res) => {
-  if (!activeEvolutionSession) {
+  const session = activeEvolutionSession;
+  if (!session) {
     res.status(400).json({ error: "Configure a conexão via QR Code antes de solicitar um novo código." });
     return;
   }
+  const previousProvider = activeProvider;
+  const shouldActivateSession = activeProvider !== "evolution" || !session.connected;
+  if (shouldActivateSession) activeProvider = "none";
   try {
-    await refreshEvolutionSession(activeEvolutionSession, true);
-    if (activeEvolutionSession.connected) {
+    await refreshEvolutionSession(session, true);
+    if (shouldActivateSession) {
+      await clearConversationHistory("all");
+      await db
+        .update(appSettings)
+        .set({ whatsappActiveProvider: "evolution", updatedAt: new Date() })
+        .where(eq(appSettings.id, 1));
+      activeProvider = "evolution";
+    }
+    if (session.connected) {
       try {
-        await persistEvolutionSession(activeEvolutionSession);
+        await persistEvolutionSession(session);
       } catch (error) {
-        logger.warn({ err: error, instanceName: activeEvolutionSession.instanceName }, "Could not persist WhatsApp profile metadata after QR refresh");
+        logger.warn({ err: error, instanceName: session.instanceName }, "Could not persist WhatsApp profile metadata after QR refresh");
       }
     }
-    res.json(evolutionConnectionResponse(activeEvolutionSession));
+    res.json(evolutionConnectionResponse(session));
   } catch (error) {
+    if (shouldActivateSession) activeProvider = previousProvider;
     const status = error instanceof MetaApiError ? error.status : 400;
     const message = error instanceof Error ? error.message : "Não foi possível atualizar o QR Code.";
     res.status(status).json({ error: message });
@@ -3533,7 +3554,7 @@ router.post("/evolution/profile-name", async (req, res): Promise<void> => {
 router.delete("/evolution/connection", async (_req, res): Promise<void> => {
   const sessionToDisconnect = activeEvolutionSession;
   const previousProvider = activeProvider;
-  const nextProvider = activeConnection ? "cloud" : "none";
+  const nextProvider = "none";
 
   // Stop new QR syncs/webhooks from repopulating history while it is cleared.
   activeEvolutionSession = null;
@@ -3617,6 +3638,7 @@ router.delete("/evolution/connection", async (_req, res): Promise<void> => {
 });
 
 router.post("/connection", async (req, res) => {
+  let previousProviderToRestore: typeof activeProvider | null = null;
   try {
     const input = ConnectWhatsAppBody.parse(req.body);
     const phoneNumbers = await loadPhoneNumbers(
@@ -3633,11 +3655,32 @@ router.post("/connection", async (req, res) => {
       (input.phoneNumberId &&
         phoneNumbers.find((phone) => phone.id === input.phoneNumberId)?.id) ??
       phoneNumbers[0].id;
+    const selectedPhoneNumber = phoneNumbers.find((phone) => phone.id === selected);
+    const currentCloudConnection = activeConnection;
+    const previousPhoneNumber = activeProvider === "cloud"
+      ? currentCloudConnection?.phoneNumbers.find(
+          (phone) => phone.id === currentCloudConnection?.selectedPhoneNumberId,
+        )?.displayPhoneNumber
+      : activeProvider === "evolution"
+        ? activeEvolutionSession?.phoneNumber
+        : null;
+    const currentDigits = previousPhoneNumber?.replace(/\D/g, "") ?? "";
+    const nextDigits = selectedPhoneNumber?.displayPhoneNumber.replace(/\D/g, "") ?? "";
+    const numberChanged = activeProvider === "cloud"
+      ? activeConnection?.selectedPhoneNumberId !== selected
+      : activeProvider === "evolution"
+        ? !currentDigits || !nextDigits || currentDigits !== nextDigits
+        : false;
 
     await subscribeWhatsAppBusinessAccount(
       input.accessToken,
       input.businessAccountId,
     );
+    if (numberChanged) {
+      previousProviderToRestore = activeProvider;
+      activeProvider = "none";
+      await clearConversationHistory("all");
+    }
 
     const encryptedAccessToken = encryptWhatsAppToken(input.accessToken);
     await db
@@ -3672,6 +3715,7 @@ router.post("/connection", async (req, res) => {
 
     res.json(connectionStatus(req));
   } catch (error) {
+    if (previousProviderToRestore) activeProvider = previousProviderToRestore;
     const status = error instanceof MetaApiError ? error.status : 400;
     const message =
       error instanceof Error
@@ -3685,7 +3729,7 @@ router.post("/connection", async (req, res) => {
 router.delete("/connection", async (_req, res) => {
   const previousConnection = activeConnection;
   const previousProvider = activeProvider;
-  const nextProvider = activeEvolutionSession?.connected ? "evolution" : "none";
+  const nextProvider = "none";
 
   activeConnection = null;
   activeProvider = nextProvider;
@@ -3693,20 +3737,21 @@ router.delete("/connection", async (_req, res) => {
     const cloudMediaPayloads = await db
       .select({ providerPayload: chatMessages.providerPayload })
       .from(chatMessages)
-      .innerJoin(conversations, eq(chatMessages.conversationId, conversations.id))
-      .where(notLike(conversations.phoneNumberId, "evolution:%"));
+      .innerJoin(conversations, eq(chatMessages.conversationId, conversations.id));
+    await Promise.all(
+      [...evolutionMessageSyncRequests.values()].map((request) =>
+        request.catch(() => undefined),
+      ),
+    );
     await db.transaction(async (tx) => {
-      const cloudConversationIds = tx
+      const allConversationIds = tx
         .select({ id: conversations.id })
-        .from(conversations)
-        .where(notLike(conversations.phoneNumberId, "evolution:%"));
+        .from(conversations);
 
       await tx
         .delete(chatMessages)
-        .where(inArray(chatMessages.conversationId, cloudConversationIds));
-      await tx
-        .delete(conversations)
-        .where(notLike(conversations.phoneNumberId, "evolution:%"));
+        .where(inArray(chatMessages.conversationId, allConversationIds));
+      await tx.delete(conversations);
       await tx
         .update(appSettings)
         .set({
@@ -3757,11 +3802,15 @@ router.get("/events", (req, res) => {
 
 router.get("/conversations", async (req, res) => {
   try {
-    if (
-      activeProvider === "none"
-      || (activeProvider === "evolution" && !activeEvolutionSession?.connected)
-    ) {
+    if (activeProvider === "none") {
       await clearConversationHistory("all");
+      res.json(ListConversationsResponse.parse([]));
+      return;
+    }
+    if (activeProvider === "evolution" && !activeEvolutionSession?.connected) {
+      if (activeEvolutionSession && isKnownEvolutionDisconnectedState(activeEvolutionSession.state)) {
+        await clearConversationHistory("all");
+      }
       res.json(ListConversationsResponse.parse([]));
       return;
     }
@@ -5247,11 +5296,19 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
     res.status(401).json({ error: "Assinatura de webhook inválida." });
     return;
   }
+  if (activeProvider !== "evolution") {
+    res.json({ success: true, ignored: true });
+    return;
+  }
 
   try {
     const body = asRecord(req.body);
     const rawEvent = stringValue(body.event) || stringValue(req.params.eventName);
     const event = rawEvent.toLowerCase().replace(/[_-]/g, ".").replace(/\.+/g, ".");
+    if (!session.connected && event !== "connection.update") {
+      res.json({ success: true, ignored: true });
+      return;
+    }
     req.log.info({ event, instanceName: session.instanceName }, "QR Code webhook received");
     const dataValue = body.data;
     const messages = evolutionEventItems(dataValue, "messages");
@@ -5707,6 +5764,10 @@ router.post("/evolution/webhook/:eventName", handleEvolutionWebhook);
 router.post("/webhook", async (req, res) => {
   try {
     const payload = ReceiveWebhookBody.parse(req.body);
+    if (activeProvider !== "cloud" || !activeConnection) {
+      res.json({ success: true, ignored: true });
+      return;
+    }
     const entries = Array.isArray(payload.entry) ? payload.entry : [];
 
     for (const entry of entries) {

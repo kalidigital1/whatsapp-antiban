@@ -3,8 +3,8 @@ name: WhatsApp disconnect cleanup
 description: Product behavior for clearing local chat history when a WhatsApp connection is disconnected.
 ---
 
-When disconnecting a WhatsApp provider, permanently remove conversations, messages, and media associated with that provider so a newly connected number starts with a clean inbox. Keep contacts and history from any provider that remains active. If no provider is active, clear leftover conversations from a disconnect that happened before this cleanup behavior existed.
+When the current WhatsApp number is disconnected or replaced, remove all conversation, message, and media history so no previous number's chats remain visible. Keep contacts and the Antiban login. Do not automatically switch to another previously configured provider; require explicit reconnection.
 
-**Why:** The user wants old chats gone when WhatsApp is removed so a different number can be connected, especially through QR, and explicitly chose to retain contacts.
+**Why:** The user repeatedly clarified that changing numbers must leave only contacts, remove chats from the screen, and keep the person logged in.
 
-**How to apply:** Warn that removal is permanent before confirming disconnection. Scope cleanup to the disconnected provider, preserve contacts and any other active provider's history, and refresh the conversation list after cleanup.
+**How to apply:** On manual disconnect or successful number/provider replacement, clear conversation rows, messages, and local media while retaining contacts and authentication. Clear the UI cache immediately and ignore webhooks from inactive providers. Hide chats during a temporary provider outage, but defer irreversible deletion until the provider confirms disconnection.
