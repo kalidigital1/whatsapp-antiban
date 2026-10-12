@@ -5,6 +5,7 @@ import {
   Archive,
   ArrowLeft,
   BarChart3,
+  Bookmark,
   Check,
   CheckCheck,
   CircleHelp,
@@ -30,7 +31,6 @@ import {
   Settings,
   LayoutDashboard,
   ShieldCheck,
-  Sparkles,
   Smartphone,
   Tag,
   Trash2,
@@ -377,7 +377,7 @@ function NavigationRail({ onSettings, onZapBan, connected, profilePictureUrl, pr
         <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'dashboard'} onClick={() => onSectionChange('dashboard')} aria-label="Dashboard" data-testid="rail-dashboard"><LayoutDashboard size={17} /><span className="rail-btn-label">Dashboard</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Envios" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Envios</span></button>
-        <button type="button" className="rail-btn" onClick={onZapBan} aria-label="ZapBan" data-testid="rail-zapban"><Sparkles size={17} /><span className="rail-btn-label">ZapBan</span></button>
+        <button type="button" className="rail-btn" onClick={onZapBan} aria-label="ZapBan" data-testid="rail-zapban"><Bookmark size={17} /><span className="rail-btn-label">ZapBan</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'contacts'} onClick={() => onSectionChange('contacts')} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
       </nav>
       <div className="rail-bottom">
@@ -511,6 +511,7 @@ function Sidebar({
 }) {
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = conversations.filter((conversation) => Boolean(conversation.archivedAt)).length;
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return conversations
@@ -548,7 +549,10 @@ function Sidebar({
       </div>
       <div className="flex gap-1 px-3 pb-2" role="group" aria-label="Filtrar conversas">
         <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] transition ${!showArchived ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setShowArchived(false)} data-testid="button-active-conversations">Conversas</button>
-        <button type="button" className={`rounded-full px-3 py-1.5 text-[11px] transition ${showArchived ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setShowArchived(true)} data-testid="button-archived-conversations">Arquivadas</button>
+        <button type="button" className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] transition ${showArchived ? 'bg-[#283b31] text-[#c9f2d4]' : 'text-[#95a19a] hover:bg-white/5'}`} onClick={() => setShowArchived(true)} data-testid="button-archived-conversations" aria-label={`Arquivadas, ${archivedCount}`} title={`${archivedCount} conversa${archivedCount === 1 ? '' : 's'} arquivada${archivedCount === 1 ? '' : 's'}`}>
+          Arquivadas
+          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#3b4941] px-1 text-[9px] font-semibold leading-none text-[#d5e5da]">{archivedCount}</span>
+        </button>
       </div>
 
       <div className="conversation-list quiet-scroll">
