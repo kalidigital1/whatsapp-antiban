@@ -56,6 +56,7 @@ const metaRequestTimeoutMs = 15_000;
 const profilePictureRefreshIntervalMs = 60_000;
 const profilePictureUrlCacheMs = 60_000;
 const profilePictureMaxBytes = 5 * 1024 * 1024;
+const evolutionMediaMaxBytes = 100 * 1024 * 1024;
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 },
@@ -426,8 +427,14 @@ function evolutionMessageDetails(item: Record<string, unknown>) {
     content = stringValue(asRecord(message.extendedTextMessage).text);
   } else if (media) {
     messageType = media[0];
-    content = stringValue(mediaPayload.caption)
-      || `[${media[0] === "audio" ? "Áudio" : media[0] === "sticker" ? "Figurinha" : "Arquivo"} recebido]`;
+    const mediaLabel = {
+      image: "Imagem",
+      video: "Vídeo",
+      document: "Arquivo",
+      audio: "Áudio",
+      sticker: "Figurinha",
+    }[media[0]];
+    content = stringValue(mediaPayload.caption) || `[${mediaLabel} recebido]`;
   } else if (Object.keys(reaction).length > 0) {
     messageType = "reaction";
     content = reactionEmoji;
@@ -722,30 +729,70 @@ function evolutionQrCode(body: Record<string, unknown>): string | null {
   return value.startsWith("data:image/") ? value : `data:image/png;base64,${value}`;
 }
 
+function nestedEvolutionProfileString(
+  value: unknown,
+  fieldNames: Set<string>,
+  depth = 0,
+): string | null {
+  if (depth > 5) return null;
+  const normalizedFieldNames = new Set([...fieldNames].map((fieldName) => fieldName.toLowerCase()));
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = nestedEvolutionProfileString(item, normalizedFieldNames, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const record = asRecord(value);
+  for (const [key, candidate] of Object.entries(record)) {
+    if (normalizedFieldNames.has(key.toLowerCase())) {
+      if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+      const nested = nestedEvolutionProfileString(candidate, new Set(["url", "src"]), depth + 1);
+      if (nested) return nested;
+    }
+  }
+  for (const candidate of Object.values(record)) {
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const found = nestedEvolutionProfileString(candidate, normalizedFieldNames, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function evolutionProfileNameFromResponse(response: unknown): string | null {
+  return nestedEvolutionProfileString(response, new Set([
+    "profileName",
+    "profile_name",
+    "pushName",
+    "push_name",
+    "verifiedName",
+    "verified_name",
+    "notifyName",
+    "notify_name",
+    "name",
+  ]));
+}
+
 function evolutionPictureUrlFromResponse(response: unknown): string | null {
-  const record = asRecord(response);
-  const data = asRecord(record.data);
-  const profile = asRecord(record.profile);
-  return safeWhatsAppPictureUrl(firstStringValue(
-    record.profilePictureUrl,
-    record.profile_picture_url,
-    record.profilePicUrl,
-    record.pictureUrl,
-    record.picture,
-    record.url,
-    data.profilePictureUrl,
-    data.profile_picture_url,
-    data.profilePicUrl,
-    data.pictureUrl,
-    data.picture,
-    data.url,
-    profile.profilePictureUrl,
-    profile.profile_picture_url,
-    profile.profilePicUrl,
-    profile.pictureUrl,
-    profile.picture,
-    profile.url,
-  ));
+  return safeWhatsAppPictureUrl(nestedEvolutionProfileString(response, new Set([
+    "profilePictureUrl",
+    "profile_picture_url",
+    "profilePicUrl",
+    "profile_pic_url",
+    "pictureUrl",
+    "picture_url",
+    "picUrl",
+    "picture",
+    "avatar",
+    "url",
+  ])));
+}
+
+function cacheEvolutionPictureUrl(session: EvolutionSession, whatsappId: string, url: string | null): void {
+  evolutionProfilePictureUrlCache.set(`${session.instanceName}:${whatsappId}`, {
+    url,
+    expiresAt: Date.now() + profilePictureUrlCacheMs,
+  });
 }
 
 async function getEvolutionPictureUrl(session: EvolutionSession, whatsappId: string): Promise<string | null> {
@@ -762,10 +809,7 @@ async function getEvolutionPictureUrl(session: EvolutionSession, whatsappId: str
       { method: "POST", body: JSON.stringify({ number: whatsappId }) },
     );
     const url = evolutionPictureUrlFromResponse(response);
-    evolutionProfilePictureUrlCache.set(cacheKey, {
-      url,
-      expiresAt: Date.now() + profilePictureUrlCacheMs,
-    });
+    cacheEvolutionPictureUrl(session, whatsappId, url);
     return url;
   })();
   evolutionProfilePictureUrlRequests.set(cacheKey, request);
@@ -776,6 +820,22 @@ async function getEvolutionPictureUrl(session: EvolutionSession, whatsappId: str
       evolutionProfilePictureUrlRequests.delete(cacheKey);
     }
   }
+}
+
+async function getEvolutionOwnProfilePictureUrl(session: EvolutionSession): Promise<string | null> {
+  const phoneNumber = normalizePhone(session.phoneNumber ?? "");
+  if (!phoneNumber) return null;
+  let lastError: unknown;
+  for (const candidate of [phoneNumber, `${phoneNumber}@s.whatsapp.net`]) {
+    try {
+      const url = await getEvolutionPictureUrl(session, candidate);
+      if (url) return url;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (lastError) throw lastError;
+  return null;
 }
 
 async function refreshConnectedProfileMetadata(session: EvolutionSession): Promise<void> {
@@ -821,40 +881,66 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
     : null;
   if (!ownWhatsAppId) return;
 
-  if (!session.profileName && shouldRefreshMetadata) {
-    try {
-      const response = await evolutionRequest<unknown>(
-        session,
-        `/chat/fetchProfile/${encodedInstance}`,
-        { method: "POST", body: JSON.stringify({ number: ownWhatsAppId }) },
-      );
-      const record = asRecord(response);
-      const data = asRecord(record.data);
-      const profile = asRecord(record.profile);
-      session.profileName = firstStringValue(
-        record.profileName,
-        record.profile_name,
-        record.pushName,
-        record.push_name,
-        record.name,
-        data.profileName,
-        data.profile_name,
-        data.pushName,
-        data.push_name,
-        data.name,
-        profile.profileName,
-        profile.pushName,
-        profile.name,
-      ) || session.profileName;
-    } catch (error) {
-      logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile name");
+  if (shouldRefreshMetadata) {
+    const ownPhoneNumber = normalizePhone(session.phoneNumber ?? "");
+    let profileLoaded = false;
+    let lastProfileError: unknown;
+    for (const number of [ownPhoneNumber, ownWhatsAppId].filter((value): value is string => Boolean(value))) {
+      try {
+        const response = await evolutionRequest<unknown>(
+          session,
+          `/chat/fetchProfile/${encodedInstance}`,
+          { method: "POST", body: JSON.stringify({ number }) },
+        );
+        const profileName = evolutionProfileNameFromResponse(response);
+        const profilePictureUrl = evolutionPictureUrlFromResponse(response);
+        if (profileName) session.profileName = profileName;
+        if (profilePictureUrl) {
+          session.profilePictureUrl = profilePictureUrl;
+          cacheEvolutionPictureUrl(session, ownPhoneNumber, profilePictureUrl);
+          cacheEvolutionPictureUrl(session, ownWhatsAppId, profilePictureUrl);
+        }
+        if (profileName || profilePictureUrl) {
+          profileLoaded = true;
+          break;
+        }
+      } catch (error) {
+        lastProfileError = error;
+      }
+    }
+    if (!profileLoaded || !session.profileName || !session.profilePictureUrl) {
+      try {
+        const businessProfile = await evolutionRequest<unknown>(
+          session,
+          `/chat/fetchBusinessProfile/${encodedInstance}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ number: ownPhoneNumber }),
+          },
+        );
+        const profileName = evolutionProfileNameFromResponse(businessProfile);
+        const profilePictureUrl = evolutionPictureUrlFromResponse(businessProfile);
+        if (profileName) session.profileName = profileName;
+        if (profilePictureUrl) {
+          session.profilePictureUrl = profilePictureUrl;
+          cacheEvolutionPictureUrl(session, ownPhoneNumber, profilePictureUrl);
+          cacheEvolutionPictureUrl(session, ownWhatsAppId, profilePictureUrl);
+        }
+        profileLoaded ||= Boolean(profileName || profilePictureUrl);
+      } catch (error) {
+        lastProfileError ??= error;
+      }
+    }
+    if (!profileLoaded && lastProfileError) {
+      logger.warn({ err: lastProfileError, instanceName: session.instanceName }, "Could not read connected account profile metadata");
     }
   }
 
   if (now - (session.profilePictureFetchedAt ?? 0) >= profilePictureRefreshIntervalMs) {
     session.profilePictureFetchedAt = now;
     try {
-      session.profilePictureUrl = await getEvolutionPictureUrl(session, ownWhatsAppId);
+      const profilePictureUrl = await getEvolutionOwnProfilePictureUrl(session);
+      if (profilePictureUrl) session.profilePictureUrl = profilePictureUrl;
     } catch (error) {
       logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile photo");
     }
@@ -2490,9 +2576,24 @@ router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
   const whatsappId = requestedNumber.includes("@")
     ? requestedNumber
     : `${normalizePhone(requestedNumber)}@s.whatsapp.net`;
+  const requestedPhoneNumber = normalizePhone(requestedNumber.split("@")[0] ?? "");
+  const isOwnProfile = Boolean(
+    session.phoneNumber
+    && requestedPhoneNumber
+    && requestedPhoneNumber === normalizePhone(session.phoneNumber),
+  );
 
   try {
-    const pictureUrl = await getEvolutionPictureUrl(session, whatsappId);
+    let pictureUrl: string | null;
+    try {
+      pictureUrl = isOwnProfile
+        ? await getEvolutionOwnProfilePictureUrl(session)
+        : await getEvolutionPictureUrl(session, whatsappId);
+    } catch (error) {
+      if (!isOwnProfile || !session.profilePictureUrl) throw error;
+      pictureUrl = safeWhatsAppPictureUrl(session.profilePictureUrl);
+    }
+    if (!pictureUrl && isOwnProfile) pictureUrl = safeWhatsAppPictureUrl(session.profilePictureUrl);
     if (!pictureUrl) {
       res.status(404).json({ error: "A foto de perfil não está disponível." });
       return;
@@ -3123,8 +3224,8 @@ router.get(
         return;
       }
       const session = activeEvolutionSession;
-      if (!session) {
-        res.status(503).json({ error: "A conexão via QR Code não está disponível para carregar a mídia." });
+      if (!session?.connected) {
+        res.status(503).json({ error: "Conecte o WhatsApp via QR Code para carregar esta mídia." });
         return;
       }
       const mediaResponse = await evolutionRequest<Record<string, unknown>>(
@@ -3142,9 +3243,13 @@ router.get(
         || stringValue(mediaData.base64)
         || stringValue(mediaResponse.mediaBase64)
         || stringValue(mediaData.mediaBase64);
-      const base64 = encoded.replace(/^data:[^;,]+;base64,/, "");
+      const base64 = encoded.replace(/^data:[^,]*;base64,/i, "").replace(/\s/g, "");
       if (!base64) {
         res.status(502).json({ error: "O serviço de conexão via QR Code não retornou o conteúdo da mídia." });
+        return;
+      }
+      if (base64.length > Math.ceil(evolutionMediaMaxBytes * 4 / 3) + 16) {
+        res.status(502).json({ error: "A mídia é grande demais para ser exibida nesta conversa." });
         return;
       }
       const bytes = Buffer.from(base64, "base64");
@@ -3152,22 +3257,31 @@ router.get(
         res.status(502).json({ error: "O arquivo retornado pela conexão via QR Code está vazio." });
         return;
       }
-      const mimeType =
+      if (bytes.length > evolutionMediaMaxBytes) {
+        res.status(502).json({ error: "A mídia é grande demais para ser exibida nesta conversa." });
+        return;
+      }
+      const requestedMimeType =
         stringValue(mediaResponse.mimetype)
         || stringValue(mediaData.mimetype)
         || message.mediaMimeType
         || "application/octet-stream";
+      const mimeTypeCandidate = requestedMimeType.split(";")[0]?.trim().toLowerCase() ?? "";
+      const mimeType = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(mimeTypeCandidate)
+        ? mimeTypeCandidate
+        : "application/octet-stream";
       const fileName =
         stringValue(mediaResponse.fileName)
         || stringValue(mediaData.fileName)
         || message.mediaFileName
         || "arquivo";
       const safeFileName = fileName.replace(/[\r\n"]/g, "_");
-      const inline = /^(image|audio|video)\//i.test(mimeType);
+      const asciiFileName = safeFileName.replace(/[^\x20-\x7e]/g, "_");
+      const inline = /^(image|audio|video)\//i.test(mimeType) || mimeType === "application/pdf";
       res.setHeader("Content-Type", mimeType);
       res.setHeader(
         "Content-Disposition",
-        `${inline ? "inline" : "attachment"}; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        `${inline ? "inline" : "attachment"}; filename="${asciiFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       );
       res.setHeader("Content-Length", bytes.length);
       res.setHeader("X-Content-Type-Options", "nosniff");
@@ -3904,7 +4018,7 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         || stringValue(updateInstance.profileName)
         || stringValue(body.profileName)
         || session.profileName;
-      session.profilePictureUrl = safeHttpUrl(firstStringValue(
+      session.profilePictureUrl = safeWhatsAppPictureUrl(firstStringValue(
         update.profilePictureUrl,
         update.profile_picture_url,
         update.profilePicUrl,

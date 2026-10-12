@@ -256,7 +256,12 @@ function initials(name: string) {
 
 function ProfileAvatar({ photoUrl, name, className = '' }: { photoUrl?: string | null; name: string; className?: string }) {
   const [photoUnavailable, setPhotoUnavailable] = useState(false);
-  useEffect(() => setPhotoUnavailable(false), [photoUrl]);
+  useEffect(() => {
+    setPhotoUnavailable(false);
+    if (!photoUrl) return;
+    const retry = window.setInterval(() => setPhotoUnavailable(false), 60_000);
+    return () => window.clearInterval(retry);
+  }, [photoUrl]);
   return (
     <div className={`profile-photo ${className}`} aria-hidden="true">
       {photoUrl && !photoUnavailable
@@ -346,6 +351,9 @@ function ConnectedProfile({ connection, connectionLabel, onSettings, canEditProf
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(name);
   const [nameFeedback, setNameFeedback] = useState<{ text: string; error: boolean } | null>(null);
+  useEffect(() => {
+    if (!editingName) setNameDraft(name);
+  }, [name, editingName]);
   const submitProfileName = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const nextName = nameDraft.trim();
@@ -584,8 +592,20 @@ function MessageBubble({
   onReact?: (messageId: number, emoji: string) => void;
 }) {
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const [mediaUnavailable, setMediaUnavailable] = useState(false);
+  const mediaUrl = message.mediaPreviewUrl || message.mediaUrl;
+  const mediaMimeType = (message.mediaMimeType || '').split(';')[0].trim().toLowerCase();
   const outbound = message.direction === 'outbound';
   const isMedia = ['image', 'video', 'audio', 'document', 'sticker'].includes(message.messageType);
+  const isImage = message.messageType === 'image' || message.messageType === 'sticker'
+    || (message.messageType === 'document' && mediaMimeType.startsWith('image/'));
+  const isVideo = message.messageType === 'video'
+    || (message.messageType === 'document' && mediaMimeType.startsWith('video/'));
+  const isAudio = message.messageType === 'audio'
+    || (message.messageType === 'document' && mediaMimeType.startsWith('audio/'));
+  const isPdf = message.messageType === 'document' && mediaMimeType === 'application/pdf';
+  const canPreviewDocument = isImage || isVideo || isAudio || isPdf;
+  useEffect(() => setMediaUnavailable(false), [mediaUrl]);
   const reactionCounts = reactions.reduce<Array<{ emoji: string; count: number; mine: boolean }>>((groups, reaction) => {
     if (!reaction.reactionEmoji) return groups;
     const current = groups.find((group) => group.emoji === reaction.reactionEmoji);
@@ -608,14 +628,20 @@ function MessageBubble({
         {replyPreview && <div className="mb-1 border-l-2 border-[#62a477] pl-2 text-xs text-[#61736a] line-clamp-2">{replyPreview}</div>}
         {isMedia ? (
           <div className="message-media">
-            {(message.mediaPreviewUrl || message.mediaUrl) && message.messageType === 'image' && <img src={message.mediaPreviewUrl || message.mediaUrl || undefined} alt={message.content || 'Imagem do WhatsApp'} />}
-            {(message.mediaPreviewUrl || message.mediaUrl) && message.messageType === 'video' && <video src={message.mediaPreviewUrl || message.mediaUrl || undefined} controls muted preload="metadata" />}
-            {(message.mediaPreviewUrl || message.mediaUrl) && message.messageType === 'audio' && <audio src={message.mediaPreviewUrl || message.mediaUrl || undefined} controls preload="metadata" />}
-            {(!message.mediaPreviewUrl && !message.mediaUrl || message.messageType === 'document' || message.messageType === 'sticker') && (
+            {mediaUrl && !mediaUnavailable && isImage && <img src={mediaUrl} alt={message.mediaCaption || message.content || 'Imagem do WhatsApp'} loading="lazy" onError={() => setMediaUnavailable(true)} />}
+            {mediaUrl && !mediaUnavailable && isVideo && <video src={mediaUrl} controls preload="metadata" onError={() => setMediaUnavailable(true)} />}
+            {mediaUrl && !mediaUnavailable && isAudio && <audio src={mediaUrl} controls preload="metadata" onError={() => setMediaUnavailable(true)} />}
+            {mediaUrl && !mediaUnavailable && isPdf && <iframe src={mediaUrl} title={message.mediaFileName || 'Documento PDF do WhatsApp'} className="mt-2 h-64 w-full rounded-lg border-0" />}
+            {message.messageType === 'document' && mediaUrl && !mediaUnavailable && canPreviewDocument && (
+              <a href={mediaUrl} className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#16885c] underline" download={message.mediaFileName || undefined}>
+                <Paperclip size={14} /> Baixar arquivo
+              </a>
+            )}
+            {(!mediaUrl || mediaUnavailable || (message.messageType === 'document' && !canPreviewDocument)) && (
               <div className="message-attachment">
-                {message.mediaUrl && message.messageType === 'document'
-                  ? <a href={message.mediaUrl} className="flex min-w-0 items-center gap-2" download={message.mediaFileName || undefined}><Paperclip size={16} /><span className="min-w-0"><strong className="block truncate">{message.mediaFileName || message.content || 'Arquivo'}</strong><span>Baixar documento</span></span></a>
-                  : <><Paperclip size={16} /><div><strong>{message.mediaFileName || message.content || 'Arquivo'}</strong><span>{message.messageType === 'document' ? 'Documento' : message.messageType}</span></div></>}
+                {mediaUrl && message.messageType === 'document'
+                  ? <a href={mediaUrl} className="flex min-w-0 items-center gap-2" download={message.mediaFileName || undefined}><Paperclip size={16} /><span className="min-w-0"><strong className="block truncate">{message.mediaFileName || message.content || 'Arquivo'}</strong><span>Baixar documento</span></span></a>
+                  : <><Paperclip size={16} /><div><strong>{message.mediaFileName || message.content || 'Arquivo'}</strong><span>{mediaUnavailable ? 'Não foi possível carregar. Tente novamente mais tarde.' : mediaUrl ? 'Abrir mídia' : 'Mídia indisponível'}</span></div>{mediaUrl && mediaUnavailable && <a href={mediaUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold underline">Abrir</a>}</>}
               </div>
             )}
             {message.mediaCaption && <p className="message-media-caption">{message.mediaCaption}</p>}
@@ -1101,7 +1127,6 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
   const evolutionActive = Boolean(evolutionConnectionQuery.data?.active);
   const [accessToken, setAccessToken] = useState('');
   const [businessAccountId, setBusinessAccountId] = useState('');
-  const [phoneNumberId, setPhoneNumberId] = useState('');
   const [formError, setFormError] = useState('');
   const [copied, setCopied] = useState(false);
   const [copiedVerifyToken, setCopiedVerifyToken] = useState(false);
@@ -1111,8 +1136,7 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
 
   useEffect(() => {
     if (connection?.businessAccountId) setBusinessAccountId(connection.businessAccountId);
-    if (connection?.selectedPhoneNumberId) setPhoneNumberId(connection.selectedPhoneNumberId);
-  }, [connection]);
+  }, [connection?.businessAccountId]);
 
   const isConnected = Boolean(connection?.connected);
   useEffect(() => {
@@ -1122,7 +1146,7 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
     event.preventDefault();
     setFormError('');
     if (!accessToken.trim() || !businessAccountId.trim()) { setFormError('Informe o token de acesso e o ID da conta comercial.'); return; }
-    connect.mutate({ data: { accessToken: accessToken.trim(), businessAccountId: businessAccountId.trim(), ...(phoneNumberId ? { phoneNumberId } : {}) } }, {
+    connect.mutate({ data: { accessToken: accessToken.trim(), businessAccountId: businessAccountId.trim() } }, {
       onSuccess: () => { setAccessToken(''); void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey() }); },
       onError: (error) => setFormError(errorText(error)),
     });
@@ -1166,17 +1190,21 @@ function SettingsDialog({ onClose, onGoToConversations }: { onClose: () => void;
           {connectionMethod === 'evolution' ? <EvolutionConnectionPanel onGoToConversations={onGoToConversations} /> : <>
           {connectionQuery.isLoading && <div className="space-y-3" data-testid="state-connection-loading"><div className="skeleton h-12 rounded-lg" /><div className="skeleton h-12 rounded-lg" /></div>}
           {connectionQuery.isError && <div className="status-note" data-testid="state-connection-error"><AlertCircle size={16} /> Não foi possível consultar o status atual da conexão.</div>}
-          <div className={`flex items-center justify-between rounded-lg border p-4 ${isConnected ? 'border-[#35684b] bg-[#1b3024]' : 'border-[#685330] bg-[#332b1e]'}`} data-testid="status-connection">
-            <div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full bg-[#2b4736] text-[#68d18c]"><Wifi size={17} /></div><div><p className="text-sm font-medium">{isConnected ? 'WhatsApp conectado' : 'Conexão pendente'}</p><p className="mt-1 text-[11px] text-[#a2aaa5]">{isConnected ? (evolutionActive ? 'A API Oficial está conectada; o inbox usa a conexão via QR Code.' : 'Mensagens do inbox passam pela API Oficial.') : 'Adicione as credenciais da Meta para começar.'}</p></div></div>
-            <span className={`connection-pill ${isConnected ? '' : 'offline'}`}><span className="dot" />{isConnected ? (evolutionActive ? 'Conectada' : 'Ativa') : 'Offline'}</span>
+          <div className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-4 ${isConnected ? 'border-[#397a52] bg-[#1b3024]' : 'border-[#806638] bg-[#332b1e]'}`} data-testid="status-connection" aria-live="polite">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-full ${isConnected ? 'bg-[#285b3a] text-[#7be59b]' : 'bg-[#5a451f] text-[#ffd477]'}`}><Wifi size={19} /></div>
+              <p className="text-sm font-semibold text-[#eef3ef]">{isConnected ? 'WhatsApp conectado' : 'Conexão pendente'}</p>
+            </div>
+            <span className={`flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold tracking-[.08em] ${isConnected ? 'border-[#4e9867] bg-[#21462f] text-[#8af0aa]' : 'border-[#a07a37] bg-[#493719] text-[#ffdc8d]'}`}>
+              <span className="dot" />{isConnected ? (evolutionActive ? 'CONECTADA' : 'ATIVA') : 'PENDENTE'}
+            </span>
           </div>
           {!isConnected && (
             <form className="space-y-4" onSubmit={submit}>
-              <div className="field"><label className="field-label" htmlFor="access-token">Token de acesso</label><input id="access-token" className="field-input" type="password" autoComplete="new-password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="Cole o token permanente da Meta" data-testid="input-access-token" /><p className="field-help">O token é usado para validar a conexão e não é salvo no navegador.</p></div>
+              <div className="field"><label className="field-label" htmlFor="access-token">Token de acesso</label><input id="access-token" className="field-input" type="password" autoComplete="new-password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="Cole o token permanente da Meta" data-testid="input-access-token" /></div>
               <div className="field"><label className="field-label" htmlFor="business-account-id">ID da conta comercial</label><input id="business-account-id" className="field-input" value={businessAccountId} onChange={(event) => setBusinessAccountId(event.target.value)} placeholder="ID da conta WhatsApp Business" data-testid="input-business-account-id" /></div>
-              <div className="field"><label className="field-label" htmlFor="phone-number-id">Número de telefone <span className="font-normal normal-case tracking-normal text-[#8d9993]">(opcional)</span></label>{connection?.phoneNumbers?.length ? <select id="phone-number-id" className="field-input" value={phoneNumberId} onChange={(event) => setPhoneNumberId(event.target.value)} data-testid="select-phone-number"><option value="">Selecionar depois</option>{connection.phoneNumbers.map((phone) => <option key={phone.id} value={phone.id}>{phone.verifiedName} · {phone.displayPhoneNumber}</option>)}</select> : <input id="phone-number-id" className="field-input" value={phoneNumberId} onChange={(event) => setPhoneNumberId(event.target.value)} placeholder="ID do número no WhatsApp Business" data-testid="input-phone-number-id" />}</div>
               {formError && <p className="flex items-center gap-2 text-xs text-[#eea59e]" data-testid="status-connection-error"><AlertCircle size={15} />{formError}</p>}
-              <button type="submit" className="btn-primary w-full" disabled={connect.isPending} data-testid="button-connect-whatsapp">{connect.isPending ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}{connect.isPending ? 'Validando conexão...' : 'Conectar WhatsApp'}</button>
+              <button type="submit" className="btn-primary w-full" disabled={connect.isPending} data-testid="button-connect-whatsapp">{connect.isPending ? <Loader2 size={16} className="animate-spin" /> : <Wifi size={16} />}{connect.isPending ? 'Validando conexão...' : 'Conectar API'}</button>
             </form>
           )}
           {isConnected && connection && (
