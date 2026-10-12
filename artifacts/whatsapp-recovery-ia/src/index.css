@@ -101,6 +101,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .action-btn:focus-visible, .btn-primary:focus-visible, .btn-ghost:focus-visible { outline:2px solid rgba(138,220,164,.72); outline-offset:2px; }
 .chat-header-actions .action-btn { border-color:transparent; border-radius:0; background:transparent; box-shadow:none; backdrop-filter:none; }
 .chat-header-actions .action-btn:hover { color:#f4f7f5; border-color:transparent; background:transparent; box-shadow:none; transform:none; }
+.sidebar-header .action-btn, .profile-card .profile-action { border-color:transparent; border-radius:0; background:transparent; box-shadow:none; backdrop-filter:none; }
+.sidebar-header .action-btn:hover, .profile-card .profile-action:hover { color:#f4f7f5; border-color:transparent; background:transparent; box-shadow:none; transform:none; }
+.profile-card .profile-name-edit-button:hover { color:#f1f5f2; border-color:transparent; background:transparent; }
 .sidebar-tools { padding:11px 12px 10px; background:hsl(var(--wa-list)); }
 .search-box { position:relative; display:flex; align-items:center; }
 .search-box svg { position:absolute; left:14px; color:#8d9692; }
