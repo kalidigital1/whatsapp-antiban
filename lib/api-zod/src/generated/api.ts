@@ -607,6 +607,26 @@ export const ImportContactsResponse = zod.object({
 
 
 /**
+ * @summary Remove contacts from the address book while preserving chat history
+ */
+export const deleteContactsBodyPhoneNumbersItemMin = 8;
+export const deleteContactsBodyPhoneNumbersItemMax = 20;
+
+export const deleteContactsBodyPhoneNumbersMax = 1000;
+
+
+
+export const DeleteContactsBody = zod.object({
+  "phoneNumbers": zod.array(zod.string().min(deleteContactsBodyPhoneNumbersItemMin).max(deleteContactsBodyPhoneNumbersItemMax)).min(1).max(deleteContactsBodyPhoneNumbersMax)
+})
+
+export const DeleteContactsResponse = zod.object({
+  "deletedCount": zod.number().int(),
+  "notFoundCount": zod.number().int()
+})
+
+
+/**
  * @summary List manually created WhatsApp message templates
  */
 export const ListTemplatesResponseItem = zod.object({

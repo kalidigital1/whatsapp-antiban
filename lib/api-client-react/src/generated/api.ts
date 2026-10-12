@@ -27,6 +27,8 @@ import type {
   ContactImportInput,
   ContactImportSummary,
   ContactInput,
+  ContactRemovalInput,
+  ContactRemovalResult,
   Conversation,
   ConversationContactProfile,
   DashboardReportResponse,
@@ -2037,6 +2039,94 @@ export const useImportContacts = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getImportContactsMutationOptions(options));
+    }
+
+export const getDeleteContactsUrl = () => {
+
+
+
+
+  return `/api/contacts/delete`
+}
+
+/**
+ * @summary Remove contacts from the address book while preserving chat history
+ */
+export const deleteContacts = async (contactRemovalInput: ContactRemovalInput, options?: Parameters<typeof customFetch>[1]): Promise<ContactRemovalResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ContactRemovalResult>(getDeleteContactsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(contactRemovalInput)
+  }
+);}
+
+
+
+
+
+export const getDeleteContactsMutationKey = () => ['deleteContacts'] as const;
+
+export const getDeleteContactsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteContacts>>, TError,DeleteContactsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteContacts>>, TError,DeleteContactsMutationVariables, TContext> => {
+
+const mutationKey = getDeleteContactsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteContacts>>, DeleteContactsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteContacts(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteContactsMutationResult = NonNullable<Awaited<ReturnType<typeof deleteContacts>>>
+    export type DeleteContactsMutationBody = BodyType<ContactRemovalInput>
+    export type DeleteContactsMutationError = ErrorType<ErrorResponse>
+    export type DeleteContactsMutationVariables = {data: BodyType<ContactRemovalInput>}
+
+    /**
+ * @summary Remove contacts from the address book while preserving chat history
+ */
+export const useDeleteContacts = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteContacts>>, TError,DeleteContactsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteContacts>>,
+        TError,
+        DeleteContactsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteContactsMutationOptions(options));
     }
 
 export const getListTemplatesUrl = () => {

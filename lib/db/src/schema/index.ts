@@ -18,6 +18,7 @@ export const contacts = pgTable(
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => ({
     phoneNumberUnique: uniqueIndex("whatsapp_contacts_phone_number_unique").on(

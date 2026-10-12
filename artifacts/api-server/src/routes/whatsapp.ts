@@ -5,6 +5,8 @@ import {
   ConnectEvolutionWhatsAppBody,
   ConnectWhatsAppBody,
   CreateContactBody,
+  DeleteContactsBody,
+  DeleteContactsResponse,
   ImportContactsBody,
   ImportContactsResponse,
   CreateTemplateBody,
@@ -36,7 +38,7 @@ import {
   EvolutionConnectionStatus,
   UpdateEvolutionProfileNameBody,
 } from "@workspace/api-zod";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
   chatMessages,
   contacts,
@@ -1896,6 +1898,13 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
   return created;
 }
 
+async function restoreContactInAddressBook(contactId: number) {
+  await db
+    .update(contacts)
+    .set({ deletedAt: null, updatedAt: new Date() })
+    .where(eq(contacts.id, contactId));
+}
+
 async function getOrCreateConversation(contactId: number, phoneNumberId: string) {
   const [existing] = await db
     .select()
@@ -3578,6 +3587,7 @@ router.get("/contacts", async (_req, res) => {
     const savedContacts = await db
       .select()
       .from(contacts)
+      .where(isNull(contacts.deletedAt))
       .orderBy(asc(contacts.name), asc(contacts.phoneNumber));
     res.json(ListContactsResponse.parse(savedContacts
       .filter((contact) => /^\d{8,15}$/.test(contact.phoneNumber))
@@ -3629,7 +3639,8 @@ router.post("/contacts/import", async (req, res) => {
 
       try {
         const existing = await findContactByPhone(row.phoneNumber);
-        await getOrCreateContact(row.phoneNumber, name);
+        const contact = await getOrCreateContact(row.phoneNumber, name);
+        await restoreContactInAddressBook(contact.id);
         if (existing) summary.updatedCount += 1;
         else summary.createdCount += 1;
       } catch (error) {
@@ -3670,11 +3681,47 @@ router.post("/contacts", async (req, res) => {
     }
     const contact = await getOrCreateContact(input.phoneNumber, name);
     if (!contact) throw new MetaApiError("Não foi possível salvar o lead.");
+    await restoreContactInAddressBook(contact.id);
     res.status(201).json({ name: contact.name, phoneNumber: contact.phoneNumber });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Lead inválido.";
     logger.warn({ message }, "WhatsApp lead creation failed");
     res.status(400).json({ error: message });
+  }
+});
+
+router.post("/contacts/delete", async (req, res) => {
+  const parsed = DeleteContactsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Selecione pelo menos um contato válido para remover." });
+    return;
+  }
+
+  const phoneNumbers = [...new Set(parsed.data.phoneNumbers.map(normalizePhone))];
+  if (phoneNumbers.some((phoneNumber) => !/^\d{8,15}$/.test(phoneNumber))) {
+    res.status(400).json({ error: "A lista contém um ou mais telefones inválidos." });
+    return;
+  }
+
+  try {
+    const deletedAt = new Date();
+    const removedContacts = await db
+      .update(contacts)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(and(
+        isNull(contacts.deletedAt),
+        inArray(contacts.phoneNumber, phoneNumbers),
+      ))
+      .returning({ phoneNumber: contacts.phoneNumber });
+    const removedPhones = new Set(removedContacts.map((contact) => contact.phoneNumber));
+
+    res.json(DeleteContactsResponse.parse({
+      deletedCount: removedContacts.length,
+      notFoundCount: phoneNumbers.filter((phoneNumber) => !removedPhones.has(phoneNumber)).length,
+    }));
+  } catch (error) {
+    logger.error({ err: error }, "Failed to remove WhatsApp contacts from the address book");
+    res.status(500).json({ error: "Não foi possível remover os contatos da agenda." });
   }
 });
 

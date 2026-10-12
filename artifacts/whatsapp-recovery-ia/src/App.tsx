@@ -52,6 +52,7 @@ import {
   useCreateTemplate,
   useDisconnectWhatsApp,
   useDeleteConversation,
+  useDeleteContacts,
   useDispatchTemplate,
   useGetConnection,
   useGetConversationContactProfile,
@@ -1932,6 +1933,7 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   const contactsQuery = useListContacts({ query: { queryKey: getListContactsQueryKey() } });
   const createContact = useCreateContact();
   const importContacts = useImportContacts();
+  const deleteContacts = useDeleteContacts();
   const contacts = contactsQuery.data ?? [];
   const [search, setSearch] = useState('');
   const [name, setName] = useState('');
@@ -1941,6 +1943,10 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   const [importFileName, setImportFileName] = useState('');
   const [importError, setImportError] = useState('');
   const [importSummary, setImportSummary] = useState<ContactImportSummary | null>(null);
+  const [selectedContactNumbers, setSelectedContactNumbers] = useState<Set<string>>(() => new Set());
+  const [contactDeleteTargets, setContactDeleteTargets] = useState<string[] | null>(null);
+  const [contactDeleteError, setContactDeleteError] = useState('');
+  const [contactDeleteFeedback, setContactDeleteFeedback] = useState('');
   const filteredContacts = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase('pt-BR');
     if (!needle) return contacts;
@@ -1949,6 +1955,8 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
       || contact.phoneNumber.includes(needle),
     );
   }, [contacts, search]);
+  const allVisibleContactsSelected = filteredContacts.length > 0
+    && filteredContacts.every((contact) => selectedContactNumbers.has(contact.phoneNumber));
 
   const handleCsvFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
@@ -2008,6 +2016,55 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
       },
       onError: (error) => setContactError(errorText(error)),
     });
+  };
+
+  const toggleContactSelection = (phone: string) => {
+    setSelectedContactNumbers((current) => {
+      const next = new Set(current);
+      if (next.has(phone)) next.delete(phone);
+      else next.add(phone);
+      return next;
+    });
+    setContactDeleteFeedback('');
+  };
+
+  const toggleVisibleContactSelection = () => {
+    setSelectedContactNumbers((current) => {
+      const next = new Set(current);
+      if (allVisibleContactsSelected) {
+        filteredContacts.forEach((contact) => next.delete(contact.phoneNumber));
+      } else {
+        filteredContacts.forEach((contact) => next.add(contact.phoneNumber));
+      }
+      return next;
+    });
+    setContactDeleteFeedback('');
+  };
+
+  const requestContactDeletion = (phoneNumbers: string[]) => {
+    setContactDeleteError('');
+    setContactDeleteTargets([...new Set(phoneNumbers)]);
+  };
+
+  const confirmContactDeletion = async () => {
+    if (!contactDeleteTargets?.length || deleteContacts.isPending) return;
+    setContactDeleteError('');
+    try {
+      const result = await deleteContacts.mutateAsync({
+        data: { phoneNumbers: contactDeleteTargets },
+      });
+      setSelectedContactNumbers(new Set());
+      setContactDeleteTargets(null);
+      const removed = result.deletedCount;
+      const removedText = removed === 1 ? '1 contato removido.' : `${removed} contatos removidos.`;
+      const notFoundText = result.notFoundCount > 0
+        ? ` ${result.notFoundCount} já não estava na agenda.`
+        : '';
+      setContactDeleteFeedback(`${removedText}${notFoundText} Conversas e mensagens foram mantidas.`);
+      void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
+    } catch (error) {
+      setContactDeleteError(errorText(error));
+    }
   };
 
   const exportContacts = () => {
@@ -2078,20 +2135,100 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
             <div><h2>Todos os contatos</h2><p>{contacts.length} cadastrados</p></div>
             <label className="contacts-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou telefone" aria-label="Buscar contatos" data-testid="input-search-contacts" /></label>
           </div>
+          {filteredContacts.length > 0 && <div className="contacts-bulk-toolbar">
+            <label className="contacts-select-all">
+              <input
+                type="checkbox"
+                checked={allVisibleContactsSelected}
+                onChange={toggleVisibleContactSelection}
+                aria-label="Selecionar todos os contatos visíveis"
+                data-testid="checkbox-select-all-contacts"
+              />
+              <span>Selecionar todos os visíveis</span>
+            </label>
+            {selectedContactNumbers.size > 0 && <div className="contacts-bulk-actions">
+              <span>{selectedContactNumbers.size} selecionado(s)</span>
+              <button
+                type="button"
+                className="contacts-delete-selected"
+                onClick={() => requestContactDeletion([...selectedContactNumbers])}
+                data-testid="button-delete-selected-contacts"
+              >
+                <Trash2 size={14} /> Excluir selecionados
+              </button>
+              <button
+                type="button"
+                className="contacts-clear-selection"
+                onClick={() => setSelectedContactNumbers(new Set())}
+                aria-label="Limpar seleção"
+                data-testid="button-clear-contact-selection"
+              >
+                Limpar
+              </button>
+            </div>}
+          </div>}
+          {contactDeleteFeedback && <p className="contacts-delete-feedback" role="status" data-testid="status-delete-contacts">{contactDeleteFeedback}</p>}
           {contactsQuery.isLoading && <div className="contacts-state" data-testid="state-contacts-loading"><Loader2 size={18} className="animate-spin" /> Carregando contatos…</div>}
           {contactsQuery.isError && <div className="contacts-state contacts-inline-error" role="alert" data-testid="state-contacts-error"><AlertCircle size={16} />Não foi possível carregar os contatos.</div>}
           {!contactsQuery.isLoading && !contactsQuery.isError && filteredContacts.length === 0 && <div className="contacts-state" data-testid="state-contacts-empty">{search ? 'Nenhum contato corresponde à busca.' : 'Ainda não há contatos. Adicione um ou importe um CSV.'}</div>}
           {filteredContacts.length > 0 && <div className="contacts-table-wrap">
             <table className="contacts-table">
-              <thead><tr><th>Nome</th><th>Telefone</th></tr></thead>
+              <thead><tr><th><span className="sr-only">Selecionar</span></th><th>Nome</th><th>Telefone</th><th><span className="sr-only">Ações</span></th></tr></thead>
               <tbody>{filteredContacts.map((contact) => <tr key={contact.phoneNumber} data-testid={`row-contact-${contact.phoneNumber}`}>
+                <td className="contacts-checkbox-cell">
+                  <input
+                    type="checkbox"
+                    checked={selectedContactNumbers.has(contact.phoneNumber)}
+                    onChange={() => toggleContactSelection(contact.phoneNumber)}
+                    aria-label={`Selecionar ${contact.name}`}
+                    data-testid={`checkbox-contact-${contact.phoneNumber}`}
+                  />
+                </td>
                 <td><span className="contacts-name-cell"><span className="contacts-avatar"><UserRound size={15} /></span>{contact.name}</span></td>
                 <td className="contacts-phone-cell">{contact.phoneNumber}</td>
+                <td className="contacts-row-action-cell">
+                  <button
+                    type="button"
+                    className="contacts-row-delete"
+                    onClick={() => requestContactDeletion([contact.phoneNumber])}
+                    aria-label={`Excluir ${contact.name} da agenda`}
+                    title="Excluir contato"
+                    data-testid={`button-delete-contact-${contact.phoneNumber}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </td>
               </tr>)}</tbody>
             </table>
           </div>}
         </section>
       </div>
+      {contactDeleteTargets && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !deleteContacts.isPending) setContactDeleteTargets(null);
+      }}>
+        <section className="settings-card contact-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="contact-delete-title" data-testid="dialog-delete-contacts">
+          <div className="settings-card-heading">
+            <span className="contacts-card-icon"><Trash2 size={17} /></span>
+            <div>
+              <h2 id="contact-delete-title">
+                {contactDeleteTargets.length === 1 ? 'Excluir este contato?' : `Excluir ${contactDeleteTargets.length} contatos?`}
+              </h2>
+              <p>O contato sai da agenda. Conversas e mensagens serão mantidas.</p>
+            </div>
+            <button type="button" className="settings-close" onClick={() => setContactDeleteTargets(null)} disabled={deleteContacts.isPending} aria-label="Fechar confirmação">
+              <X size={17} />
+            </button>
+          </div>
+          {contactDeleteError && <p className="contacts-inline-error" role="alert" data-testid="status-delete-contacts-error"><AlertCircle size={15} />{contactDeleteError}</p>}
+          <div className="contact-delete-actions">
+            <button type="button" className="btn-ghost" onClick={() => setContactDeleteTargets(null)} disabled={deleteContacts.isPending} data-testid="button-cancel-delete-contacts">Cancelar</button>
+            <button type="button" className="btn-primary btn-danger" onClick={() => void confirmContactDeletion()} disabled={deleteContacts.isPending} data-testid="button-confirm-delete-contacts">
+              {deleteContacts.isPending ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              {deleteContacts.isPending ? 'Excluindo…' : 'Excluir contato(s)'}
+            </button>
+          </div>
+        </section>
+      </div>}
     </section>
   );
 }

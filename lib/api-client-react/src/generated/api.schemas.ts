@@ -124,6 +124,21 @@ export interface ContactInput {
   phoneNumber: string;
 }
 
+export interface ContactRemovalInput {
+  /**
+     * @minItems 1
+     * @maxItems 1000
+     * @items.minLength 8
+     * @items.maxLength 20
+     */
+  phoneNumbers: string[];
+}
+
+export interface ContactRemovalResult {
+  deletedCount: number;
+  notFoundCount: number;
+}
+
 export interface ContactImportRow {
   /** @minimum 1 */
   rowNumber: number;

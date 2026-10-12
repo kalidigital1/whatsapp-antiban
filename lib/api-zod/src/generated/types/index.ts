@@ -16,6 +16,8 @@ export * from './contactImportInput';
 export * from './contactImportRow';
 export * from './contactImportSummary';
 export * from './contactInput';
+export * from './contactRemovalInput';
+export * from './contactRemovalResult';
 export * from './conversation';
 export * from './conversationContactProfile';
 export * from './conversationConversationType';
