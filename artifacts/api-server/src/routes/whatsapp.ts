@@ -1,12 +1,17 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { Readable } from "node:stream";
 import { Router, type IRouter, type Request, type Response } from "express";
 import multer from "multer";
 import {
   ConnectEvolutionWhatsAppBody,
   ConnectWhatsAppBody,
+  CreateSavedReplyBody,
+  CreateSavedReplyResponse,
   CreateContactBody,
   DeleteContactsBody,
   DeleteContactsResponse,
+  DeleteSavedReplyParams,
+  DeleteSavedReplyResponse,
   ImportContactsBody,
   ImportContactsResponse,
   CreateTemplateBody,
@@ -19,12 +24,15 @@ import {
   GetConversationContactProfileResponse,
   ListConversationsResponse,
   ListContactsResponse,
+  ListSavedRepliesResponse,
   ListConversationMessagesParams,
   ListConversationMessagesResponse,
   ListTemplatesResponse,
   ListTemplatesResponseItem,
   ListConversationMessagesResponseItem,
   SendConversationMessageReactionBody,
+  SendSavedReplyParams,
+  SendSavedReplyResponse,
   MessageInput,
   ReceiveWebhookBody,
   SendConversationMessageBody,
@@ -37,6 +45,9 @@ import {
   ListTemplateDispatchesResponse,
   EvolutionConnectionStatus,
   UpdateEvolutionProfileNameBody,
+  UpdateSavedReplyBody,
+  UpdateSavedReplyParams,
+  UpdateSavedReplyResponse,
 } from "@workspace/api-zod";
 import { and, asc, desc, eq, inArray, isNull, like, notLike } from "drizzle-orm";
 import {
@@ -45,14 +56,17 @@ import {
   conversations,
   db,
   appSettings,
+  savedReplies,
   whatsappTemplateDispatchRecipients,
   whatsappTemplateDispatches,
   whatsappTemplates,
   type WhatsappTemplateComponent,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { ObjectStorageService } from "../lib/objectStorage";
 
 const router: IRouter = Router();
+const objectStorage = new ObjectStorageService();
 const graphVersion = process.env.WHATSAPP_GRAPH_VERSION ?? "v23.0";
 const metaRequestTimeoutMs = 15_000;
 const profilePictureRefreshIntervalMs = 60_000;
@@ -1538,6 +1552,7 @@ function messageResponse(
     message.messageType,
   );
   const rawMessage = asRecord(asRecord(message.providerPayload).message);
+  const localMediaPath = stringValue(asRecord(message.providerPayload).localMediaPath);
   const location = asRecord(unwrapEvolutionMessage(rawMessage).locationMessage);
   const latitude = Number(location.degreesLatitude);
   const longitude = Number(location.degreesLongitude);
@@ -1555,9 +1570,11 @@ function messageResponse(
     createdAt: message.createdAt.toISOString(),
     whatsappMessageId: message.whatsappMessageId,
     mediaUrl: locationUrl || (
-      hasMedia && message.providerPayload && conversationId
-        ? `/api/conversations/${conversationId}/messages/${message.id}/media`
-        : null
+      localMediaPath
+        ? `/api/storage${localMediaPath}`
+        : hasMedia && message.providerPayload && conversationId
+          ? `/api/conversations/${conversationId}/messages/${message.id}/media`
+          : null
     ),
     mediaMimeType: message.mediaMimeType,
     mediaFileName: message.mediaFileName,
@@ -1565,6 +1582,39 @@ function messageResponse(
     replyToMessageId: message.replyToMessageId,
     reactionEmoji: message.reactionEmoji,
   });
+}
+
+function savedReplyResponse(reply: typeof savedReplies.$inferSelect) {
+  return {
+    id: reply.id,
+    title: reply.title,
+    kind: reply.kind,
+    content: reply.content,
+    objectPath: reply.objectPath,
+    mediaMimeType: reply.mediaMimeType,
+    mediaFileName: reply.mediaFileName,
+    sizeBytes: reply.sizeBytes,
+    createdAt: reply.createdAt.toISOString(),
+    updatedAt: reply.updatedAt.toISOString(),
+  };
+}
+
+function localMediaPathFromPayload(payload: unknown): string | null {
+  const path = stringValue(asRecord(payload).localMediaPath);
+  return path && /^\/objects\/uploads\/[A-Za-z0-9-]+$/.test(path) ? path : null;
+}
+
+async function deleteLocalMediaObjects(payloads: unknown[]): Promise<void> {
+  const paths = [...new Set(payloads.map(localMediaPathFromPayload).filter(
+    (path): path is string => path !== null,
+  ))];
+  await Promise.all(paths.map(async (path) => {
+    try {
+      await objectStorage.deleteObjectEntityFile(path);
+    } catch (error) {
+      logger.warn({ err: error, path }, "Could not remove saved chat media from private storage");
+    }
+  }));
 }
 
 async function conversationResponse(
@@ -1646,6 +1696,12 @@ function mediaMessageType(mimeType: string): MediaMessageType {
   return "document";
 }
 
+function isOggOpus(buffer: Buffer): boolean {
+  return buffer.length >= 32
+    && buffer.toString("ascii", 0, 4) === "OggS"
+    && buffer.indexOf(Buffer.from("OpusHead"), 0, "ascii") >= 0;
+}
+
 async function uploadMediaToMeta(
   phoneNumberId: string,
   file: Express.Multer.File,
@@ -1684,6 +1740,7 @@ async function sendMediaMessage(
   file: Express.Multer.File,
   caption: string,
   accessToken: string,
+  asVoiceNote = false,
 ) {
   const type = mediaMessageType(file.mimetype);
   const mediaId = await uploadMediaToMeta(phoneNumberId, file, accessToken);
@@ -1691,6 +1748,7 @@ async function sendMediaMessage(
     id: mediaId,
     ...(caption ? { caption } : {}),
     ...(type === "document" ? { filename: file.originalname } : {}),
+    ...(asVoiceNote && type === "audio" ? { voice: true } : {}),
   };
   const body = await graphRequest<{ messages?: Array<{ id?: string }> }>(
     `${encodeURIComponent(phoneNumberId)}/messages`,
@@ -1716,6 +1774,8 @@ async function storeOutboundEvolutionMediaMessage(
   file: Express.Multer.File,
   caption: string,
   session: EvolutionSession,
+  asVoiceNote = false,
+  historyObjectPath?: string,
 ) {
   const [contact] = await db
     .select()
@@ -1725,6 +1785,9 @@ async function storeOutboundEvolutionMediaMessage(
   if (!contact) throw new MetaApiError("Contato da conversa não encontrado.", 404);
 
   const type = mediaMessageType(file.mimetype);
+  if (asVoiceNote && (type !== "audio" || !isOggOpus(file.buffer))) {
+    throw new MetaApiError("Notas de voz precisam estar no formato OGG/Opus.", 400);
+  }
   const [pending] = await db
     .insert(chatMessages)
     .values({
@@ -1736,19 +1799,28 @@ async function storeOutboundEvolutionMediaMessage(
     })
     .returning();
   try {
-    const body = await evolutionRequest<Record<string, unknown>>(
-      session,
-      `/message/sendMedia/${encodeURIComponent(session.instanceName)}`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-           number: evolutionRecipient(contact.phoneNumber, conversation),
+    const endpoint = asVoiceNote
+      ? `/message/sendWhatsAppAudio/${encodeURIComponent(session.instanceName)}`
+      : `/message/sendMedia/${encodeURIComponent(session.instanceName)}`;
+    const requestBody = asVoiceNote
+      ? {
+          number: evolutionRecipient(contact.phoneNumber, conversation),
+          audio: file.buffer.toString("base64"),
+        }
+      : {
+          number: evolutionRecipient(contact.phoneNumber, conversation),
           mediatype: type,
           mimetype: file.mimetype,
           caption,
           media: file.buffer.toString("base64"),
           fileName: file.originalname,
-        }),
+        };
+    const body = await evolutionRequest<Record<string, unknown>>(
+      session,
+      endpoint,
+      {
+        method: "POST",
+        body: JSON.stringify(requestBody),
       },
     );
     const key = asRecord(asRecord(body.data).key);
@@ -1763,6 +1835,7 @@ async function storeOutboundEvolutionMediaMessage(
       messageType: type,
       messageTimestamp: mediaData.messageTimestamp ?? body.messageTimestamp,
     }) as Record<string, unknown>;
+    if (historyObjectPath) providerPayload.localMediaPath = historyObjectPath;
     const [latestPending] = await db
       .select({ status: chatMessages.status })
       .from(chatMessages)
@@ -1803,6 +1876,8 @@ async function storeOutboundMediaMessage(
   file: Express.Multer.File,
   caption: string,
   connection: ActiveConnection,
+  asVoiceNote = false,
+  historyObjectPath?: string,
 ) {
   const [contact] = await db
     .select()
@@ -1830,10 +1905,18 @@ async function storeOutboundMediaMessage(
       file,
       caption,
       connection.accessToken,
+      asVoiceNote,
     );
     const [updated] = await db
       .update(chatMessages)
-      .set({ status: "sent", whatsappMessageId: sent.id })
+      .set({
+        status: "sent",
+        whatsappMessageId: sent.id,
+        mediaMimeType: file.mimetype,
+        mediaFileName: file.originalname,
+        mediaCaption: caption || null,
+        ...(historyObjectPath ? { providerPayload: { localMediaPath: historyObjectPath } } : {}),
+      })
       .where(eq(chatMessages.id, pending.id))
       .returning();
     await db
@@ -2860,6 +2943,11 @@ router.delete("/evolution/connection", async (_req, res): Promise<void> => {
         request.catch(() => undefined),
       ),
     );
+    const qrMediaPayloads = await db
+      .select({ providerPayload: chatMessages.providerPayload })
+      .from(chatMessages)
+      .innerJoin(conversations, eq(chatMessages.conversationId, conversations.id))
+      .where(like(conversations.phoneNumberId, "evolution:%"));
 
     await db.transaction(async (tx) => {
       const qrConversationIds = tx
@@ -2882,6 +2970,7 @@ router.delete("/evolution/connection", async (_req, res): Promise<void> => {
         })
         .where(eq(appSettings.id, 1));
     });
+    await deleteLocalMediaObjects(qrMediaPayloads.map((row) => row.providerPayload));
   } catch (error) {
     activeEvolutionSession = sessionToDisconnect;
     activeProvider = previousProvider;
@@ -2980,6 +3069,11 @@ router.delete("/connection", async (_req, res) => {
   activeConnection = null;
   activeProvider = nextProvider;
   try {
+    const cloudMediaPayloads = await db
+      .select({ providerPayload: chatMessages.providerPayload })
+      .from(chatMessages)
+      .innerJoin(conversations, eq(chatMessages.conversationId, conversations.id))
+      .where(notLike(conversations.phoneNumberId, "evolution:%"));
     await db.transaction(async (tx) => {
       const cloudConversationIds = tx
         .select({ id: conversations.id })
@@ -3003,6 +3097,7 @@ router.delete("/connection", async (_req, res) => {
         })
         .where(eq(appSettings.id, 1));
     });
+    await deleteLocalMediaObjects(cloudMediaPayloads.map((row) => row.providerPayload));
   } catch (error) {
     activeConnection = previousConnection;
     activeProvider = previousProvider;
@@ -3047,6 +3142,9 @@ router.get("/conversations", async (req, res) => {
         .from(conversations)
         .limit(1);
       if (orphanedConversation) {
+        const mediaPayloads = await db
+          .select({ providerPayload: chatMessages.providerPayload })
+          .from(chatMessages);
         await db.transaction(async (tx) => {
           const allConversationIds = tx
             .select({ id: conversations.id })
@@ -3056,6 +3154,7 @@ router.get("/conversations", async (req, res) => {
             .where(inArray(chatMessages.conversationId, allConversationIds));
           await tx.delete(conversations);
         });
+        await deleteLocalMediaObjects(mediaPayloads.map((row) => row.providerPayload));
         req.log.info("Cleared orphaned WhatsApp chat history while disconnected");
       }
     }
@@ -3261,6 +3360,10 @@ router.delete("/conversations/:conversationId", async (req, res) => {
       return;
     }
 
+    const mediaPayloads = await db
+      .select({ providerPayload: chatMessages.providerPayload })
+      .from(chatMessages)
+      .where(eq(chatMessages.conversationId, conversationId));
     const deleted = await db
       .delete(conversations)
       .where(eq(conversations.id, conversationId))
@@ -3270,6 +3373,7 @@ router.delete("/conversations/:conversationId", async (req, res) => {
       return;
     }
 
+    await deleteLocalMediaObjects(mediaPayloads.map((row) => row.providerPayload));
     res.json({ success: true });
   } catch (error) {
     logger.error({ err: error }, "Failed to delete WhatsApp conversation");
@@ -3606,6 +3710,285 @@ router.post(
       const status = error instanceof MetaApiError ? error.status : 400;
       const message = error instanceof Error ? error.message : "Falha ao enviar arquivo.";
       logger.warn({ status, message }, "WhatsApp media send failed");
+      res.status(status).json({ error: message });
+    }
+  },
+);
+
+router.get("/saved-replies", async (req, res): Promise<void> => {
+  try {
+    const rows = await db
+      .select()
+      .from(savedReplies)
+      .orderBy(asc(savedReplies.createdAt), asc(savedReplies.id));
+    res.json(ListSavedRepliesResponse.parse(rows.map(savedReplyResponse)));
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to list saved chat highlights");
+    res.status(500).json({ error: "Não foi possível carregar os destaques." });
+  }
+});
+
+router.post("/saved-replies", async (req, res): Promise<void> => {
+  let uploadedObjectPath: string | null = null;
+  try {
+    const input = CreateSavedReplyBody.parse(req.body);
+    const title = input.title.trim();
+    if (!title) {
+      res.status(400).json({ error: "Informe um nome para o destaque." });
+      return;
+    }
+
+    let content: string | null = null;
+    let objectPath: string | null = null;
+    let mediaMimeType: string | null = null;
+    let mediaFileName: string | null = null;
+    let sizeBytes: number | null = null;
+
+    if (input.kind === "text") {
+      content = input.content?.trim() || null;
+      if (!content) {
+        res.status(400).json({ error: "Escreva a mensagem que será salva." });
+        return;
+      }
+    } else {
+      objectPath = input.objectPath?.trim() || null;
+      uploadedObjectPath = objectPath;
+      if (
+        !objectPath
+        || !/^\/objects\/uploads\/[A-Za-z0-9-]+$/.test(objectPath)
+        || !input.mediaMimeType
+        || !input.mediaFileName
+        || !input.sizeBytes
+      ) {
+        res.status(400).json({ error: "Envie um arquivo válido para salvar o destaque." });
+        return;
+      }
+      if (input.sizeBytes > 25 * 1024 * 1024) {
+        res.status(400).json({ error: "O arquivo deve ter até 25 MB." });
+        return;
+      }
+      const file = await objectStorage.getObjectEntityFile(objectPath);
+      const [metadata] = await file.getMetadata();
+      const actualSize = Number(metadata.size);
+      const storedMimeType = String(metadata.contentType || input.mediaMimeType);
+      if (!Number.isFinite(actualSize) || actualSize !== input.sizeBytes) {
+        res.status(400).json({ error: "O arquivo carregado não corresponde aos dados enviados." });
+        return;
+      }
+      if (mediaMessageType(input.mediaMimeType) !== input.kind) {
+        res.status(400).json({ error: "O formato do arquivo não corresponde ao tipo do destaque." });
+        return;
+      }
+      if (input.kind === "audio") {
+        if (actualSize > 16 * 1024 * 1024) {
+          res.status(400).json({ error: "O áudio deve ter até 16 MB." });
+          return;
+        }
+        const [audioBuffer] = await file.download();
+        if (!isOggOpus(audioBuffer)) {
+          res.status(400).json({ error: "Para enviar como nota de voz, use um arquivo OGG/Opus." });
+          return;
+        }
+      }
+      mediaMimeType = input.kind === "audio" ? "audio/ogg" : storedMimeType;
+      mediaFileName = input.mediaFileName.slice(0, 255);
+      sizeBytes = actualSize;
+    }
+
+    const [created] = await db
+      .insert(savedReplies)
+      .values({
+        title,
+        kind: input.kind,
+        content,
+        objectPath,
+        mediaMimeType,
+        mediaFileName,
+        sizeBytes,
+        updatedAt: new Date(),
+      })
+      .returning();
+    uploadedObjectPath = null;
+    res.status(201).json(CreateSavedReplyResponse.parse(savedReplyResponse(created)));
+  } catch (error) {
+    if (uploadedObjectPath) {
+      try {
+        await objectStorage.deleteObjectEntityFile(uploadedObjectPath);
+      } catch {
+        // Keep the original validation or database error for the caller.
+      }
+    }
+    const status = error instanceof MetaApiError ? error.status : 400;
+    const message = error instanceof Error ? error.message : "Não foi possível salvar o destaque.";
+    req.log.warn({ err: error }, "Failed to save chat highlight");
+    res.status(status).json({ error: message });
+  }
+});
+
+router.patch("/saved-replies/:savedReplyId", async (req, res): Promise<void> => {
+  try {
+    const params = UpdateSavedReplyParams.parse(req.params);
+    const input = UpdateSavedReplyBody.parse(req.body);
+    const [existing] = await db
+      .select()
+      .from(savedReplies)
+      .where(eq(savedReplies.id, params.savedReplyId))
+      .limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Destaque não encontrado." });
+      return;
+    }
+    const title = input.title.trim();
+    const content = existing.kind === "text" && input.content !== undefined
+      ? input.content.trim()
+      : existing.content;
+    if (!title || (existing.kind === "text" && !content)) {
+      res.status(400).json({ error: "O nome e o conteúdo do destaque não podem ficar vazios." });
+      return;
+    }
+    const [updated] = await db
+      .update(savedReplies)
+      .set({ title, content, updatedAt: new Date() })
+      .where(eq(savedReplies.id, params.savedReplyId))
+      .returning();
+    res.json(UpdateSavedReplyResponse.parse(savedReplyResponse(updated)));
+  } catch (error) {
+    req.log.warn({ err: error }, "Failed to update chat highlight");
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Não foi possível atualizar o destaque.",
+    });
+  }
+});
+
+router.delete("/saved-replies/:savedReplyId", async (req, res): Promise<void> => {
+  try {
+    const params = DeleteSavedReplyParams.parse(req.params);
+    const [deleted] = await db
+      .delete(savedReplies)
+      .where(eq(savedReplies.id, params.savedReplyId))
+      .returning();
+    if (!deleted) {
+      res.status(404).json({ error: "Destaque não encontrado." });
+      return;
+    }
+    if (deleted.objectPath) {
+      try {
+        await objectStorage.deleteObjectEntityFile(deleted.objectPath);
+      } catch (error) {
+        req.log.warn({ err: error, objectPath: deleted.objectPath }, "Could not remove deleted highlight media");
+      }
+    }
+    res.json(DeleteSavedReplyResponse.parse({ success: true }));
+  } catch (error) {
+    req.log.warn({ err: error }, "Failed to delete chat highlight");
+    res.status(400).json({ error: "Não foi possível remover o destaque." });
+  }
+});
+
+router.post(
+  "/conversations/:conversationId/saved-replies/:savedReplyId/send",
+  async (req, res): Promise<void> => {
+    let historyObjectPath: string | undefined;
+    try {
+      const params = SendSavedReplyParams.parse(req.params);
+      const [conversation] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, params.conversationId))
+        .limit(1);
+      const [reply] = await db
+        .select()
+        .from(savedReplies)
+        .where(eq(savedReplies.id, params.savedReplyId))
+        .limit(1);
+      if (!conversation || !reply) {
+        res.status(404).json({ error: "Conversa ou destaque não encontrado." });
+        return;
+      }
+
+      let message;
+      if (reply.kind === "text") {
+        if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
+          message = await storeOutboundEvolutionMessage(
+            conversation,
+            reply.content ?? "",
+            activeEvolutionSession,
+          );
+        } else if (activeProvider === "cloud" && activeConnection) {
+          message = await storeOutboundMessage(conversation, reply.content ?? "", activeConnection);
+        } else {
+          res.status(400).json({ error: "Conecte o WhatsApp antes de enviar um destaque." });
+          return;
+        }
+      } else {
+        if (activeProvider === "evolution" && !activeEvolutionSession?.connected) {
+          res.status(400).json({ error: "A conexão via QR Code não está ativa. Leia o código novamente." });
+          return;
+        }
+        if (activeProvider !== "evolution" && !(activeProvider === "cloud" && activeConnection)) {
+          res.status(400).json({ error: "Conecte o WhatsApp antes de enviar um destaque." });
+          return;
+        }
+        if (!reply.objectPath || !reply.mediaMimeType || !reply.mediaFileName) {
+          res.status(400).json({ error: "O arquivo deste destaque não está disponível." });
+          return;
+        }
+        const sourceFile = await objectStorage.getObjectEntityFile(reply.objectPath);
+        const [buffer] = await sourceFile.download();
+        if (reply.kind === "audio" && !isOggOpus(buffer)) {
+          res.status(400).json({ error: "A nota de voz não está mais em formato OGG/Opus." });
+          return;
+        }
+        historyObjectPath = await objectStorage.copyObjectEntityFile(reply.objectPath);
+        const mediaFile = {
+          fieldname: "file",
+          originalname: reply.mediaFileName,
+          encoding: "7bit",
+          mimetype: reply.mediaMimeType,
+          size: buffer.length,
+          stream: Readable.from(buffer),
+          destination: "",
+          filename: reply.mediaFileName,
+          path: "",
+          buffer,
+        } satisfies Express.Multer.File;
+        const asVoiceNote = reply.kind === "audio";
+        if (activeProvider === "evolution" && activeEvolutionSession) {
+          message = await storeOutboundEvolutionMediaMessage(
+            conversation,
+            mediaFile,
+            "",
+            activeEvolutionSession,
+            asVoiceNote,
+            historyObjectPath,
+          );
+        } else if (activeProvider === "cloud" && activeConnection) {
+          message = await storeOutboundMediaMessage(
+            conversation,
+            mediaFile,
+            "",
+            activeConnection,
+            asVoiceNote,
+            historyObjectPath,
+          );
+        } else {
+          res.status(400).json({ error: "Conecte o WhatsApp antes de enviar um destaque." });
+          return;
+        }
+        historyObjectPath = undefined;
+      }
+      res.status(201).json(SendSavedReplyResponse.parse(messageResponse(message, conversation.id)));
+    } catch (error) {
+      if (historyObjectPath) {
+        try {
+          await objectStorage.deleteObjectEntityFile(historyObjectPath);
+        } catch (cleanupError) {
+          req.log.warn({ err: cleanupError, historyObjectPath }, "Could not remove unsent chat media copy");
+        }
+      }
+      const status = error instanceof MetaApiError ? error.status : 502;
+      const message = error instanceof Error ? error.message : "Não foi possível enviar o destaque.";
+      req.log.warn({ err: error, conversationId: req.params.conversationId }, "Saved chat highlight send failed");
       res.status(status).json({ error: message });
     }
   },

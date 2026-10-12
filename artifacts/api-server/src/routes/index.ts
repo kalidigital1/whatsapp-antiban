@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import authRouter, { requireAuth } from "./auth";
 import dashboardRouter from "./dashboard";
 import healthRouter from "./health";
+import storageRouter from "./storage";
 import whatsappRouter from "./whatsapp";
 
 const router: IRouter = Router();
@@ -19,6 +20,7 @@ router.use((req, res, next) => {
   }
   requireAuth(req, res, next);
 });
+router.use(storageRouter);
 router.use(dashboardRouter);
 router.use(whatsappRouter);
 

@@ -189,3 +189,5 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export type WhatsappTemplate = typeof whatsappTemplates.$inferSelect;
 export type WhatsappTemplateDispatch = typeof whatsappTemplateDispatches.$inferSelect;
 export type WhatsappTemplateDispatchRecipient = typeof whatsappTemplateDispatchRecipients.$inferSelect;
+
+export * from "./saved-replies";

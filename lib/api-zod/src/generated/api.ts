@@ -18,6 +18,170 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary List reusable chat highlights
+ */
+export const ListSavedRepliesResponseItem = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "kind": zod.enum(['text', 'audio', 'image', 'video', 'document']),
+  "content": zod.string().nullable(),
+  "objectPath": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "sizeBytes": zod.number().int().nullable(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+export const ListSavedRepliesResponse = zod.array(ListSavedRepliesResponseItem)
+
+
+/**
+ * @summary Save a reusable message or media highlight
+ */
+export const createSavedReplyBodyTitleMax = 64;
+
+export const createSavedReplyBodyContentMax = 10000;
+
+
+
+
+
+
+
+export const CreateSavedReplyBody = zod.object({
+  "title": zod.string().min(1).max(createSavedReplyBodyTitleMax),
+  "kind": zod.enum(['text', 'audio', 'image', 'video', 'document']),
+  "content": zod.string().max(createSavedReplyBodyContentMax).optional(),
+  "objectPath": zod.string().min(1).optional(),
+  "mediaMimeType": zod.string().min(1).optional(),
+  "mediaFileName": zod.string().min(1).optional(),
+  "sizeBytes": zod.number().int().min(1).optional()
+})
+
+export const CreateSavedReplyResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "kind": zod.enum(['text', 'audio', 'image', 'video', 'document']),
+  "content": zod.string().nullable(),
+  "objectPath": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "sizeBytes": zod.number().int().nullable(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Update a saved highlight
+ */
+export const UpdateSavedReplyParams = zod.object({
+  "savedReplyId": zod.coerce.number().int()
+})
+
+export const updateSavedReplyBodyTitleMax = 64;
+
+export const updateSavedReplyBodyContentMax = 10000;
+
+
+
+export const UpdateSavedReplyBody = zod.object({
+  "title": zod.string().min(1).max(updateSavedReplyBodyTitleMax),
+  "content": zod.string().max(updateSavedReplyBodyContentMax).optional()
+})
+
+export const UpdateSavedReplyResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "kind": zod.enum(['text', 'audio', 'image', 'video', 'document']),
+  "content": zod.string().nullable(),
+  "objectPath": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "sizeBytes": zod.number().int().nullable(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Delete a saved highlight
+ */
+export const DeleteSavedReplyParams = zod.object({
+  "savedReplyId": zod.coerce.number().int()
+})
+
+export const DeleteSavedReplyResponse = zod.object({
+  "success": zod.boolean()
+})
+
+
+/**
+ * @summary Send a saved highlight immediately in a conversation
+ */
+export const SendSavedReplyParams = zod.object({
+  "conversationId": zod.coerce.number().int(),
+  "savedReplyId": zod.coerce.number().int()
+})
+
+export const SendSavedReplyResponse = zod.object({
+  "id": zod.number().int(),
+  "direction": zod.enum(['inbound', 'outbound']),
+  "content": zod.string(),
+  "messageType": zod.string(),
+  "status": zod.string(),
+  "createdAt": zod.string(),
+  "whatsappMessageId": zod.string().nullable(),
+  "mediaUrl": zod.string().nullable(),
+  "mediaMimeType": zod.string().nullable(),
+  "mediaFileName": zod.string().nullable(),
+  "mediaCaption": zod.string().nullable(),
+  "replyToMessageId": zod.number().int().nullable(),
+  "reactionEmoji": zod.string().nullable()
+})
+
+
+/**
+ * @summary Request a private media upload URL
+ */
+
+
+
+
+
+export const RequestUploadUrlBody = zod.object({
+  "name": zod.string().min(1),
+  "size": zod.number().int().min(1),
+  "contentType": zod.string().min(1)
+})
+
+
+
+
+
+
+export const RequestUploadUrlResponse = zod.object({
+  "uploadURL": zod.string().url(),
+  "objectPath": zod.string(),
+  "metadata": zod.object({
+  "name": zod.string().min(1),
+  "size": zod.number().int().min(1),
+  "contentType": zod.string().min(1)
+}).optional()
+})
+
+
+/**
+ * @summary Serve a private saved media object
+ */
+export const GetStorageObjectParams = zod.object({
+  "objectPath": zod.coerce.string()
+})
+
+export const GetStorageObjectResponse = zod.unknown()
+
+
+/**
  * @summary Get the current WhatsApp connection
  */
 export const GetConnectionResponse = zod.object({

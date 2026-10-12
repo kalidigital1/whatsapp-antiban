@@ -190,6 +190,60 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .send-btn { width:42px; height:42px; border:0; border-radius:50%; display:grid; place-items:center; color:#152118; background:#42c875; transition:filter .18s ease, transform .18s ease; }
 .send-btn:hover:not(:disabled) { filter:brightness(1.08); transform:translateY(-1px); }
 .send-btn:disabled { background:#3a4f43; color:#8ca498; }
+.saved-highlights { width:min(1000px,100%); display:flex; align-items:center; gap:6px; margin:0 auto 8px; overflow-x:auto; padding:1px 1px 3px; scrollbar-width:none; }
+.saved-highlights::-webkit-scrollbar { display:none; }
+.saved-highlight-chip { min-height:30px; max-width:190px; display:inline-flex; align-items:center; gap:7px; flex:none; padding:0 11px; border:1px solid #3b5145; border-radius:999px; color:#c9e2d0; background:rgba(36,57,44,.58); font-size:11px; transition:border-color .15s ease, background .15s ease, color .15s ease; }
+.saved-highlight-chip:hover:not(:disabled) { border-color:#5a8067; color:#eff9f1; background:#2a4233; }
+.saved-highlight-chip:disabled { opacity:.48; cursor:not-allowed; }
+.saved-highlight-chip svg { flex:none; color:#89c69b; }
+.saved-highlight-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.saved-highlight-manage { width:30px; height:30px; display:grid; place-items:center; flex:none; border:1px solid #3a4941; border-radius:50%; color:#a8c5b0; background:transparent; transition:all .15s ease; }
+.saved-highlight-manage:hover { border-color:#70a17e; color:#dcf0e1; background:rgba(45,74,54,.42); }
+.saved-highlight-loading { display:grid; place-items:center; flex:none; color:#93a69a; }
+.saved-highlight-error { width:min(1000px,100%); margin:0 auto 7px; color:#efaaa2; font-size:11px; }
+.saved-replies-dialog { width:min(820px,100%); max-height:min(760px,calc(100dvh - 32px)); display:flex; flex-direction:column; overflow:hidden; border:1px solid #46534c; border-radius:13px; color:#e8efea; background:#202523; box-shadow:0 24px 80px rgba(0,0,0,.55); }
+.saved-replies-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:19px 21px 15px; border-bottom:1px solid #38423d; }
+.saved-replies-header h2 { margin:0; color:#edf4ef; font-size:19px; font-weight:600; }
+.saved-replies-header p { margin:5px 0 0; color:#91a098; font-size:11px; }
+.saved-replies-content { min-height:0; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.05fr); overflow:auto; }
+.saved-replies-list { min-width:0; display:grid; align-content:start; gap:6px; padding:14px; border-right:1px solid #343d38; }
+.saved-replies-empty { margin:0; padding:14px 8px; color:#88968e; font-size:12px; text-align:center; }
+.saved-reply-row { min-width:0; display:grid; grid-template-columns:30px minmax(0,1fr) 30px 30px; align-items:center; gap:7px; padding:8px; border:1px solid #343e38; border-radius:9px; background:#1b211e; }
+.saved-reply-kind { width:28px; height:28px; display:grid; place-items:center; color:#9dd0aa; }
+.saved-reply-row-copy { min-width:0; display:grid; gap:3px; }
+.saved-reply-row-copy strong, .saved-reply-row-copy span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.saved-reply-row-copy strong { color:#e3ece6; font-size:11px; font-weight:600; }
+.saved-reply-row-copy span { color:#89978f; font-size:10px; }
+.saved-reply-icon-btn { width:28px; height:28px; display:grid; place-items:center; border:0; border-radius:6px; color:#a9b8ae; background:transparent; }
+.saved-reply-icon-btn:hover { color:#dcf0e1; background:#2a352f; }
+.saved-reply-icon-btn.danger:hover { color:#f2a39a; background:#3a2927; }
+.saved-reply-form { min-width:0; display:grid; align-content:start; gap:12px; padding:15px 17px 17px; }
+.saved-reply-form-heading { display:flex; align-items:center; justify-content:space-between; }
+.saved-reply-form-heading h3 { margin:0; color:#e4ede7; font-size:13px; font-weight:600; }
+.saved-reply-cancel-edit { border:0; color:#94cba2; background:transparent; font-size:11px; }
+.saved-reply-kind-tabs { display:flex; gap:5px; padding:3px; border:1px solid #343f38; border-radius:8px; background:#181d1a; }
+.saved-reply-kind-tabs button { min-height:31px; display:inline-flex; align-items:center; justify-content:center; gap:5px; flex:1; padding:0 7px; border:0; border-radius:6px; color:#98a69d; background:transparent; font-size:10px; white-space:nowrap; }
+.saved-reply-kind-tabs button.active { color:#d7f0dd; background:#294332; }
+.saved-reply-kind-tabs button:disabled:not(.active) { opacity:.4; }
+.saved-reply-field { display:grid; gap:5px; color:#9daa9f; font-size:10px; }
+.saved-reply-field input, .saved-reply-field textarea { width:100%; border:1px solid #3a4540; border-radius:7px; padding:9px 10px; color:#eaf0ec; background:#171b19; outline:none; font-size:12px; }
+.saved-reply-field input:focus, .saved-reply-field textarea:focus { border-color:#5e8068; }
+.saved-reply-field textarea { resize:vertical; min-height:76px; }
+.saved-reply-file-input { min-height:74px; display:grid; place-content:center; gap:7px; padding:12px; border:1px dashed #4a6252; border-radius:8px; color:#a6b8ab; background:#1b251f; font-size:11px; text-align:center; cursor:pointer; }
+.saved-reply-file-input input { width:min(100%,250px); color:#a9b7ae; font-size:10px; }
+.saved-reply-file-input small { overflow:hidden; color:#c4dfca; text-overflow:ellipsis; white-space:nowrap; }
+.saved-reply-file-note { margin:0; color:#8f9d94; font-size:10px; line-height:1.5; }
+.saved-reply-form-error { margin:0; color:#efaaa2; font-size:11px; }
+.saved-reply-form-actions { display:flex; justify-content:flex-end; gap:8px; padding-top:2px; }
+.saved-reply-cancel, .saved-reply-save { min-height:34px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 12px; border:1px solid #46524b; border-radius:7px; color:#b5c0b9; background:transparent; font-size:11px; }
+.saved-reply-save { border-color:#42654d; color:#e0f4e5; background:#24402c; }
+.saved-reply-save:disabled, .saved-reply-cancel:disabled { opacity:.55; cursor:not-allowed; }
+@media (max-width: 640px) {
+  .saved-replies-content { grid-template-columns:1fr; }
+  .saved-replies-list { max-height:190px; overflow:auto; border-right:0; border-bottom:1px solid #343d38; }
+  .saved-reply-form { padding:13px; }
+  .saved-reply-kind-tabs button { gap:4px; padding:0 4px; font-size:9px; }
+}
 .empty-chat { position:relative; flex:1; min-height:0; display:grid; place-items:center; padding:30px; text-align:center; }
 .empty-chat-card { max-width:380px; color:#9ba7a2; }
 .empty-chat-list-button { display:inline-flex; align-items:center; gap:6px; margin:0 auto 22px; min-height:34px; padding:0 12px; border:1px solid #40564a; border-radius:7px; color:#bed7c5; background:#1b2a22; font-size:12px; }

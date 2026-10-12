@@ -43,6 +43,9 @@ import type {
   MediaInput,
   MessageInput,
   MessageReactionInput,
+  SavedReply,
+  SavedReplyInput,
+  SavedReplyUpdate,
   StartConversationInput,
   StartConversationResult,
   SuccessResponse,
@@ -52,6 +55,8 @@ import type {
   TemplateDispatchResult,
   TemplateDispatchSummary,
   TemplateInput,
+  UploadUrlRequest,
+  UploadUrlResponse,
   VerifyWebhookParams,
   WebhookPayload
 } from './api.schemas';
@@ -149,6 +154,575 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListSavedRepliesUrl = () => {
+
+
+
+
+  return `/api/saved-replies`
+}
+
+/**
+ * @summary List reusable chat highlights
+ */
+export const listSavedReplies = async ( options?: Parameters<typeof customFetch>[1]): Promise<SavedReply[]> => {
+
+  return customFetch<SavedReply[]>(getListSavedRepliesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSavedRepliesQueryKey = () => {
+    return [
+    `/api/saved-replies`
+    ] as const;
+    }
+
+
+export const getListSavedRepliesQueryOptions = <TData = Awaited<ReturnType<typeof listSavedReplies>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSavedReplies>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSavedRepliesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSavedReplies>>> = ({ signal }) => listSavedReplies({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSavedReplies>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSavedRepliesQueryResult = NonNullable<Awaited<ReturnType<typeof listSavedReplies>>>
+export type ListSavedRepliesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List reusable chat highlights
+ */
+
+export function useListSavedReplies<TData = Awaited<ReturnType<typeof listSavedReplies>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSavedReplies>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSavedRepliesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateSavedReplyUrl = () => {
+
+
+
+
+  return `/api/saved-replies`
+}
+
+/**
+ * @summary Save a reusable message or media highlight
+ */
+export const createSavedReply = async (savedReplyInput: SavedReplyInput, options?: Parameters<typeof customFetch>[1]): Promise<SavedReply> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SavedReply>(getCreateSavedReplyUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(savedReplyInput)
+  }
+);}
+
+
+
+
+
+export const getCreateSavedReplyMutationKey = () => ['createSavedReply'] as const;
+
+export const getCreateSavedReplyMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSavedReply>>, TError,CreateSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSavedReply>>, TError,CreateSavedReplyMutationVariables, TContext> => {
+
+const mutationKey = getCreateSavedReplyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSavedReply>>, CreateSavedReplyMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSavedReply(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateSavedReplyMutationResult = NonNullable<Awaited<ReturnType<typeof createSavedReply>>>
+    export type CreateSavedReplyMutationBody = BodyType<SavedReplyInput>
+    export type CreateSavedReplyMutationError = ErrorType<ErrorResponse>
+    export type CreateSavedReplyMutationVariables = {data: BodyType<SavedReplyInput>}
+
+    /**
+ * @summary Save a reusable message or media highlight
+ */
+export const useCreateSavedReply = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSavedReply>>, TError,CreateSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createSavedReply>>,
+        TError,
+        CreateSavedReplyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateSavedReplyMutationOptions(options));
+    }
+
+export const getUpdateSavedReplyUrl = (savedReplyId: number,) => {
+
+
+
+
+  return `/api/saved-replies/${savedReplyId}`
+}
+
+/**
+ * @summary Update a saved highlight
+ */
+export const updateSavedReply = async (savedReplyId: number,
+    savedReplyUpdate: SavedReplyUpdate, options?: Parameters<typeof customFetch>[1]): Promise<SavedReply> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SavedReply>(getUpdateSavedReplyUrl(savedReplyId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(savedReplyUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdateSavedReplyMutationKey = () => ['updateSavedReply'] as const;
+
+export const getUpdateSavedReplyMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSavedReply>>, TError,UpdateSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateSavedReply>>, TError,UpdateSavedReplyMutationVariables, TContext> => {
+
+const mutationKey = getUpdateSavedReplyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSavedReply>>, UpdateSavedReplyMutationVariables> = (props) => {
+          const {savedReplyId,data} = props ?? {};
+
+          return  updateSavedReply(savedReplyId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateSavedReplyMutationResult = NonNullable<Awaited<ReturnType<typeof updateSavedReply>>>
+    export type UpdateSavedReplyMutationBody = BodyType<SavedReplyUpdate>
+    export type UpdateSavedReplyMutationError = ErrorType<ErrorResponse>
+    export type UpdateSavedReplyMutationVariables = {savedReplyId: number;data: BodyType<SavedReplyUpdate>}
+
+    /**
+ * @summary Update a saved highlight
+ */
+export const useUpdateSavedReply = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSavedReply>>, TError,UpdateSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateSavedReply>>,
+        TError,
+        UpdateSavedReplyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateSavedReplyMutationOptions(options));
+    }
+
+export const getDeleteSavedReplyUrl = (savedReplyId: number,) => {
+
+
+
+
+  return `/api/saved-replies/${savedReplyId}`
+}
+
+/**
+ * @summary Delete a saved highlight
+ */
+export const deleteSavedReply = async (savedReplyId: number, options?: Parameters<typeof customFetch>[1]): Promise<SuccessResponse> => {
+
+  return customFetch<SuccessResponse>(getDeleteSavedReplyUrl(savedReplyId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteSavedReplyMutationKey = () => ['deleteSavedReply'] as const;
+
+export const getDeleteSavedReplyMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSavedReply>>, TError,DeleteSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSavedReply>>, TError,DeleteSavedReplyMutationVariables, TContext> => {
+
+const mutationKey = getDeleteSavedReplyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSavedReply>>, DeleteSavedReplyMutationVariables> = (props) => {
+          const {savedReplyId} = props ?? {};
+
+          return  deleteSavedReply(savedReplyId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSavedReplyMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSavedReply>>>
+
+    export type DeleteSavedReplyMutationError = ErrorType<ErrorResponse>
+    export type DeleteSavedReplyMutationVariables = {savedReplyId: number}
+
+    /**
+ * @summary Delete a saved highlight
+ */
+export const useDeleteSavedReply = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSavedReply>>, TError,DeleteSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSavedReply>>,
+        TError,
+        DeleteSavedReplyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteSavedReplyMutationOptions(options));
+    }
+
+export const getSendSavedReplyUrl = (conversationId: number,
+    savedReplyId: number,) => {
+
+
+
+
+  return `/api/conversations/${conversationId}/saved-replies/${savedReplyId}/send`
+}
+
+/**
+ * @summary Send a saved highlight immediately in a conversation
+ */
+export const sendSavedReply = async (conversationId: number,
+    savedReplyId: number, options?: Parameters<typeof customFetch>[1]): Promise<ChatMessage> => {
+
+  return customFetch<ChatMessage>(getSendSavedReplyUrl(conversationId,savedReplyId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSendSavedReplyMutationKey = () => ['sendSavedReply'] as const;
+
+export const getSendSavedReplyMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendSavedReply>>, TError,SendSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendSavedReply>>, TError,SendSavedReplyMutationVariables, TContext> => {
+
+const mutationKey = getSendSavedReplyMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendSavedReply>>, SendSavedReplyMutationVariables> = (props) => {
+          const {conversationId,savedReplyId} = props ?? {};
+
+          return  sendSavedReply(conversationId,savedReplyId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendSavedReplyMutationResult = NonNullable<Awaited<ReturnType<typeof sendSavedReply>>>
+
+    export type SendSavedReplyMutationError = ErrorType<ErrorResponse>
+    export type SendSavedReplyMutationVariables = {conversationId: number;savedReplyId: number}
+
+    /**
+ * @summary Send a saved highlight immediately in a conversation
+ */
+export const useSendSavedReply = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendSavedReply>>, TError,SendSavedReplyMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendSavedReply>>,
+        TError,
+        SendSavedReplyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSendSavedReplyMutationOptions(options));
+    }
+
+export const getRequestUploadUrlUrl = () => {
+
+
+
+
+  return `/api/storage/uploads/request-url`
+}
+
+/**
+ * @summary Request a private media upload URL
+ */
+export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, options?: Parameters<typeof customFetch>[1]): Promise<UploadUrlResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<UploadUrlResponse>(getRequestUploadUrlUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(uploadUrlRequest)
+  }
+);}
+
+
+
+
+
+export const getRequestUploadUrlMutationKey = () => ['requestUploadUrl'] as const;
+
+export const getRequestUploadUrlMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,RequestUploadUrlMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,RequestUploadUrlMutationVariables, TContext> => {
+
+const mutationKey = getRequestUploadUrlMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestUploadUrl>>, RequestUploadUrlMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  requestUploadUrl(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestUploadUrl>>>
+    export type RequestUploadUrlMutationBody = BodyType<UploadUrlRequest>
+    export type RequestUploadUrlMutationError = ErrorType<ErrorResponse>
+    export type RequestUploadUrlMutationVariables = {data: BodyType<UploadUrlRequest>}
+
+    /**
+ * @summary Request a private media upload URL
+ */
+export const useRequestUploadUrl = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,RequestUploadUrlMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestUploadUrl>>,
+        TError,
+        RequestUploadUrlMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRequestUploadUrlMutationOptions(options));
+    }
+
+export const getGetStorageObjectUrl = (objectPath: string,) => {
+
+
+
+
+  return `/api/storage/objects/${objectPath}`
+}
+
+/**
+ * @summary Serve a private saved media object
+ */
+export const getStorageObject = async (objectPath: string, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getGetStorageObjectUrl(objectPath),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetStorageObjectQueryKey = (objectPath: string,) => {
+    return [
+    `/api/storage/objects/${objectPath}`
+    ] as const;
+    }
+
+
+export const getGetStorageObjectQueryOptions = <TData = Awaited<ReturnType<typeof getStorageObject>>, TError = ErrorType<ErrorResponse>>(objectPath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStorageObject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetStorageObjectQueryKey(objectPath);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStorageObject>>> = ({ signal }) => getStorageObject(objectPath, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: objectPath !== null && objectPath !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getStorageObject>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetStorageObjectQueryResult = NonNullable<Awaited<ReturnType<typeof getStorageObject>>>
+export type GetStorageObjectQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Serve a private saved media object
+ */
+
+export function useGetStorageObject<TData = Awaited<ReturnType<typeof getStorageObject>>, TError = ErrorType<ErrorResponse>>(
+ objectPath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStorageObject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetStorageObjectQueryOptions(objectPath,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

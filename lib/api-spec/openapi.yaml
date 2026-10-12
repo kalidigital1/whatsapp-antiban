@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: whatsapp
     description: WhatsApp Cloud API connection and messaging
+  - name: storage
+    description: Private persistent media storage
 paths:
   /healthz:
     get:
@@ -26,6 +28,180 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /saved-replies:
+    get:
+      operationId: listSavedReplies
+      tags: [whatsapp]
+      summary: List reusable chat highlights
+      responses:
+        "200":
+          description: Saved messages and media
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SavedReply"
+    post:
+      operationId: createSavedReply
+      tags: [whatsapp]
+      summary: Save a reusable message or media highlight
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavedReplyInput"
+      responses:
+        "201":
+          description: Saved highlight created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedReply"
+        "400":
+          description: Invalid saved highlight
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /saved-replies/{savedReplyId}:
+    patch:
+      operationId: updateSavedReply
+      tags: [whatsapp]
+      summary: Update a saved highlight
+      parameters:
+        - name: savedReplyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavedReplyUpdate"
+      responses:
+        "200":
+          description: Saved highlight updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedReply"
+        "404":
+          description: Saved highlight not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSavedReply
+      tags: [whatsapp]
+      summary: Delete a saved highlight
+      parameters:
+        - name: savedReplyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Saved highlight deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "404":
+          description: Saved highlight not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /conversations/{conversationId}/saved-replies/{savedReplyId}/send:
+    post:
+      operationId: sendSavedReply
+      tags: [whatsapp]
+      summary: Send a saved highlight immediately in a conversation
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: savedReplyId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "201":
+          description: Saved highlight sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        "400":
+          description: Sending failed or the account is disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Conversation or saved highlight not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a private media upload URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          description: Invalid upload metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /storage/objects/{objectPath}:
+    get:
+      operationId: getStorageObject
+      tags: [storage]
+      summary: Serve a private saved media object
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Media content streamed
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /connection:
     get:
       operationId: getConnection
@@ -782,6 +958,92 @@ components:
         error:
           type: string
       required: [error]
+    SavedReply:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        kind:
+          type: string
+          enum: [text, audio, image, video, document]
+        content:
+          type: ["string", "null"]
+        objectPath:
+          type: ["string", "null"]
+        mediaMimeType:
+          type: ["string", "null"]
+        mediaFileName:
+          type: ["string", "null"]
+        sizeBytes:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, title, kind, content, objectPath, mediaMimeType, mediaFileName, sizeBytes, createdAt, updatedAt]
+    SavedReplyInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 64
+        kind:
+          type: string
+          enum: [text, audio, image, video, document]
+        content:
+          type: string
+          maxLength: 10000
+        objectPath:
+          type: string
+          minLength: 1
+        mediaMimeType:
+          type: string
+          minLength: 1
+        mediaFileName:
+          type: string
+          minLength: 1
+        sizeBytes:
+          type: integer
+          minimum: 1
+      required: [title, kind]
+    SavedReplyUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 64
+        content:
+          type: string
+          maxLength: 10000
+      required: [title]
+    UploadUrlRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        size:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          minLength: 1
+      required: [name, size, contentType]
+    UploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+        objectPath:
+          type: string
+        metadata:
+          $ref: "#/components/schemas/UploadUrlRequest"
+      required: [uploadURL, objectPath]
     SuccessResponse:
       type: object
       properties:

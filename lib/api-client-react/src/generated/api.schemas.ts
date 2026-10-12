@@ -13,6 +13,90 @@ export interface ErrorResponse {
   error: string;
 }
 
+export type SavedReplyKind = typeof SavedReplyKind[keyof typeof SavedReplyKind];
+
+
+export const SavedReplyKind = {
+  text: 'text',
+  audio: 'audio',
+  image: 'image',
+  video: 'video',
+  document: 'document',
+} as const;
+
+export interface SavedReply {
+  id: number;
+  title: string;
+  kind: SavedReplyKind;
+  /** @nullable */
+  content: string | null;
+  /** @nullable */
+  objectPath: string | null;
+  /** @nullable */
+  mediaMimeType: string | null;
+  /** @nullable */
+  mediaFileName: string | null;
+  /** @nullable */
+  sizeBytes: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SavedReplyInputKind = typeof SavedReplyInputKind[keyof typeof SavedReplyInputKind];
+
+
+export const SavedReplyInputKind = {
+  text: 'text',
+  audio: 'audio',
+  image: 'image',
+  video: 'video',
+  document: 'document',
+} as const;
+
+export interface SavedReplyInput {
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  title: string;
+  kind: SavedReplyInputKind;
+  /** @maxLength 10000 */
+  content?: string;
+  /** @minLength 1 */
+  objectPath?: string;
+  /** @minLength 1 */
+  mediaMimeType?: string;
+  /** @minLength 1 */
+  mediaFileName?: string;
+  /** @minimum 1 */
+  sizeBytes?: number;
+}
+
+export interface SavedReplyUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  title: string;
+  /** @maxLength 10000 */
+  content?: string;
+}
+
+export interface UploadUrlRequest {
+  /** @minLength 1 */
+  name: string;
+  /** @minimum 1 */
+  size: number;
+  /** @minLength 1 */
+  contentType: string;
+}
+
+export interface UploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
+  metadata?: UploadUrlRequest;
+}
+
 export interface SuccessResponse {
   success: boolean;
 }

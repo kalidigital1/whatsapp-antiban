@@ -85,6 +85,7 @@ import {
 import { ErrorBoundary } from '@/components/error-boundary';
 import { DashboardWorkspace } from '@/components/dashboard-workspace';
 import { EvolutionConnectionPanel } from '@/components/evolution-connection-panel';
+import { SavedReplyHighlights } from '@/components/saved-reply-highlights';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
@@ -1061,6 +1062,7 @@ function ChatPanel({
       </div>
 
       <div className="composer-wrap">
+        <SavedReplyHighlights conversationId={conversation.id} disabled={!connected || sending} />
         {mediaFile && (
           <div className="attachment-draft" data-testid="attachment-draft">
             <div className="attachment-draft-preview">
