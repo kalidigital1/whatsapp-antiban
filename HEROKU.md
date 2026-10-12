@@ -42,10 +42,12 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
    - `WHATSAPP_GRAPH_VERSION`: opcional; o padrão do projeto é `v23.0`.
    - `WHATSAPP_ESTIMATED_COST_PER_MESSAGE`: opcional.
    - `WHATSAPP_ESTIMATED_COST_CURRENCY`: opcional; o padrão é `BRL`.
+    - `EVOLUTION_API_URL`: URL base do serviço usado para conectar pelo QR Code.
+    - `EVOLUTION_API_KEY`: chave desse serviço, mantida somente nas Config Vars.
 
-   Os dados da conta WhatsApp conectada são configurados pela tela de configurações e persistidos no banco.
+    Os dados da conta WhatsApp conectada são configurados pela tela de configurações e persistidos no banco. Os valores guardados nos Secrets do Replit não são copiados para o Heroku; configure-os novamente nas Config Vars do app.
 
-4. O Heroku instala a versão de pnpm declarada em `packageManager`, executa o build pelo `heroku-postbuild` e roda o `release` do `Procfile` para aplicar o schema do banco antes de iniciar o dyno web.
+4. O Heroku instala a versão de pnpm declarada em `packageManager`, executa o build pelo `heroku-postbuild` e roda o `release` do `Procfile` para aplicar o schema do banco antes de iniciar o dyno web. O `drizzle-kit` precisa permanecer disponível nas dependências de produção para essa etapa.
 5. No painel da Meta, configure o callback para:
 
    ```text

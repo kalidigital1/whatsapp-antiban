@@ -24,6 +24,8 @@ import type {
   ConnectionInput,
   ConnectionStatus,
   Contact,
+  ContactImportInput,
+  ContactImportSummary,
   ContactInput,
   Conversation,
   ConversationContactProfile,
@@ -1862,6 +1864,94 @@ export const useCreateContact = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getCreateContactMutationOptions(options));
+    }
+
+export const getImportContactsUrl = () => {
+
+
+
+
+  return `/api/contacts/import`
+}
+
+/**
+ * @summary Import or update WhatsApp contacts from a CSV batch
+ */
+export const importContacts = async (contactImportInput: ContactImportInput, options?: Parameters<typeof customFetch>[1]): Promise<ContactImportSummary> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ContactImportSummary>(getImportContactsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(contactImportInput)
+  }
+);}
+
+
+
+
+
+export const getImportContactsMutationKey = () => ['importContacts'] as const;
+
+export const getImportContactsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importContacts>>, TError,ImportContactsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importContacts>>, TError,ImportContactsMutationVariables, TContext> => {
+
+const mutationKey = getImportContactsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importContacts>>, ImportContactsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  importContacts(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportContactsMutationResult = NonNullable<Awaited<ReturnType<typeof importContacts>>>
+    export type ImportContactsMutationBody = BodyType<ContactImportInput>
+    export type ImportContactsMutationError = ErrorType<ErrorResponse>
+    export type ImportContactsMutationVariables = {data: BodyType<ContactImportInput>}
+
+    /**
+ * @summary Import or update WhatsApp contacts from a CSV batch
+ */
+export const useImportContacts = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importContacts>>, TError,ImportContactsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importContacts>>,
+        TError,
+        ImportContactsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getImportContactsMutationOptions(options));
     }
 
 export const getListTemplatesUrl = () => {

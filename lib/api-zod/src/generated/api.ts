@@ -564,6 +564,33 @@ export const CreateContactResponse = zod.object({
 
 
 /**
+ * @summary Import or update WhatsApp contacts from a CSV batch
+ */
+
+export const importContactsBodyContactsMax = 1000;
+
+
+
+export const ImportContactsBody = zod.object({
+  "contacts": zod.array(zod.object({
+  "rowNumber": zod.number().int().min(1),
+  "name": zod.string(),
+  "phoneNumber": zod.string()
+})).min(1).max(importContactsBodyContactsMax)
+})
+
+export const ImportContactsResponse = zod.object({
+  "createdCount": zod.number().int(),
+  "updatedCount": zod.number().int(),
+  "rejectedCount": zod.number().int(),
+  "errors": zod.array(zod.object({
+  "rowNumber": zod.number().int(),
+  "reason": zod.string()
+}))
+})
+
+
+/**
  * @summary List manually created WhatsApp message templates
  */
 export const ListTemplatesResponseItem = zod.object({

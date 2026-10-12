@@ -5,6 +5,8 @@ import {
   ConnectEvolutionWhatsAppBody,
   ConnectWhatsAppBody,
   CreateContactBody,
+  ImportContactsBody,
+  ImportContactsResponse,
   CreateTemplateBody,
   DispatchTemplateBody,
   DispatchTemplateParams,
@@ -1645,18 +1647,7 @@ async function storeOutboundMediaMessage(
   }
 }
 
-function isGeneratedContactName(name: string, phoneNumber: string): boolean {
-  return name.trim() === `Cliente ${phoneNumber.slice(-4)}`;
-}
-
-function contactDisplayName(contact: typeof contacts.$inferSelect): string {
-  const name = contact.name.trim();
-  return name && !isGeneratedContactName(name, contact.phoneNumber)
-    ? name
-    : contact.phoneNumber;
-}
-
-async function getOrCreateContact(phoneNumber: string, name?: string) {
+function contactPhoneCandidates(phoneNumber: string): string[] {
   const normalizedPhone = normalizePhone(phoneNumber);
   const explicitlyInternational = phoneNumber.trim().startsWith("+");
   const storedPhoneNumber = explicitlyInternational ? `+${normalizedPhone}` : normalizedPhone;
@@ -1675,19 +1666,37 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
     }
     candidatePhones.push(countryAwarePhone);
   }
+  return [...new Set(candidatePhones)];
+}
 
-  let existing: typeof contacts.$inferSelect | undefined;
-  for (const candidatePhone of new Set(candidatePhones)) {
+async function findContactByPhone(phoneNumber: string) {
+  for (const candidatePhone of contactPhoneCandidates(phoneNumber)) {
     const [candidate] = await db
       .select()
       .from(contacts)
       .where(eq(contacts.phoneNumber, candidatePhone))
       .limit(1);
-    if (candidate) {
-      existing = candidate;
-      break;
-    }
+    if (candidate) return candidate;
   }
+  return undefined;
+}
+
+function isGeneratedContactName(name: string, phoneNumber: string): boolean {
+  return name.trim() === `Cliente ${phoneNumber.slice(-4)}`;
+}
+
+function contactDisplayName(contact: typeof contacts.$inferSelect): string {
+  const name = contact.name.trim();
+  return name && !isGeneratedContactName(name, contact.phoneNumber)
+    ? name
+    : contact.phoneNumber;
+}
+
+async function getOrCreateContact(phoneNumber: string, name?: string) {
+  const normalizedPhone = normalizePhone(phoneNumber);
+  const explicitlyInternational = phoneNumber.trim().startsWith("+");
+  const storedPhoneNumber = explicitlyInternational ? `+${normalizedPhone}` : normalizedPhone;
+  const existing = await findContactByPhone(phoneNumber);
 
   if (existing) {
     const incomingName = name?.trim();
@@ -3282,6 +3291,70 @@ router.get("/contacts", async (_req, res) => {
   }
 });
 
+router.post("/contacts/import", async (req, res) => {
+  try {
+    const input = ImportContactsBody.parse(req.body);
+    const summary = {
+      createdCount: 0,
+      updatedCount: 0,
+      rejectedCount: 0,
+      errors: [] as Array<{ rowNumber: number; reason: string }>,
+    };
+    const seenPhones = new Set<string>();
+
+    for (const row of input.contacts) {
+      const name = row.name.trim();
+      const phoneNumber = normalizePhone(row.phoneNumber);
+      const phoneKey = phoneNumber.startsWith("55") && phoneNumber.length >= 12
+        ? phoneNumber.slice(2)
+        : phoneNumber;
+      let reason: string | null = null;
+
+      if (!name) {
+        reason = "Informe o nome do contato.";
+      } else if (name.length > 160) {
+        reason = "O nome deve ter no máximo 160 caracteres.";
+      } else if (phoneNumber.length < 8 || phoneNumber.length > 15) {
+        reason = "Informe um telefone válido com DDI.";
+      } else if (seenPhones.has(phoneKey)) {
+        reason = "Telefone duplicado no arquivo; a primeira ocorrência foi mantida.";
+      }
+
+      if (reason) {
+        summary.rejectedCount += 1;
+        summary.errors.push({ rowNumber: row.rowNumber, reason });
+        continue;
+      }
+      seenPhones.add(phoneKey);
+
+      try {
+        const existing = await findContactByPhone(row.phoneNumber);
+        await getOrCreateContact(row.phoneNumber, name);
+        if (existing) summary.updatedCount += 1;
+        else summary.createdCount += 1;
+      } catch (error) {
+        summary.rejectedCount += 1;
+        summary.errors.push({
+          rowNumber: row.rowNumber,
+          reason: "Não foi possível salvar este contato.",
+        });
+        logger.warn(
+          { err: error, rowNumber: row.rowNumber },
+          "WhatsApp contact import row failed",
+        );
+      }
+    }
+
+    res.json(ImportContactsResponse.parse(summary));
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : "Arquivo de contatos inválido.";
+    logger.warn({ message }, "WhatsApp contacts import failed");
+    res.status(400).json({ error: "A lista de contatos enviada é inválida." });
+  }
+});
+
 router.post("/contacts", async (req, res) => {
   try {
     const input = CreateContactBody.parse(req.body);
@@ -3295,21 +3368,7 @@ router.post("/contacts", async (req, res) => {
       res.status(400).json({ error: "Informe um nome para o lead." });
       return;
     }
-    const [existing] = await db
-      .select()
-      .from(contacts)
-      .where(eq(contacts.phoneNumber, phoneNumber))
-      .limit(1);
-    const [contact] = existing
-      ? await db
-          .update(contacts)
-          .set({ name, updatedAt: new Date() })
-          .where(eq(contacts.id, existing.id))
-          .returning()
-      : await db
-          .insert(contacts)
-          .values({ name, phoneNumber })
-          .returning();
+    const contact = await getOrCreateContact(input.phoneNumber, name);
     if (!contact) throw new MetaApiError("Não foi possível salvar o lead.");
     res.status(201).json({ name: contact.name, phoneNumber: contact.phoneNumber });
   } catch (error) {

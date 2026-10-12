@@ -124,6 +124,33 @@ export interface ContactInput {
   phoneNumber: string;
 }
 
+export interface ContactImportRow {
+  /** @minimum 1 */
+  rowNumber: number;
+  name: string;
+  phoneNumber: string;
+}
+
+export interface ContactImportInput {
+  /**
+     * @minItems 1
+     * @maxItems 1000
+     */
+  contacts: ContactImportRow[];
+}
+
+export interface ContactImportError {
+  rowNumber: number;
+  reason: string;
+}
+
+export interface ContactImportSummary {
+  createdCount: number;
+  updatedCount: number;
+  rejectedCount: number;
+  errors: ContactImportError[];
+}
+
 export type DashboardReportResponsePeriod = typeof DashboardReportResponsePeriod[keyof typeof DashboardReportResponsePeriod];
 
 

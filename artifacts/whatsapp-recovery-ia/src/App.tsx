@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -9,6 +9,7 @@ import {
   CircleHelp,
   CircleDollarSign,
   Clipboard,
+  Download,
   FileText,
   Image as ImageIcon,
   Inbox,
@@ -29,6 +30,7 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
+  Upload,
   UserRound,
   Video,
   Wifi,
@@ -57,6 +59,7 @@ import {
   useUpdateEvolutionProfileName,
   useGetTemplateDispatch,
   useGetTemplateCosts,
+  useImportContacts,
   useListConversationMessages,
   useListContacts,
   useListConversations,
@@ -68,6 +71,8 @@ import {
   useStartConversation,
   type ChatMessage,
   type Contact,
+  type ContactImportInput,
+  type ContactImportSummary,
   type ConnectionStatus,
   type Conversation,
   type Template,
@@ -303,7 +308,7 @@ function Avatar({ name, size = 'normal' }: { name: string; size?: 'normal' | 'la
   );
 }
 
-function NavigationRail({ onSettings, connected, profilePictureUrl, profileName, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; profileName?: string | null; activeSection: 'inbox' | 'templates' | 'dashboard'; onSectionChange: (section: 'inbox' | 'templates' | 'dashboard') => void }) {
+function NavigationRail({ onSettings, connected, profilePictureUrl, profileName, activeSection, onSectionChange }: { onSettings: () => void; connected: boolean; profilePictureUrl?: string | null; profileName?: string | null; activeSection: 'inbox' | 'templates' | 'dashboard' | 'contacts'; onSectionChange: (section: 'inbox' | 'templates' | 'dashboard' | 'contacts') => void }) {
   return (
     <aside className="wa-rail" aria-label="Navegação principal">
       <div className="rail-brand" aria-label="Meta Business Partner">
@@ -313,7 +318,7 @@ function NavigationRail({ onSettings, connected, profilePictureUrl, profileName,
         <button type="button" className="rail-btn" data-active={activeSection === 'inbox'} onClick={() => onSectionChange('inbox')} aria-label="Conversas" data-testid="rail-conversations"><MessageCircle size={17} /><span className="rail-btn-label">Conversas</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'dashboard'} onClick={() => onSectionChange('dashboard')} aria-label="Dashboard" data-testid="rail-dashboard"><LayoutDashboard size={17} /><span className="rail-btn-label">Dashboard</span></button>
         <button type="button" className="rail-btn" data-active={activeSection === 'templates'} onClick={() => onSectionChange('templates')} aria-label="Envios" data-testid="rail-templates"><FileText size={17} strokeWidth={1.8} /><span className="rail-btn-label">Envios</span></button>
-        <button type="button" className="rail-btn" onClick={() => undefined} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
+        <button type="button" className="rail-btn" data-active={activeSection === 'contacts'} onClick={() => onSectionChange('contacts')} aria-label="Contatos" data-testid="rail-contacts"><UserRound size={17} /><span className="rail-btn-label">Contatos</span></button>
       </nav>
       <div className="rail-bottom">
         <button type="button" className="rail-btn" onClick={onSettings} aria-label="Configurações" data-testid="rail-settings"><Settings size={17} /><span className="rail-btn-label">Configurações</span></button>
@@ -1199,12 +1204,15 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
   const evolutionMode = Boolean(evolutionConnectionQuery.data?.active);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [phoneCountry, setPhoneCountry] = useState<CountryCode>('BR');
+  const [saveAsContact, setSaveAsContact] = useState(false);
+  const [contactName, setContactName] = useState('');
   const [sendMode, setSendMode] = useState<'text' | 'template'>('text');
   const [content, setContent] = useState('');
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [parameterValues, setParameterValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState('');
   const startConversation = useStartConversation();
+  const saveContact = useCreateContact();
   const approvedTemplates = useMemo(
     () => (templatesQuery.data ?? []).filter((template) => template.status.toUpperCase() === 'APPROVED'),
     [templatesQuery.data],
@@ -1254,12 +1262,31 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
       return;
     }
     const internationalPhoneNumber = parsedPhoneNumber.number;
+    if (saveAsContact && !contactName.trim()) {
+      setFormError('Informe o nome para salvar este contato.');
+      return;
+    }
+    const sendAfterContactSave = (send: () => void) => {
+      if (!saveAsContact) {
+        send();
+        return;
+      }
+      saveContact.mutate({
+        data: { phoneNumber: internationalPhoneNumber, name: contactName.trim() },
+      }, {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
+          send();
+        },
+        onError: (error) => setFormError(errorText(error)),
+      });
+    };
     if (sendMode === 'text') {
       if (!content.trim()) {
         setFormError('Digite a mensagem inicial.');
         return;
       }
-      startConversation.mutate({
+      sendAfterContactSave(() => startConversation.mutate({
         data: {
           phoneNumber: internationalPhoneNumber,
           content: content.trim(),
@@ -1267,7 +1294,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
       }, {
         onSuccess: (result) => { void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() }); onCreated(result.conversation); },
         onError: (error) => setFormError(errorText(error)),
-      });
+      }));
       return;
     }
     if (!selectedTemplate) {
@@ -1289,7 +1316,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
     const variables = parameterSlots
       .filter((slot) => slot.component === 'body' && slot.parameterType === 'text')
       .map((slot) => parameterValues[slot.key]?.trim() ?? '');
-    startConversation.mutate({
+    sendAfterContactSave(() => startConversation.mutate({
       data: {
         phoneNumber: internationalPhoneNumber,
         templateId: selectedTemplate.id,
@@ -1299,7 +1326,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
     }, {
       onSuccess: (result) => { void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() }); onCreated(result.conversation); },
       onError: (error) => setFormError(errorText(error)),
-    });
+    }));
   };
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="new-conversation-title" data-testid="dialog-new-conversation">
@@ -1311,6 +1338,13 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
             <div className="field"><label className="field-label" htmlFor="new-phone-number">Telefone</label><input id="new-phone-number" type="tel" inputMode="tel" className="field-input" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder={phoneCountry === 'BR' ? 'DDD e número' : 'Número local'} data-testid="input-new-phone-number" /></div>
           </div>
           <p className="field-help -mt-2">O DDI selecionado será aplicado automaticamente. Você também pode colar um número completo com DDI.</p>
+          <div className="space-y-2 rounded-lg border border-[#363e3a] bg-[#191e1b] p-3">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-[#c1cbc5]">
+              <input type="checkbox" checked={saveAsContact} onChange={(event) => setSaveAsContact(event.target.checked)} className="h-4 w-4 accent-[#68c98a]" data-testid="checkbox-save-new-contact" />
+              <span>Salvar este número na lista de contatos</span>
+            </label>
+            {saveAsContact && <div className="field"><label className="field-label" htmlFor="new-contact-name">Nome do contato</label><input id="new-contact-name" className="field-input" value={contactName} onChange={(event) => setContactName(event.target.value)} placeholder="Ex.: Maria Silva" data-testid="input-new-contact-name" /></div>}
+          </div>
           <div className="field"><label className="field-label" htmlFor="new-message-mode">Tipo de mensagem</label><select id="new-message-mode" className="field-input" value={sendMode} onChange={(event) => setSendMode(event.target.value as 'text' | 'template')} data-testid="select-new-message-mode"><option value="text">Mensagem normal</option><option value="template" disabled={evolutionMode || approvedTemplates.length === 0}>{evolutionMode ? 'Template disponível apenas na API Oficial' : `Template aprovado${approvedTemplates.length === 0 ? ' (nenhum disponível)' : ''}`}</option></select>{evolutionMode && <p className="field-help">Templates oficiais exigem conexão ativa com a API Oficial da Meta.</p>}</div>
           {sendMode === 'text' && <div className="field"><label className="field-label" htmlFor="new-message">Mensagem inicial</label><textarea id="new-message" className="field-input min-h-28 resize-y" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Olá, como podemos ajudar?" data-testid="input-new-message" /><p className="field-help">A Meta pode bloquear texto normal quando o contato ainda não iniciou uma conversa ou não há janela de atendimento ativa.</p></div>}
           {templatesQuery.isLoading && <div className="status-note"><Loader2 size={16} className="animate-spin" /> Carregando templates aprovados...</div>}
@@ -1318,7 +1352,7 @@ function NewConversationDialog({ onClose, onCreated }: { onClose: () => void; on
           {sendMode === 'template' && approvedTemplates.length > 0 && <div className="field"><label className="field-label" htmlFor="new-template">Template aprovado</label><select id="new-template" className="field-input" value={templateId ?? ''} onChange={(event) => setTemplateId(Number(event.target.value))} data-testid="select-new-template">{approvedTemplates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.languageCode}</option>)}</select><p className="field-help">{selectedTemplate?.body}</p></div>}
           {sendMode === 'template' && parameterSlots.map((slot) => <div className="field" key={slot.key}><label className="field-label" htmlFor={`new-template-${slot.key}`}>{slot.label}</label><input id={`new-template-${slot.key}`} className="field-input" value={parameterValues[slot.key] ?? ''} onChange={(event) => setParameterValues((current) => ({ ...current, [slot.key]: event.target.value }))} placeholder={slot.placeholder} data-testid={`input-new-template-${slot.key}`} /></div>)}
           {formError && <p className="flex items-center gap-2 text-xs text-[#eea59e]" data-testid="status-new-conversation-error"><AlertCircle size={15} />{formError}</p>}
-          <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-ghost" onClick={onClose} data-testid="button-cancel-new-conversation">Cancelar</button><button type="submit" className="btn-primary" disabled={startConversation.isPending || (sendMode === 'template' && !selectedTemplate)} data-testid="button-start-conversation">{startConversation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{startConversation.isPending ? 'Iniciando...' : 'Iniciar conversa'}</button></div>
+           <div className="flex justify-end gap-2 pt-2"><button type="button" className="btn-ghost" onClick={onClose} data-testid="button-cancel-new-conversation">Cancelar</button><button type="submit" className="btn-primary" disabled={startConversation.isPending || saveContact.isPending || (sendMode === 'template' && !selectedTemplate)} data-testid="button-start-conversation">{startConversation.isPending || saveContact.isPending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}{saveContact.isPending ? 'Salvando contato...' : startConversation.isPending ? 'Iniciando...' : 'Iniciar conversa'}</button></div>
         </form>
       </div>
     </div>
@@ -1750,6 +1784,284 @@ function TemplateWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   );
 }
 
+function parseContactCsvRecords(source: string, delimiter: string): string[][] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = '';
+  let quoted = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '"') {
+      if (quoted && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === delimiter && !quoted) {
+      record.push(field);
+      field = '';
+    } else if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && source[index + 1] === '\n') index += 1;
+      record.push(field);
+      if (record.some((value) => value.trim())) records.push(record);
+      record = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+
+  if (quoted) throw new Error('O arquivo CSV tem aspas sem fechamento.');
+  record.push(field);
+  if (record.some((value) => value.trim())) records.push(record);
+  return records;
+}
+
+function parseContactCsv(source: string): { rows: ContactImportInput['contacts']; error?: string } {
+  const content = source.replace(/^\uFEFF/, '');
+  const firstLine = content.split(/\r?\n/).find((line) => line.trim());
+  if (!firstLine) return { rows: [], error: 'O arquivo está vazio.' };
+
+  const delimiterCounts = [',', ';', '\t'].map((delimiter) => {
+    let count = 0;
+    let quoted = false;
+    for (let index = 0; index < firstLine.length; index += 1) {
+      const character = firstLine[index];
+      if (character === '"') {
+        if (quoted && firstLine[index + 1] === '"') index += 1;
+        else quoted = !quoted;
+      } else if (character === delimiter && !quoted) {
+        count += 1;
+      }
+    }
+    return { delimiter, count };
+  }).sort((left, right) => right.count - left.count);
+  const delimiter = delimiterCounts[0]?.count ? delimiterCounts[0].delimiter : ',';
+
+  let records: string[][];
+  try {
+    records = parseContactCsvRecords(content, delimiter);
+  } catch (error) {
+    return {
+      rows: [],
+      error: error instanceof Error ? error.message : 'Não foi possível ler o CSV.',
+    };
+  }
+
+  const headers = records[0]?.map((value) => value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')) ?? [];
+  const nameColumn = headers.findIndex((value) =>
+    ['nome', 'name', 'contato', 'contact'].includes(value) || value.startsWith('nome'),
+  );
+  const phoneColumn = headers.findIndex((value) =>
+    ['telefone', 'phone', 'phonenumber', 'celular', 'whatsapp', 'numero', 'number', 'mobile'].includes(value)
+    || value.includes('telefone')
+    || value.includes('celular'),
+  );
+  if (nameColumn < 0 || phoneColumn < 0) {
+    return {
+      rows: [],
+      error: 'O CSV precisa ter cabeçalhos para Nome e Telefone (ou Name e Phone).',
+    };
+  }
+
+  const rows = records.slice(1).map((record, index) => ({
+    rowNumber: index + 2,
+    name: record[nameColumn]?.trim() ?? '',
+    phoneNumber: record[phoneColumn]?.trim() ?? '',
+  }));
+  if (rows.length === 0) return { rows: [], error: 'O arquivo não contém contatos para importar.' };
+  if (rows.length > 1000) {
+    return { rows: [], error: 'O limite é de 1.000 linhas por importação. Divida o CSV e tente novamente.' };
+  }
+  return { rows };
+}
+
+function downloadContactsCsv(content: string, fileName: string) {
+  const file = new Blob(['\uFEFF', content], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
+  const queryClient = useQueryClient();
+  const contactsQuery = useListContacts({ query: { queryKey: getListContactsQueryKey() } });
+  const createContact = useCreateContact();
+  const importContacts = useImportContacts();
+  const contacts = contactsQuery.data ?? [];
+  const [search, setSearch] = useState('');
+  const [name, setName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [contactError, setContactError] = useState('');
+  const [importRows, setImportRows] = useState<ContactImportInput['contacts']>([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importError, setImportError] = useState('');
+  const [importSummary, setImportSummary] = useState<ContactImportSummary | null>(null);
+  const filteredContacts = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase('pt-BR');
+    if (!needle) return contacts;
+    return contacts.filter((contact) =>
+      contact.name.toLocaleLowerCase('pt-BR').includes(needle)
+      || contact.phoneNumber.includes(needle),
+    );
+  }, [contacts, search]);
+
+  const handleCsvFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    setImportError('');
+    setImportSummary(null);
+    try {
+      if (file.size > 5 * 1024 * 1024) {
+        setImportRows([]);
+        setImportFileName('');
+        setImportError('O arquivo excede o limite de 5 MB.');
+        return;
+      }
+      const parsed = parseContactCsv(await file.text());
+      setImportRows(parsed.rows);
+      setImportFileName(file.name);
+      if (parsed.error) setImportError(parsed.error);
+    } catch {
+      setImportRows([]);
+      setImportFileName('');
+      setImportError('Não foi possível abrir este arquivo. Selecione um CSV válido.');
+    }
+  };
+
+  const submitImport = async () => {
+    if (importRows.length === 0 || importContacts.isPending) return;
+    setImportError('');
+    setImportSummary(null);
+    try {
+      const result = await importContacts.mutateAsync({ data: { contacts: importRows } });
+      setImportSummary(result);
+      setImportRows([]);
+      setImportFileName('');
+      void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
+    } catch (error) {
+      setImportError(errorText(error));
+    }
+  };
+
+  const submitContact = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setContactError('');
+    if (!name.trim()) {
+      setContactError('Informe o nome do contato.');
+      return;
+    }
+    if (!phoneNumber.trim()) {
+      setContactError('Informe o telefone com DDI.');
+      return;
+    }
+    createContact.mutate({ data: { name: name.trim(), phoneNumber: phoneNumber.trim() } }, {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
+        setName('');
+        setPhoneNumber('');
+      },
+      onError: (error) => setContactError(errorText(error)),
+    });
+  };
+
+  const exportContacts = () => {
+    const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const csv = [
+      ['Nome', 'Telefone'].map(quote).join(';'),
+      ...contacts.map((contact) => [contact.name, contact.phoneNumber].map(quote).join(';')),
+    ].join('\r\n');
+    const date = new Date().toISOString().slice(0, 10);
+    downloadContactsCsv(csv, `contatos-antiban-${date}.csv`);
+  };
+
+  return (
+    <section className="contacts-area" data-testid="workspace-contacts">
+      <header className="contacts-topbar">
+        <div>
+          <button type="button" className="templates-mobile-back mobile-only" onClick={onBackToInbox} data-testid="button-contacts-back"><ArrowLeft size={16} /> Conversas</button>
+          <h1 className="contacts-title">Contatos</h1>
+          <p className="contacts-subtitle">Sua base de contatos, pronta para organizar e usar nos envios.</p>
+        </div>
+        <button type="button" className="contacts-secondary-button" onClick={exportContacts} disabled={contacts.length === 0 || contactsQuery.isLoading} data-testid="button-export-contacts">
+          <Download size={15} /> Exportar CSV
+        </button>
+      </header>
+
+      <div className="contacts-content quiet-scroll">
+        <div className="contacts-tools-grid">
+          <section className="contacts-card" aria-label="Importar contatos">
+            <div className="contacts-card-heading">
+              <span className="contacts-card-icon"><Upload size={17} /></span>
+              <div><h2>Importar contatos</h2><p>Envie um CSV com as colunas Nome e Telefone.</p></div>
+            </div>
+            <div className="contacts-import-actions">
+              <label className="contacts-secondary-button contacts-file-button">
+                <Upload size={15} /> Selecionar CSV
+                <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} data-testid="input-import-contacts" />
+              </label>
+              <button type="button" className="contacts-text-button" onClick={() => downloadContactsCsv('"Nome";"Telefone"\r\n', 'modelo-contatos.csv')} data-testid="button-download-contacts-template">
+                Baixar modelo
+              </button>
+            </div>
+            <p className="contacts-help">Números com DDI são recomendados. Contatos com o mesmo telefone serão atualizados, sem criar duplicatas.</p>
+            {importFileName && importRows.length > 0 && <p className="contacts-file-note" data-testid="text-import-file">{importFileName} · {importRows.length} linha(s) pronta(s)</p>}
+            {importRows.length > 0 && <button type="button" className="contacts-primary-button" onClick={() => void submitImport()} disabled={importContacts.isPending} data-testid="button-confirm-import-contacts">{importContacts.isPending ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}{importContacts.isPending ? 'Importando…' : `Importar ${importRows.length} contato(s)`}</button>}
+            {importError && <p className="contacts-inline-error" role="alert" data-testid="status-import-contacts-error"><AlertCircle size={15} />{importError}</p>}
+            {importSummary && <div className="contacts-import-summary" role="status" data-testid="status-import-contacts-result">
+              <strong>Importação concluída</strong>
+              <span>{importSummary.createdCount} novo(s) · {importSummary.updatedCount} atualizado(s) · {importSummary.rejectedCount} rejeitado(s)</span>
+              {importSummary.errors.slice(0, 8).map((item) => <small key={`${item.rowNumber}-${item.reason}`}>Linha {item.rowNumber}: {item.reason}</small>)}
+              {importSummary.errors.length > 8 && <small>Mais {importSummary.errors.length - 8} linha(s) com erro.</small>}
+            </div>}
+          </section>
+
+          <form className="contacts-card contacts-create-card" onSubmit={submitContact} aria-label="Adicionar contato">
+            <div className="contacts-card-heading">
+              <span className="contacts-card-icon"><Plus size={17} /></span>
+              <div><h2>Adicionar contato</h2><p>Cadastre um contato individualmente.</p></div>
+            </div>
+            <label className="contacts-field"><span>Nome</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome do contato" data-testid="input-contact-name" /></label>
+            <label className="contacts-field"><span>Telefone</span><input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+55 11 99999-0000" data-testid="input-contact-phone" /></label>
+            {contactError && <p className="contacts-inline-error" role="alert" data-testid="status-contact-create-error"><AlertCircle size={15} />{contactError}</p>}
+            <button type="submit" className="contacts-primary-button" disabled={createContact.isPending} data-testid="button-create-contact">{createContact.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{createContact.isPending ? 'Salvando…' : 'Salvar contato'}</button>
+          </form>
+        </div>
+
+        <section className="contacts-card contacts-list-card" aria-label="Lista de contatos">
+          <div className="contacts-list-toolbar">
+            <div><h2>Todos os contatos</h2><p>{contacts.length} cadastrados</p></div>
+            <label className="contacts-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou telefone" aria-label="Buscar contatos" data-testid="input-search-contacts" /></label>
+          </div>
+          {contactsQuery.isLoading && <div className="contacts-state" data-testid="state-contacts-loading"><Loader2 size={18} className="animate-spin" /> Carregando contatos…</div>}
+          {contactsQuery.isError && <div className="contacts-state contacts-inline-error" role="alert" data-testid="state-contacts-error"><AlertCircle size={16} />Não foi possível carregar os contatos.</div>}
+          {!contactsQuery.isLoading && !contactsQuery.isError && filteredContacts.length === 0 && <div className="contacts-state" data-testid="state-contacts-empty">{search ? 'Nenhum contato corresponde à busca.' : 'Ainda não há contatos. Adicione um ou importe um CSV.'}</div>}
+          {filteredContacts.length > 0 && <div className="contacts-table-wrap">
+            <table className="contacts-table">
+              <thead><tr><th>Nome</th><th>Telefone</th></tr></thead>
+              <tbody>{filteredContacts.map((contact) => <tr key={contact.phoneNumber} data-testid={`row-contact-${contact.phoneNumber}`}>
+                <td><span className="contacts-name-cell"><span className="contacts-avatar"><UserRound size={15} /></span>{contact.name}</span></td>
+                <td className="contacts-phone-cell">{contact.phoneNumber}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function Home() {
   const conversationsQuery = useListConversations({ query: { refetchInterval: 5000, queryKey: getListConversationsQueryKey() } });
   const connectionQuery = useGetConnection({ query: { refetchInterval: 10000, queryKey: getGetConnectionQueryKey() } });
@@ -1782,7 +2094,7 @@ function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [mobileListOpen, setMobileListOpen] = useState(true);
-  const [activeSection, setActiveSection] = useState<'inbox' | 'templates' | 'dashboard'>('inbox');
+  const [activeSection, setActiveSection] = useState<'inbox' | 'templates' | 'dashboard' | 'contacts'>('inbox');
   const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
   const [deleteError, setDeleteError] = useState('');
   const deleteConversation = useDeleteConversation();
@@ -1847,7 +2159,13 @@ function Home() {
           activeSection={activeSection}
           onSectionChange={setActiveSection}
         />
-        {activeSection === 'dashboard' ? <DashboardWorkspace onBackToInbox={() => setActiveSection('inbox')} /> : activeSection === 'templates' ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} /> : (
+        {activeSection === 'dashboard'
+          ? <DashboardWorkspace onBackToInbox={() => setActiveSection('inbox')} />
+          : activeSection === 'templates'
+            ? <TemplateWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} />
+            : activeSection === 'contacts'
+              ? <ContactsWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} />
+              : (
           <>
             <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
