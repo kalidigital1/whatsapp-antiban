@@ -373,6 +373,10 @@ function phoneNumberFromJid(value: unknown): string | null {
   return /^\d{8,15}$/.test(number) ? number : null;
 }
 
+function isEvolutionLid(value: unknown): boolean {
+  return stringValue(value).trim().toLowerCase().endsWith("@lid");
+}
+
 function evolutionPhoneFromAlternateJid(value: string): string | null {
   const candidate = value.trim();
   if (/@(?:s\.whatsapp\.net|c\.us)$/i.test(candidate)) {
@@ -680,28 +684,42 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
       );
       const root = asRecord(response);
       const data = asRecord(root.data);
-      const collection = [
+      const collections = [
         response,
         root.contacts,
         root.records,
         root.result,
         root.data,
+        root.results,
         data.contacts,
         data.records,
-      ].find(Array.isArray);
+        data.result,
+        data.results,
+      ].filter(Array.isArray);
 
-      if (Array.isArray(collection)) {
+      for (const collection of collections) {
         for (const value of collection) {
           const contact = asRecord(value);
-          const id = firstStringValue(contact.id, contact.jid, contact.remoteJid);
-          const number = firstStringValue(
+          const lidJids = [
+            contact.id,
+            contact.jid,
+            contact.remoteJid,
+            contact.lid,
+            contact.lidJid,
+            asRecord(contact.key).remoteJid,
+          ].map(stringValue).filter(isEvolutionLid);
+          const phoneCandidates = [
             contact.number,
             contact.phoneNumber,
             contact.remoteJidAlt,
-          );
-          const phone = evolutionPhoneFromAlternateJid(number ?? "");
-          if (id?.endsWith("@lid") && phone && phone !== phoneNumberFromJid(id)) {
-            aliases.set(id, phone);
+            contact.phone,
+            contact.whatsappNumber,
+          ].map((candidate) => evolutionPhoneFromAlternateJid(stringValue(candidate)))
+            .filter((candidate): candidate is string => Boolean(candidate));
+          for (const lidJid of lidJids) {
+            const lidDigits = normalizePhone(lidJid.split("@")[0]);
+            const phone = phoneCandidates.find((candidate) => candidate !== lidDigits);
+            if (phone) aliases.set(lidJid, phone);
           }
         }
       }
@@ -732,6 +750,26 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
       evolutionLidAliasRequests.delete(session.instanceName);
     }
   }
+}
+
+function rememberEvolutionLidAlias(
+  session: EvolutionSession,
+  lidJidValue: unknown,
+  phoneValue: unknown,
+): void {
+  const lidJid = stringValue(lidJidValue).trim();
+  if (!isEvolutionLid(lidJid)) return;
+  const phone = evolutionPhoneFromAlternateJid(stringValue(phoneValue));
+  const lidDigits = normalizePhone(lidJid.split("@")[0]);
+  if (!phone || phone === lidDigits) return;
+
+  const existing = evolutionLidAliasCache.get(session.instanceName);
+  const aliases = new Map(existing?.aliases ?? []);
+  aliases.set(lidJid, phone);
+  evolutionLidAliasCache.set(session.instanceName, {
+    aliases,
+    expiresAt: Date.now() + 5 * 60_000,
+  });
 }
 
 function evolutionQrCode(body: Record<string, unknown>): string | null {
@@ -1649,8 +1687,8 @@ async function conversationResponse(
     conversationType: conversation.conversationType === "group" ? "group" : "direct",
     remoteJid: conversation.remoteJid,
     contact: {
-      name: contactDisplayName(contact),
-      phoneNumber: contact.phoneNumber,
+      name: conversationContactDisplayName(conversation, contact),
+      phoneNumber: await conversationPhoneNumber(conversation, contact),
     },
     profilePictureUrl: activeProvider === "evolution" && activeEvolutionSession?.connected
       ? evolutionProfilePicturePath(conversation.remoteJid || contact.phoneNumber)
@@ -1973,9 +2011,57 @@ function isGeneratedContactName(name: string, phoneNumber: string): boolean {
 
 function contactDisplayName(contact: typeof contacts.$inferSelect): string {
   const name = contact.name.trim();
-  return name && !isGeneratedContactName(name, contact.phoneNumber)
-    ? name
-    : contact.phoneNumber;
+  if (name && !isGeneratedContactName(name, contact.phoneNumber)) return name;
+  return isEvolutionLid(contact.phoneNumber) ? "Contato do WhatsApp" : contact.phoneNumber;
+}
+
+function conversationContactDisplayName(
+  conversation: typeof conversations.$inferSelect,
+  contact: typeof contacts.$inferSelect,
+): string {
+  const name = contactDisplayName(contact);
+  if (!isEvolutionLid(conversation.remoteJid)) return name;
+  const lidDigits = normalizePhone(stringValue(conversation.remoteJid).split("@")[0]);
+  return name === conversation.remoteJid || normalizePhone(name) === lidDigits
+    ? "Contato do WhatsApp"
+    : name;
+}
+
+async function conversationPhoneNumber(
+  conversation: typeof conversations.$inferSelect,
+  contact: typeof contacts.$inferSelect,
+): Promise<string> {
+  if (conversation.conversationType === "group") return "";
+
+  const remoteJid = stringValue(conversation.remoteJid);
+  const storedPhone = stringValue(contact.phoneNumber).trim();
+  const lidJid = isEvolutionLid(remoteJid)
+    ? remoteJid
+    : isEvolutionLid(storedPhone)
+      ? storedPhone
+      : null;
+
+  if (lidJid) {
+    const lidDigits = normalizePhone(lidJid.split("@")[0]);
+    const session = activeProvider === "evolution" ? activeEvolutionSession : null;
+    if (session?.connected) {
+      const aliases = await loadEvolutionLidAliases(session);
+      const resolved = evolutionPhoneFromAlternateJid(
+        aliases.get(remoteJid) ?? aliases.get(storedPhone) ?? "",
+      );
+      if (resolved && resolved !== lidDigits) return resolved;
+    }
+
+    const storedDigits = normalizePhone(storedPhone);
+    return /^\d{8,15}$/.test(storedDigits) && storedDigits !== lidDigits
+      ? storedPhone
+      : "";
+  }
+
+  const jidPhone = phoneNumberFromJid(remoteJid) || phoneNumberFromJid(storedPhone);
+  if (jidPhone) return jidPhone;
+  const normalizedStoredPhone = normalizePhone(storedPhone);
+  return /^\d{8,15}$/.test(normalizedStoredPhone) ? storedPhone : "";
 }
 
 async function getOrCreateContact(phoneNumber: string, name?: string) {
@@ -2057,7 +2143,7 @@ async function getOrCreateEvolutionConversation(
   const alternatePhone = !isGroup && remoteJid.endsWith("@lid")
     ? evolutionPhoneFromAlternateJid(alternateRemoteJid ?? "")
     : null;
-  const rawPhone = alternatePhone ?? remoteJid.split("@")[0];
+  const rawPhone = alternatePhone ?? (isEvolutionLid(remoteJid) ? "" : remoteJid.split("@")[0]);
   let contact: typeof contacts.$inferSelect;
 
   if (isGroup) {
@@ -3206,11 +3292,24 @@ router.get("/conversations/:conversationId/contact-profile", async (req, res): P
       return;
     }
 
-    const whatsappId =
+    const rawWhatsappId =
       conversation.remoteJid
       || (contact.phoneNumber.includes("@")
         ? contact.phoneNumber
         : `${normalizePhone(contact.phoneNumber)}@s.whatsapp.net`);
+    let resolvedPhone: string | null = null;
+    if (isEvolutionLid(rawWhatsappId)) {
+      const aliases = await loadEvolutionLidAliases(session);
+      resolvedPhone = evolutionPhoneFromAlternateJid(aliases.get(rawWhatsappId) ?? "");
+      const contactDigits = normalizePhone(contact.phoneNumber);
+      const lidDigits = normalizePhone(rawWhatsappId.split("@")[0]);
+      if (!resolvedPhone && /^\d{8,15}$/.test(contactDigits) && contactDigits !== lidDigits) {
+        resolvedPhone = contactDigits;
+      }
+    }
+    const whatsappId = resolvedPhone
+      ? `${resolvedPhone}@s.whatsapp.net`
+      : rawWhatsappId;
     const instance = encodeURIComponent(session.instanceName);
     const pictureRequest = getEvolutionPictureUrl(session, whatsappId);
     const profileRequest = conversation.conversationType === "group"
@@ -3328,7 +3427,7 @@ router.get("/conversations/:conversationId/contact-profile", async (req, res): P
     const response = {
       profileName: firstText(records, ["profileName", "profile_name", "pushName", "push_name", "name"]),
       profilePictureUrl: safePictureUrl,
-      whatsappId,
+      whatsappId: isEvolutionLid(whatsappId) ? null : whatsappId,
       about: firstText(records, ["about", "statusText", "status_text", "status", "profileStatus", "profile_status"]),
       verifiedName: firstText(records, ["verifiedName", "verified_name", "businessName", "business_name"]),
       isBusiness: firstBoolean(["isBusiness", "is_business"]),
@@ -4079,8 +4178,28 @@ router.get("/contacts", async (_req, res) => {
       .from(contacts)
       .where(isNull(contacts.deletedAt))
       .orderBy(asc(contacts.name), asc(contacts.phoneNumber));
+    const linkedConversations = await db
+      .select({
+        contactId: conversations.contactId,
+        phoneNumber: contacts.phoneNumber,
+        remoteJid: conversations.remoteJid,
+      })
+      .from(conversations)
+      .innerJoin(contacts, eq(conversations.contactId, contacts.id));
+    const unresolvedLidContactIds = new Set(
+      linkedConversations
+        .filter((row) => {
+          if (!isEvolutionLid(row.remoteJid)) return false;
+          return normalizePhone(row.phoneNumber)
+            === normalizePhone(stringValue(row.remoteJid).split("@")[0]);
+        })
+        .map((row) => row.contactId),
+    );
     res.json(ListContactsResponse.parse(savedContacts
-      .filter((contact) => /^\d{8,15}$/.test(contact.phoneNumber))
+      .filter((contact) => (
+        /^\d{8,15}$/.test(normalizePhone(contact.phoneNumber))
+        && !unresolvedLidContactIds.has(contact.id)
+      ))
       .map((contact) => ({
       name: contact.name,
       phoneNumber: contact.phoneNumber,
@@ -4592,22 +4711,46 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
           stringValue(contactPayload.id)
           || stringValue(contactPayload.jid)
           || stringValue(contactPayload.remoteJid);
+        const lidJid = [
+          jid,
+          contactPayload.lid,
+          contactPayload.lidJid,
+          contactPayload.remoteJid,
+        ].map(stringValue).find(isEvolutionLid) ?? "";
         const profileName =
           stringValue(contactPayload.name)
           || stringValue(contactPayload.pushName)
           || stringValue(contactPayload.notify)
           || stringValue(contactPayload.verifiedName);
-        const rawPhone = stringValue(contactPayload.phoneNumber)
-          || stringValue(contactPayload.number)
-          || jid.split("@")[0];
-        const phoneNumber = normalizePhone(rawPhone);
-        if (/^\d{8,15}$/.test(phoneNumber)) {
+        const lidDigits = lidJid ? normalizePhone(lidJid.split("@")[0]) : "";
+        const phoneNumberCandidates = [
+          contactPayload.phoneNumber,
+          contactPayload.number,
+          contactPayload.remoteJidAlt,
+          contactPayload.phone,
+        ].map((candidate) => evolutionPhoneFromAlternateJid(stringValue(candidate)))
+          .filter((candidate): candidate is string => Boolean(candidate));
+        const phoneFromJid = [
+          jid,
+          contactPayload.id,
+          contactPayload.jid,
+          contactPayload.remoteJid,
+          contactPayload.remoteJidAlt,
+        ].map(phoneNumberFromJid)
+          .find((candidate) => candidate && candidate !== lidDigits) ?? null;
+        const phoneNumber =
+          phoneNumberCandidates.find((candidate) => candidate !== lidDigits)
+          || phoneFromJid
+          || null;
+
+        if (lidJid && phoneNumber) rememberEvolutionLidAlias(session, lidJid, phoneNumber);
+        if (phoneNumber && /^\d{8,15}$/.test(phoneNumber)) {
           await getOrCreateContact(phoneNumber, profileName || undefined);
-        } else if (jid.endsWith("@lid")) {
+        } else if (lidJid) {
           const [existing] = await db
             .select()
             .from(contacts)
-            .where(eq(contacts.phoneNumber, jid))
+            .where(eq(contacts.phoneNumber, lidJid))
             .limit(1);
           if (existing) {
             if (profileName && profileName !== existing.name) {
@@ -4616,11 +4759,6 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
                 .set({ name: profileName, updatedAt: new Date() })
                 .where(eq(contacts.id, existing.id));
             }
-          } else {
-            await db.insert(contacts).values({
-              phoneNumber: jid,
-              name: profileName || "Contato do WhatsApp",
-            });
           }
         }
       }

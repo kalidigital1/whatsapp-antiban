@@ -737,6 +737,27 @@ function MessageBubble({
   );
 }
 
+function isDisplayablePhoneNumber(value: string | null | undefined): value is string {
+  return Boolean(value && /^\+?\d{8,15}$/.test(value.trim()));
+}
+
+function phoneMatchKeys(value: string): string[] {
+  const digits = value.replace(/\D/g, '');
+  if (!/^\d{8,15}$/.test(digits)) return [];
+  const keys = [digits];
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    keys.push(digits.slice(2));
+  } else if (digits.length === 10 || digits.length === 11) {
+    keys.push(`55${digits}`);
+  }
+  return keys;
+}
+
+function sameContactPhone(first: string, second: string): boolean {
+  const firstKeys = new Set(phoneMatchKeys(first));
+  return phoneMatchKeys(second).some((key) => firstKeys.has(key));
+}
+
 function ContactProfilePanel({
   conversation,
   messages,
@@ -751,7 +772,18 @@ function ContactProfilePanel({
   const inboundCount = messages.filter((message) => message.direction === 'inbound').length;
   const outboundCount = messages.filter((message) => message.direction === 'outbound').length;
   const groupConversation = conversation.conversationType === 'group';
-  const phoneAvailable = !groupConversation && !conversation.contact.phoneNumber.includes('@');
+  const phoneAvailable = !groupConversation && isDisplayablePhoneNumber(conversation.contact.phoneNumber);
+  const queryClient = useQueryClient();
+  const contactsQuery = useListContacts({
+    query: {
+      enabled: !groupConversation,
+      queryKey: getListContactsQueryKey(),
+      staleTime: 30_000,
+    },
+  });
+  const createContact = useCreateContact();
+  const [saveContactError, setSaveContactError] = useState('');
+  const [savedLocally, setSavedLocally] = useState(false);
   const contactProfileQuery = useGetConversationContactProfile(conversation.id, {
     query: {
       enabled: evolutionMode,
@@ -761,6 +793,27 @@ function ContactProfilePanel({
   });
   const contactProfile = contactProfileQuery.data;
   const profileName = contactProfile?.profileName || conversation.contact.name;
+  const contactIsSaved = savedLocally || (contactsQuery.data ?? []).some(
+    (contact) => sameContactPhone(contact.phoneNumber, conversation.contact.phoneNumber),
+  );
+  const saveCurrentContact = () => {
+    if (!phoneAvailable || contactIsSaved || createContact.isPending) return;
+    const name = profileName.trim() && profileName !== 'Contato do WhatsApp'
+      ? profileName.trim()
+      : conversation.contact.phoneNumber;
+    setSaveContactError('');
+    createContact.mutate(
+      { data: { name, phoneNumber: conversation.contact.phoneNumber } },
+      {
+        onSuccess: () => {
+          setSavedLocally(true);
+          void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
+          void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+        },
+        onError: (error) => setSaveContactError(errorText(error)),
+      },
+    );
+  };
   const [photoUnavailable, setPhotoUnavailable] = useState(false);
   useEffect(() => setPhotoUnavailable(false), [contactProfile?.profilePictureUrl]);
   const profileDetails: Array<[string, string | null]> = [
@@ -794,12 +847,33 @@ function ContactProfilePanel({
           <span>{groupConversation ? 'Grupo do WhatsApp' : phoneAvailable ? conversation.contact.phoneNumber : 'Telefone não disponibilizado'}</span>
         </div>
         <div className="contact-profile-section">
-          <span className="contact-profile-label">{groupConversation ? 'Identificador do grupo' : 'Contato'}</span>
+          <span className="contact-profile-label">{groupConversation ? 'Grupo' : 'Contato'}</span>
           {groupConversation
-            ? <span className="contact-profile-phone">{conversation.remoteJid || 'Grupo do WhatsApp'}</span>
+            ? <span className="contact-profile-phone">{conversation.contact.name || 'Grupo do WhatsApp'}</span>
             : phoneAvailable
               ? <a href={`tel:${conversation.contact.phoneNumber}`} className="contact-profile-phone"><Phone size={15} /> {conversation.contact.phoneNumber}</a>
               : <span className="contact-profile-phone">Telefone não disponibilizado pela conexão.</span>}
+          {!groupConversation && phoneAvailable && (
+            <div className="mt-3">
+              {contactIsSaved ? (
+                <p className="flex items-center gap-1.5 text-xs text-[#9ecfae]" role="status" data-testid="status-contact-saved">
+                  <Check size={14} /> Salvo nos contatos
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={saveCurrentContact}
+                  disabled={createContact.isPending || contactsQuery.isLoading}
+                  data-testid="button-save-chat-contact"
+                >
+                  {createContact.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+                  {createContact.isPending ? 'Salvando…' : 'Salvar contato'}
+                </button>
+              )}
+              {saveContactError && <p className="mt-2 text-xs text-[#efa8a0]" role="alert">{saveContactError}</p>}
+            </div>
+          )}
         </div>
         {evolutionMode && (
           <div className="contact-profile-section">
@@ -823,12 +897,6 @@ function ContactProfilePanel({
                   <p className={`text-xs ${contactProfile.numberExists ? 'text-[#9ecfae]' : 'text-[#d7a79b]'}`}>
                     {contactProfile.numberExists ? 'Número encontrado no WhatsApp' : 'Número não confirmado no WhatsApp'}
                   </p>
-                )}
-                {contactProfile.whatsappId && (
-                  <div className="grid gap-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-[.08em] text-[#7e8d84]">Identificador WhatsApp</span>
-                    <span className="break-all text-xs leading-5 text-[#cbd5cf]">{contactProfile.whatsappId}</span>
-                  </div>
                 )}
                 {profileDetails.map(([label, value]) => value && (
                   <div className="grid gap-1" key={label}>
