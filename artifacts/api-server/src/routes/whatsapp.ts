@@ -120,6 +120,8 @@ let connectionRestorePromise: Promise<void> | null = null;
 const eventClients = new Set<Response>();
 const evolutionMessageSyncTimestamps = new Map<string, number>();
 const evolutionConversationHistorySyncTimestamps = new Map<string, number>();
+const evolutionConversationDedupTimestamps = new Map<string, number>();
+const evolutionConversationDedupRequests = new Map<string, Promise<void>>();
 const evolutionChatPinSyncTimestamps = new Map<string, number>();
 const evolutionMessageSyncRequests = new Map<string, Promise<void>>();
 const evolutionMessageSyncErrorLogAt = new Map<string, number>();
@@ -406,6 +408,39 @@ function phoneNumberFromJid(value: unknown): string | null {
   if (domain?.toLowerCase() === "lid") return null;
   const number = user.split(":")[0].replace(/^\+/, "");
   return /^\d{8,15}$/.test(number) ? number : null;
+}
+
+function evolutionOwnerPhoneNumber(...values: unknown[]): string | null {
+  const candidates = values.flatMap((value) => {
+    const record = asRecord(value);
+    const owner = asRecord(record.owner);
+    const me = asRecord(record.me);
+    return [
+      value,
+      record.ownerJid,
+      record.owner_jid,
+      record.wuid,
+      record.phoneNumber,
+      record.phone_number,
+      record.number,
+      record.phone,
+      owner.jid,
+      owner.wuid,
+      owner.phoneNumber,
+      owner.phone_number,
+      owner.number,
+      owner.phone,
+      me.jid,
+      me.wuid,
+      me.phoneNumber,
+      me.phone_number,
+      me.number,
+      me.phone,
+    ];
+  });
+  return candidates
+    .map(phoneNumberFromJid)
+    .find((phoneNumber): phoneNumber is string => Boolean(phoneNumber)) ?? null;
 }
 
 function isEvolutionLid(value: unknown): boolean {
@@ -797,6 +832,11 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
       aliases,
       expiresAt: Date.now() + cacheDurationMs,
     });
+    if (aliases.size > 0) {
+      void deduplicateEvolutionConversations(session, true).catch((error) => {
+        logger.warn({ err: error, instanceName: session.instanceName }, "Could not merge conversations after resolving contact numbers");
+      });
+    }
     return aliases;
   })();
 
@@ -1003,14 +1043,7 @@ async function refreshConnectedProfileMetadata(session: EvolutionSession): Promi
       );
       if (profileName) session.profileName = profileName;
 
-      const phoneNumber = phoneNumberFromJid(firstStringValue(
-        instance.ownerJid,
-        instance.owner,
-        instance.wuid,
-        matchedRecord?.ownerJid,
-        matchedRecord?.owner,
-        matchedRecord?.wuid,
-      ));
+      const phoneNumber = evolutionOwnerPhoneNumber(instance, matchedRecord);
       if (phoneNumber) session.phoneNumber = phoneNumber;
     } catch (error) {
       logger.warn({ err: error, instanceName: session.instanceName }, "Could not read connected account profile metadata");
@@ -1101,17 +1134,7 @@ async function refreshEvolutionSession(
   session.connected = state.toLowerCase() === "open";
   const instance = asRecord(stateBody.instance);
   const stateData = asRecord(stateBody.data);
-  session.phoneNumber = phoneNumberFromJid(firstStringValue(
-    instance.ownerJid,
-    instance.owner,
-    instance.wuid,
-    stateBody.ownerJid,
-    stateBody.owner,
-    stateBody.wuid,
-    stateData.ownerJid,
-    stateData.owner,
-    stateData.wuid,
-  )) || session.phoneNumber;
+  session.phoneNumber = evolutionOwnerPhoneNumber(instance, stateBody, stateData) || session.phoneNumber;
   session.profileName = firstStringValue(
     instance.profileName,
     instance.profile_name,
@@ -1140,14 +1163,7 @@ async function refreshEvolutionSession(
     );
     session.qrCode = evolutionQrCode(qrBody);
     const qrInstance = asRecord(qrBody.instance);
-    session.phoneNumber = phoneNumberFromJid(firstStringValue(
-      qrInstance.ownerJid,
-      qrInstance.owner,
-      qrInstance.wuid,
-      qrBody.ownerJid,
-      qrBody.owner,
-      qrBody.wuid,
-    )) || session.phoneNumber;
+    session.phoneNumber = evolutionOwnerPhoneNumber(qrInstance, qrBody) || session.phoneNumber;
   }
 }
 
@@ -1201,7 +1217,10 @@ async function ensureEvolutionWebhook(session: EvolutionSession, req: Request): 
   await setEvolutionWebhook(session, req);
 }
 
-function evolutionConnectionResponse(session: EvolutionSession | null): EvolutionConnectionStatus {
+function evolutionConnectionResponse(
+  session: EvolutionSession | null,
+  includeQrCode = false,
+): EvolutionConnectionStatus {
   return GetEvolutionConnectionResponse.parse({
     configured: Boolean(session),
     connected: Boolean(session?.connected),
@@ -1213,7 +1232,7 @@ function evolutionConnectionResponse(session: EvolutionSession | null): Evolutio
     profilePictureUrl: session?.connected
       ? evolutionProfilePicturePath(session.phoneNumber)
       : null,
-    qrCode: session?.qrCode ?? null,
+    qrCode: includeQrCode ? session?.qrCode ?? null : null,
     defaultServerUrlConfigured: Boolean(process.env.EVOLUTION_API_URL?.trim()),
     defaultApiKeyConfigured: Boolean(process.env.EVOLUTION_API_KEY?.trim()),
   });
@@ -1818,6 +1837,13 @@ async function conversationResponse(
     reactionEmoji: null,
   } as const;
 
+  const phoneNumber = await conversationPhoneNumber(conversation, contact);
+  const contactName = conversationContactDisplayName(conversation, contact);
+  const shouldShowUnsavedNumber = activeProvider === "evolution"
+    && conversation.conversationType !== "group"
+    && Boolean(contact.deletedAt)
+    && Boolean(phoneNumber);
+
   return {
     id: conversation.id,
     conversationType: conversation.conversationType === "group" ? "group" : "direct",
@@ -1826,8 +1852,8 @@ async function conversationResponse(
     archivedAt: conversation.archivedAt?.toISOString() ?? null,
     isPinned: conversation.isPinned,
     contact: {
-      name: conversationContactDisplayName(conversation, contact),
-      phoneNumber: await conversationPhoneNumber(conversation, contact),
+      name: shouldShowUnsavedNumber ? phoneNumber : contactName,
+      phoneNumber,
     },
     profilePictureUrl: activeProvider === "evolution" && activeEvolutionSession?.connected
       ? evolutionProfilePicturePath(conversation.remoteJid || contact.phoneNumber)
@@ -2228,11 +2254,17 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
     return existing;
   }
 
-  const [created] = await db
-    .insert(contacts)
-    .values({ phoneNumber: storedPhoneNumber, name: name?.trim() || storedPhoneNumber })
-    .returning();
-  return created;
+  try {
+    const [created] = await db
+      .insert(contacts)
+      .values({ phoneNumber: storedPhoneNumber, name: name?.trim() || storedPhoneNumber })
+      .returning();
+    return created;
+  } catch (error) {
+    const createdConcurrently = await findContactByPhone(phoneNumber);
+    if (createdConcurrently) return createdConcurrently;
+    throw error;
+  }
 }
 
 async function restoreContactInAddressBook(contactId: number) {
@@ -2272,6 +2304,57 @@ async function getOrCreateConversation(contactId: number, phoneNumberId: string)
   return created;
 }
 
+async function mergeEvolutionConversationRows(
+  primary: typeof conversations.$inferSelect,
+  duplicateRows: Array<typeof conversations.$inferSelect>,
+) {
+  const duplicates = [...new Map(
+    duplicateRows
+      .filter((row) => row.id !== primary.id)
+      .map((row) => [row.id, row]),
+  ).values()];
+  if (duplicates.length === 0) return primary;
+
+  const allRows = [primary, ...duplicates];
+  const latestMessageAt = allRows
+    .map((row) => row.lastMessageAt)
+    .filter((date): date is Date => date !== null)
+    .sort((first, second) => second.getTime() - first.getTime())[0] ?? null;
+  const latestUpdatedAt = new Date(Math.max(...allRows.map((row) => row.updatedAt.getTime())));
+  const archivedAt = allRows.find((row) => row.archivedAt)?.archivedAt ?? null;
+  const labels = [...new Set(allRows.flatMap((row) => row.labels ?? []))].slice(0, 12);
+
+  await db.transaction(async (tx) => {
+    for (const duplicate of duplicates) {
+      await tx
+        .update(chatMessages)
+        .set({ conversationId: primary.id })
+        .where(eq(chatMessages.conversationId, duplicate.id));
+    }
+    await tx
+      .update(conversations)
+      .set({
+        unreadCount: allRows.reduce((total, row) => total + row.unreadCount, 0),
+        lastMessageAt: latestMessageAt,
+        updatedAt: latestUpdatedAt,
+        labels,
+        archivedAt,
+        isPinned: allRows.some((row) => row.isPinned),
+      })
+      .where(eq(conversations.id, primary.id));
+    await tx
+      .delete(conversations)
+      .where(inArray(conversations.id, duplicates.map((row) => row.id)));
+  });
+
+  const [merged] = await db
+    .select()
+    .from(conversations)
+    .where(eq(conversations.id, primary.id))
+    .limit(1);
+  return merged ?? primary;
+}
+
 async function getOrCreateEvolutionConversation(
   remoteJid: string,
   name: string | undefined,
@@ -2279,10 +2362,34 @@ async function getOrCreateEvolutionConversation(
   alternateRemoteJid?: string,
 ) {
   const isGroup = remoteJid.endsWith("@g.us");
-  const alternatePhone = !isGroup && remoteJid.endsWith("@lid")
+  const cachedAliases = evolutionLidAliasCache.get(session.instanceName);
+  let aliases = cachedAliases && cachedAliases.expiresAt > Date.now()
+    ? cachedAliases.aliases
+    : new Map<string, string>();
+  const alternatePhone = !isGroup
     ? evolutionPhoneFromAlternateJid(alternateRemoteJid ?? "")
     : null;
-  const rawPhone = alternatePhone ?? (isEvolutionLid(remoteJid) ? "" : remoteJid.split("@")[0]);
+  if (!isGroup && isEvolutionLid(remoteJid) && !alternatePhone && !aliases.has(remoteJid)) {
+    aliases = await loadEvolutionLidAliases(session);
+  }
+  const remotePhone = !isGroup ? phoneNumberFromJid(remoteJid) : null;
+  const aliasedPhone = !isGroup && isEvolutionLid(remoteJid)
+    ? evolutionPhoneFromAlternateJid(aliases.get(remoteJid) ?? "")
+    : null;
+  const rawPhone = remotePhone || alternatePhone || aliasedPhone
+    || (isEvolutionLid(remoteJid) ? "" : remoteJid.split("@")[0]);
+  const resolvedPhone = normalizePhone(rawPhone);
+  const lidJids = new Set<string>(
+    [remoteJid, alternateRemoteJid ?? ""].filter(isEvolutionLid),
+  );
+  if (!isGroup && /^\d{8,15}$/.test(resolvedPhone)) {
+    for (const [lidJid, mappedPhone] of aliases) {
+      const mappedNumber = evolutionPhoneFromAlternateJid(mappedPhone);
+      if (mappedNumber && normalizePhone(mappedNumber) === resolvedPhone) {
+        lidJids.add(lidJid);
+      }
+    }
+  }
   let contact: typeof contacts.$inferSelect;
 
   if (isGroup) {
@@ -2324,10 +2431,15 @@ async function getOrCreateEvolutionConversation(
         contact = conversationOnlyContact ?? contact;
       }
     } else {
+      const identityJid = isEvolutionLid(remoteJid)
+        ? remoteJid
+        : isEvolutionLid(alternateRemoteJid ?? "")
+          ? alternateRemoteJid!
+          : remoteJid;
       const [existing] = await db
         .select()
         .from(contacts)
-        .where(eq(contacts.phoneNumber, remoteJid))
+        .where(eq(contacts.phoneNumber, identityJid))
         .limit(1);
       if (existing) {
         const nextName = name?.trim() || existing.name;
@@ -2345,13 +2457,13 @@ async function getOrCreateEvolutionConversation(
         const [created] = await db
           .insert(contacts)
           .values({
-            phoneNumber: remoteJid,
+            phoneNumber: identityJid,
             name: name?.trim() || "Contato do WhatsApp",
           })
           .returning();
         contact = created;
       }
-      if (isEvolutionLid(remoteJid) && !contact.deletedAt) {
+      if (isEvolutionLid(identityJid) && !contact.deletedAt) {
         const [conversationOnlyContact] = await db
           .update(contacts)
           .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -2363,6 +2475,26 @@ async function getOrCreateEvolutionConversation(
   }
 
   const providerPhoneNumberId = `evolution:${session.instanceName}`;
+  const phoneCandidates = !isGroup && /^\d{8,15}$/.test(resolvedPhone)
+    ? contactPhoneCandidates(resolvedPhone)
+    : [];
+  const identityJids = [...new Set(
+    [remoteJid, alternateRemoteJid ?? "", ...lidJids].filter((jid) => jid.includes("@")),
+  )];
+  const relatedPredicates = [
+    ...(phoneCandidates.length ? [inArray(contacts.phoneNumber, phoneCandidates)] : []),
+    ...(identityJids.length ? [inArray(conversations.remoteJid, identityJids)] : []),
+  ];
+  const relatedRows = relatedPredicates.length
+    ? await db
+      .select({ conversation: conversations, contact: contacts })
+      .from(conversations)
+      .innerJoin(contacts, eq(conversations.contactId, contacts.id))
+      .where(and(
+        eq(conversations.phoneNumberId, providerPhoneNumberId),
+        or(...relatedPredicates),
+      ))
+    : [];
   let [conversation] = await db
     .select()
     .from(conversations)
@@ -2373,93 +2505,38 @@ async function getOrCreateEvolutionConversation(
       ),
     )
     .limit(1);
-  if (conversation && isEvolutionLid(remoteJid)) {
-    const [separateLidConversation] = await db
-      .select()
-      .from(conversations)
-      .where(and(
-        eq(conversations.phoneNumberId, providerPhoneNumberId),
-        eq(conversations.remoteJid, remoteJid),
-      ))
-      .limit(1);
-    if (separateLidConversation && separateLidConversation.id !== conversation.id) {
-      const latestMessageAt = [
-        conversation.lastMessageAt,
-        separateLidConversation.lastMessageAt,
-      ].filter((date): date is Date => date !== null)
-        .sort((first, second) => second.getTime() - first.getTime())[0] ?? null;
-      const latestUpdatedAt = new Date(Math.max(
-        conversation.updatedAt.getTime(),
-        separateLidConversation.updatedAt.getTime(),
-      ));
-      await db.transaction(async (tx) => {
-        await tx
-          .update(chatMessages)
-          .set({ conversationId: conversation.id })
-          .where(eq(chatMessages.conversationId, separateLidConversation.id));
-        await tx
-          .update(conversations)
-          .set({
-            unreadCount: conversation.unreadCount + separateLidConversation.unreadCount,
-            lastMessageAt: latestMessageAt,
-            updatedAt: latestUpdatedAt,
-            labels: [...new Set([
-              ...(conversation.labels ?? []),
-              ...(separateLidConversation.labels ?? []),
-            ])].slice(0, 12),
-            archivedAt: conversation.archivedAt ?? separateLidConversation.archivedAt,
-            isPinned: conversation.isPinned || separateLidConversation.isPinned,
-          })
-          .where(eq(conversations.id, conversation.id));
-        await tx
-          .delete(conversations)
-          .where(eq(conversations.id, separateLidConversation.id));
-      });
-      const [mergedConversation] = await db
-        .select()
-        .from(conversations)
-        .where(eq(conversations.id, conversation.id))
-        .limit(1);
-      conversation = mergedConversation ?? conversation;
-    }
-  }
-  if (!conversation && isEvolutionLid(remoteJid)) {
-    [conversation] = await db
-      .select()
-      .from(conversations)
-      .where(and(
-        eq(conversations.phoneNumberId, providerPhoneNumberId),
-        eq(conversations.remoteJid, remoteJid),
-      ))
-      .limit(1);
-    if (conversation && conversation.contactId !== contact.id) {
-      const previousContactId = conversation.contactId;
-      const [relinked] = await db
-        .update(conversations)
-        .set({ contactId: contact.id })
-        .where(eq(conversations.id, conversation.id))
-        .returning();
-      conversation = relinked ?? conversation;
-
-      const [previousContact] = await db
-        .select()
-        .from(contacts)
-        .where(eq(contacts.id, previousContactId))
-        .limit(1);
-      if (
-        previousContact
-        && previousContact.id !== contact.id
-        && (
-          isEvolutionLid(previousContact.phoneNumber)
-          || normalizePhone(previousContact.phoneNumber)
-            === normalizePhone(remoteJid.split("@")[0])
-        )
-        && !previousContact.deletedAt
-      ) {
-        await db
-          .update(contacts)
-          .set({ deletedAt: new Date(), updatedAt: new Date() })
-          .where(eq(contacts.id, previousContact.id));
+  if (!conversation) {
+    const preferredRelated = [...relatedRows].sort((first, second) => {
+      const firstSaved = first.contact.deletedAt ? 0 : 1;
+      const secondSaved = second.contact.deletedAt ? 0 : 1;
+      return secondSaved - firstSaved
+        || (second.conversation.lastMessageAt?.getTime() ?? 0)
+          - (first.conversation.lastMessageAt?.getTime() ?? 0)
+        || second.conversation.updatedAt.getTime() - first.conversation.updatedAt.getTime();
+    })[0]?.conversation;
+    if (preferredRelated) {
+      if (preferredRelated.contactId === contact.id) {
+        conversation = preferredRelated;
+      } else {
+        try {
+          const [relinked] = await db
+            .update(conversations)
+            .set({ contactId: contact.id })
+            .where(eq(conversations.id, preferredRelated.id))
+            .returning();
+          conversation = relinked ?? preferredRelated;
+        } catch (error) {
+          const [concurrentCanonical] = await db
+            .select()
+            .from(conversations)
+            .where(and(
+              eq(conversations.contactId, contact.id),
+              eq(conversations.phoneNumberId, providerPhoneNumberId),
+            ))
+            .limit(1);
+          if (!concurrentCanonical) throw error;
+          conversation = concurrentCanonical;
+        }
       }
     }
   }
@@ -2484,13 +2561,40 @@ async function getOrCreateEvolutionConversation(
     }
   }
   if (!conversation) {
-    const [created] = await db
-      .insert(conversations)
-      .values({ contactId: contact.id, phoneNumberId: providerPhoneNumberId })
-      .returning();
-    conversation = created;
+    try {
+      const [created] = await db
+        .insert(conversations)
+        .values({ contactId: contact.id, phoneNumberId: providerPhoneNumberId })
+        .returning();
+      conversation = created;
+    } catch (error) {
+      const [concurrentCanonical] = await db
+        .select()
+        .from(conversations)
+        .where(and(
+          eq(conversations.contactId, contact.id),
+          eq(conversations.phoneNumberId, providerPhoneNumberId),
+        ))
+        .limit(1);
+      if (!concurrentCanonical) throw error;
+      conversation = concurrentCanonical;
+    }
   }
 
+  const sameContactRows = await db
+    .select()
+    .from(conversations)
+    .where(and(
+      eq(conversations.contactId, contact.id),
+      eq(conversations.phoneNumberId, providerPhoneNumberId),
+    ));
+  conversation = await mergeEvolutionConversationRows(
+    conversation,
+    [
+      ...relatedRows.map((row) => row.conversation),
+      ...sameContactRows,
+    ],
+  );
   const [updated] = await db
     .update(conversations)
     .set({
@@ -2500,6 +2604,78 @@ async function getOrCreateEvolutionConversation(
     .where(eq(conversations.id, conversation.id))
     .returning();
   return updated ?? conversation;
+}
+
+async function deduplicateEvolutionConversations(
+  session: EvolutionSession,
+  force = false,
+): Promise<void> {
+  const syncKey = session.instanceName;
+  const pending = evolutionConversationDedupRequests.get(syncKey);
+  if (pending) await pending;
+  if (!force && Date.now() - (evolutionConversationDedupTimestamps.get(syncKey) ?? 0) < 15_000) return;
+
+  const request = (async () => {
+    const pendingSync = evolutionMessageSyncRequests.get(syncKey);
+    if (pendingSync) await pendingSync;
+
+    const cachedAliases = evolutionLidAliasCache.get(syncKey);
+    const aliases = cachedAliases && cachedAliases.expiresAt > Date.now()
+      ? cachedAliases.aliases
+      : new Map<string, string>();
+    const rows = await db
+      .select({ conversation: conversations, contact: contacts })
+      .from(conversations)
+      .innerJoin(contacts, eq(conversations.contactId, contacts.id))
+      .where(eq(conversations.phoneNumberId, `evolution:${session.instanceName}`));
+    const byPhone = new Map<string, Array<{
+      conversation: typeof conversations.$inferSelect;
+      contact: typeof contacts.$inferSelect;
+    }>>();
+
+    for (const row of rows) {
+      if (row.conversation.conversationType === "group") continue;
+      const remoteJid = row.conversation.remoteJid ?? "";
+      const phoneCandidate =
+        phoneNumberFromJid(row.contact.phoneNumber)
+        || phoneNumberFromJid(remoteJid)
+        || evolutionPhoneFromAlternateJid(aliases.get(remoteJid) ?? "")
+        || evolutionPhoneFromAlternateJid(aliases.get(row.contact.phoneNumber) ?? "");
+      const phone = normalizePhone(phoneCandidate ?? "");
+      if (!/^\d{8,15}$/.test(phone)) continue;
+      const samePhone = byPhone.get(phone) ?? [];
+      samePhone.push(row);
+      byPhone.set(phone, samePhone);
+    }
+
+    for (const samePhone of byPhone.values()) {
+      if (samePhone.length < 2) continue;
+      const ordered = [...samePhone].sort((first, second) => {
+        const firstSaved = first.contact.deletedAt ? 0 : 1;
+        const secondSaved = second.contact.deletedAt ? 0 : 1;
+        return secondSaved - firstSaved
+          || Number(second.conversation.isPinned) - Number(first.conversation.isPinned)
+          || (second.conversation.lastMessageAt?.getTime() ?? 0)
+            - (first.conversation.lastMessageAt?.getTime() ?? 0)
+          || second.conversation.updatedAt.getTime() - first.conversation.updatedAt.getTime();
+      });
+      await mergeEvolutionConversationRows(
+        ordered[0]!.conversation,
+        ordered.slice(1).map((row) => row.conversation),
+      );
+    }
+
+    evolutionConversationDedupTimestamps.set(syncKey, Date.now());
+  })();
+
+  evolutionConversationDedupRequests.set(syncKey, request);
+  try {
+    await request;
+  } finally {
+    if (evolutionConversationDedupRequests.get(syncKey) === request) {
+      evolutionConversationDedupRequests.delete(syncKey);
+    }
+  }
 }
 
 function evolutionRecipient(
@@ -2587,7 +2763,9 @@ async function syncEvolutionRecentMessages(session: EvolutionSession): Promise<v
         stringValue(key.remoteJidAlt) || stringValue(item.remoteJidAlt);
       const alternateRemoteJid = evolutionPhoneFromAlternateJid(rawAlternateRemoteJid)
         ? rawAlternateRemoteJid
-        : lidAliases.get(itemRemoteJid) ?? "";
+        : isEvolutionLid(rawAlternateRemoteJid)
+          ? rawAlternateRemoteJid
+          : lidAliases.get(itemRemoteJid) ?? "";
       const remoteJid = itemRemoteJid || alternateRemoteJid;
       if (!rawId || !remoteJid.includes("@")) continue;
 
@@ -2840,7 +3018,9 @@ async function syncEvolutionConversationHistory(
           || stringValue(item.remoteJidAlt);
         const alternateRemoteJid = evolutionPhoneFromAlternateJid(rawAlternateRemoteJid)
           ? rawAlternateRemoteJid
-          : aliases.get(itemRemoteJid) ?? "";
+          : isEvolutionLid(rawAlternateRemoteJid)
+            ? rawAlternateRemoteJid
+            : aliases.get(itemRemoteJid) ?? "";
         if (!rawId || !itemRemoteJid.includes("@")) continue;
 
         const whatsappMessageId = `evolution:${session.instanceName}:${rawId}`;
@@ -3241,7 +3421,7 @@ router.get("/evolution/connection", async (req, res) => {
       logger.warn({ err: error, instanceName: session.instanceName }, "Could not refresh QR Code webhook configuration");
     }
     try {
-      await refreshEvolutionSession(session, !session.qrCode);
+      await refreshEvolutionSession(session, false);
     } catch (error) {
       session.state = "unreachable";
       session.connected = false;
@@ -3460,7 +3640,7 @@ router.post("/evolution/connection", async (req, res) => {
       activeProvider = previousProvider;
       throw error;
     }
-    res.json(evolutionConnectionResponse(session));
+    res.json(evolutionConnectionResponse(session, true));
   } catch (error) {
     const status = error instanceof MetaApiError ? error.status : 400;
     const message = error instanceof Error ? error.message : "Não foi possível iniciar a conexão via QR Code.";
@@ -3495,7 +3675,7 @@ router.post("/evolution/connection/qr", async (_req, res) => {
         logger.warn({ err: error, instanceName: session.instanceName }, "Could not persist WhatsApp profile metadata after QR refresh");
       }
     }
-    res.json(evolutionConnectionResponse(session));
+    res.json(evolutionConnectionResponse(session, true));
   } catch (error) {
     if (shouldActivateSession) activeProvider = previousProvider;
     const status = error instanceof MetaApiError ? error.status : 400;
@@ -3816,6 +3996,11 @@ router.get("/conversations", async (req, res) => {
     }
 
     if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
+      try {
+        await deduplicateEvolutionConversations(activeEvolutionSession);
+      } catch (error) {
+        logger.warn({ err: error }, "Could not merge duplicate QR Code conversations");
+      }
       scheduleEvolutionMessageSync(activeEvolutionSession);
       scheduleEvolutionPinnedChatSync(activeEvolutionSession);
     }
@@ -3846,6 +4031,131 @@ router.get("/conversations", async (req, res) => {
   }
 });
 
+type EvolutionLabel = { id: string; name: string };
+
+class EvolutionLabelSyncError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number = 502,
+  ) {
+    super(message);
+    this.name = "EvolutionLabelSyncError";
+  }
+}
+
+function parseEvolutionLabels(payload: unknown): EvolutionLabel[] {
+  const root = asRecord(payload);
+  const data = asRecord(root.data);
+  const rawLabels = [
+    payload,
+    root.labels,
+    root.data,
+    data.labels,
+    root.response,
+  ].find(Array.isArray);
+  if (!Array.isArray(rawLabels)) {
+    throw new EvolutionLabelSyncError(
+      "A conexão QR não retornou a lista de etiquetas do WhatsApp.",
+    );
+  }
+  return rawLabels.flatMap((value): EvolutionLabel[] => {
+    const record = asRecord(value);
+    const id = stringValue(
+      record.labelId ?? record.LabelID ?? record.id ?? record.ID,
+    );
+    const name = stringValue(
+      record.name ?? record.Name ?? record.label ?? record.text,
+    ).trim();
+    const deleted = record.deleted === true || record.Deleted === true;
+    return id && name && !deleted ? [{ id, name }] : [];
+  });
+}
+
+async function syncEvolutionConversationLabels(
+  session: EvolutionSession,
+  conversation: typeof conversations.$inferSelect,
+  contact: typeof contacts.$inferSelect,
+  previousLabels: string[],
+  nextLabels: string[],
+): Promise<void> {
+  const previousSet = new Set(previousLabels.map((label) => label.toLocaleLowerCase("pt-BR")));
+  const nextSet = new Set(nextLabels.map((label) => label.toLocaleLowerCase("pt-BR")));
+  const changed = previousSet.size !== nextSet.size
+    || [...previousSet].some((label) => !nextSet.has(label));
+  if (!changed) return;
+
+  const number = evolutionPhoneNumber(evolutionRecipient(contact.phoneNumber, conversation));
+  if (!number || isEvolutionLid(number)) {
+    throw new EvolutionLabelSyncError(
+      "Não foi possível aplicar a etiqueta: a conexão não tem o número real deste contato.",
+      409,
+    );
+  }
+
+  let providerLabels: EvolutionLabel[];
+  try {
+    const payload = await evolutionRequest<unknown>(
+      session,
+      `/label/findLabels/${encodeURIComponent(session.instanceName)}`,
+      { method: "GET" },
+    );
+    providerLabels = parseEvolutionLabels(payload);
+  } catch (error) {
+    if (error instanceof EvolutionLabelSyncError) throw error;
+    logger.warn({ err: error, instanceName: session.instanceName }, "Could not read WhatsApp Business labels");
+    throw new EvolutionLabelSyncError(
+      "Não foi possível consultar as etiquetas do WhatsApp. Nada foi alterado.",
+    );
+  }
+
+  const byName = new Map(
+    providerLabels.map((label) => [label.name.toLocaleLowerCase("pt-BR"), label]),
+  );
+  const missing = nextLabels.filter(
+    (label) => !byName.has(label.toLocaleLowerCase("pt-BR")),
+  );
+  if (missing.length) {
+    throw new EvolutionLabelSyncError(
+      `A etiqueta ${missing.map((label) => `“${label}”`).join(", ")} não existe na lista disponível do WhatsApp Business. Crie-a no WhatsApp Business e tente novamente.`,
+      409,
+    );
+  }
+
+  const requestedLabels = nextLabels
+    .map((label) => byName.get(label.toLocaleLowerCase("pt-BR")))
+    .filter((label): label is EvolutionLabel => Boolean(label));
+  const removedLabels = previousLabels
+    .filter((label) => !nextSet.has(label.toLocaleLowerCase("pt-BR")))
+    .map((label) => byName.get(label.toLocaleLowerCase("pt-BR")))
+    .filter((label): label is EvolutionLabel => Boolean(label));
+  const operations = [
+    ...requestedLabels.map((label) => ({ label, action: "add" as const })),
+    ...removedLabels.map((label) => ({ label, action: "remove" as const })),
+  ];
+
+  try {
+    for (const { label, action } of operations) {
+      await evolutionRequest<unknown>(
+        session,
+        `/label/handleLabel/${encodeURIComponent(session.instanceName)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            number,
+            labelId: label.id,
+            action,
+          }),
+        },
+      );
+    }
+  } catch (error) {
+    logger.warn({ err: error, instanceName: session.instanceName }, "Could not apply WhatsApp label to chat");
+    throw new EvolutionLabelSyncError(
+      "A conexão QR não conseguiu atualizar a etiqueta no WhatsApp. As etiquetas do Antiban não foram alteradas.",
+    );
+  }
+}
+
 router.patch("/conversations/:conversationId/metadata", async (req, res): Promise<void> => {
   const conversationId = Number(req.params.conversationId);
   if (!Number.isSafeInteger(conversationId) || conversationId < 1) {
@@ -3875,13 +4185,50 @@ router.patch("/conversations/:conversationId/metadata", async (req, res): Promis
     }
   }
   const [existing] = await db
-    .select({ id: conversations.id })
+    .select({ conversation: conversations, contact: contacts })
     .from(conversations)
+    .innerJoin(contacts, eq(conversations.contactId, contacts.id))
     .where(eq(conversations.id, conversationId))
     .limit(1);
   if (!existing) {
     res.status(404).json({ error: "Conversa não encontrada." });
     return;
+  }
+  const previousLabels = Array.isArray(existing.conversation.labels)
+    ? existing.conversation.labels
+    : [];
+  const previousLabelSet = new Set(previousLabels.map((label) => label.toLocaleLowerCase("pt-BR")));
+  const nextLabelSet = new Set(labels.map((label) => label.toLocaleLowerCase("pt-BR")));
+  const labelsChanged = previousLabelSet.size !== nextLabelSet.size
+    || [...previousLabelSet].some((label) => !nextLabelSet.has(label));
+  let labelsSync: "local" | "unchanged" | "requested" = "local";
+  let labelSyncNotice: string | undefined;
+  if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
+    try {
+      await syncEvolutionConversationLabels(
+        activeEvolutionSession,
+        existing.conversation,
+        existing.contact,
+        previousLabels,
+        labels,
+      );
+      labelsSync = labelsChanged ? "requested" : "unchanged";
+      if (labelsChanged) {
+        labelSyncNotice = "Pedido enviado pela conexão QR. A Evolution não confirma se a etiqueta já apareceu no aplicativo WhatsApp.";
+      }
+    } catch (error) {
+      if (error instanceof EvolutionLabelSyncError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error({ err: error, conversationId }, "Could not synchronize WhatsApp labels");
+      res.status(502).json({ error: "Não foi possível sincronizar as etiquetas com o WhatsApp." });
+      return;
+    }
+  } else if (labelsChanged) {
+    labelSyncNotice = activeProvider === "cloud"
+      ? "Etiqueta salva apenas no Antiban; a API oficial não oferece sincronização de etiquetas do chat."
+      : "Etiqueta salva apenas no Antiban porque não há uma conexão WhatsApp ativa.";
   }
   const archivedAt = body.archived ? new Date() : null;
   const isPinned = body.pinned;
@@ -3894,6 +4241,8 @@ router.patch("/conversations/:conversationId/metadata", async (req, res): Promis
     labels,
     archivedAt: archivedAt?.toISOString() ?? null,
     isPinned,
+    labelsSync,
+    ...(labelSyncNotice ? { labelSyncNotice } : {}),
   });
 });
 
@@ -5341,20 +5690,12 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         updateInstance.profilePictureUrl,
       )) || session.profilePictureUrl;
       const previousPhoneNumber = session.phoneNumber;
-      session.phoneNumber = phoneNumberFromJid(firstStringValue(
-        update.wuid,
-        update.ownerJid,
-        update.owner,
-        updateData.wuid,
-        updateData.ownerJid,
-        updateData.owner,
-        updateInstance.ownerJid,
-        updateInstance.owner,
-        updateInstance.wuid,
-        body.wuid,
-        body.ownerJid,
-        body.owner,
-      )) || session.phoneNumber;
+      session.phoneNumber = evolutionOwnerPhoneNumber(
+        update,
+        updateData,
+        updateInstance,
+        body,
+      ) || session.phoneNumber;
       if (session.phoneNumber !== previousPhoneNumber) {
         evolutionLidAliasCache.delete(session.instanceName);
       }
@@ -5449,6 +5790,8 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         ) || "";
         const alternateRemoteJid = evolutionPhoneFromAlternateJid(rawAlternateRemoteJid)
           ? rawAlternateRemoteJid
+          : isEvolutionLid(rawAlternateRemoteJid)
+            ? rawAlternateRemoteJid
           : remoteJid.endsWith("@lid")
             ? (await loadEvolutionLidAliases(session)).get(remoteJid) ?? ""
             : "";
@@ -5500,6 +5843,8 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         if (!rawId || !remoteJid.includes("@")) continue;
         const alternateRemoteJid = evolutionPhoneFromAlternateJid(rawAlternateRemoteJid)
           ? rawAlternateRemoteJid
+          : isEvolutionLid(rawAlternateRemoteJid)
+            ? rawAlternateRemoteJid
           : remoteJid.endsWith("@lid")
             ? (await loadEvolutionLidAliases(session)).get(remoteJid) ?? ""
             : "";

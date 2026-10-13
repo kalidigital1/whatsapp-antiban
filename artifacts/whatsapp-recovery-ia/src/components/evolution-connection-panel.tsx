@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -43,9 +43,15 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
   const disconnect = useDisconnectEvolutionWhatsApp();
   const connection = connectionQuery.data;
   const [actionError, setActionError] = useState("");
+  const [generatedQrCode, setGeneratedQrCode] = useState<string | null>(null);
 
   const isConnected = Boolean(connection?.connected);
   const isWorking = connect.isPending || refreshQr.isPending;
+  const showGeneratedQrCode = Boolean(generatedQrCode && !isConnected);
+
+  useEffect(() => {
+    if (isConnected) setGeneratedQrCode(null);
+  }, [isConnected]);
 
   const invalidateEvolution = () => {
     void queryClient.invalidateQueries({ queryKey: getGetEvolutionConnectionQueryKey() });
@@ -66,9 +72,14 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
 
   const generateQr = () => {
     setActionError("");
+    setGeneratedQrCode(null);
     if (connection?.configured) {
       refreshQr.mutate(undefined, {
         onSuccess: (updatedConnection) => {
+          setGeneratedQrCode(updatedConnection.qrCode);
+          if (!updatedConnection.qrCode) {
+            setActionError("O servidor não retornou um QR Code. Tente novamente.");
+          }
           queryClient.setQueryData(getGetEvolutionConnectionQueryKey(), updatedConnection);
           invalidateEvolution();
           void clearConversationCache();
@@ -82,6 +93,10 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
       { data: { instanceName: `antiban-${Date.now().toString(36)}` } },
       {
         onSuccess: async (newConnection) => {
+          setGeneratedQrCode(newConnection.qrCode);
+          if (!newConnection.qrCode) {
+            setActionError("O servidor não retornou um QR Code. Tente novamente.");
+          }
           queryClient.setQueryData(getGetEvolutionConnectionQueryKey(), newConnection);
           invalidateConnections();
           await clearConversationCache();
@@ -100,6 +115,7 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
     setActionError("");
     disconnect.mutate(undefined, {
       onSuccess: async () => {
+        setGeneratedQrCode(null);
         invalidateConnections();
         await clearConversationCache();
       },
@@ -126,10 +142,10 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
         )}
 
         {!connectionQuery.isLoading && !isConnected && (
-          <div className={`evolution-connect-view ${connection?.qrCode ? "has-qr" : ""}`}>
-            {connection?.qrCode && (
+          <div className={`evolution-connect-view ${showGeneratedQrCode ? "has-qr" : ""}`}>
+            {showGeneratedQrCode && generatedQrCode && (
               <div className="evolution-qr-frame">
-                <img src={qrImageSource(connection.qrCode)} alt="QR Code para conectar o WhatsApp" data-testid="img-evolution-qr-code" />
+                <img src={qrImageSource(generatedQrCode)} alt="QR Code para conectar o WhatsApp" data-testid="img-evolution-qr-code" />
               </div>
             )}
             {connectionQuery.isError && (
@@ -147,10 +163,10 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
               className="evolution-primary-button"
               onClick={generateQr}
               disabled={isWorking}
-              data-testid={connection?.qrCode ? "button-refresh-evolution-qr" : connection?.configured ? "button-create-evolution-qr" : "button-connect-evolution"}
+              data-testid={showGeneratedQrCode ? "button-refresh-evolution-qr" : connection?.configured ? "button-create-evolution-qr" : "button-connect-evolution"}
             >
-              {isWorking ? <Loader2 size={18} className="animate-spin" /> : connection?.qrCode ? <RefreshCw size={17} /> : <QrCode size={18} />}
-              {isWorking ? "Gerando QR Code..." : connection?.qrCode ? "Gerar novo QR Code" : "Gerar acesso via QR Code"}
+              {isWorking ? <Loader2 size={18} className="animate-spin" /> : showGeneratedQrCode ? <RefreshCw size={17} /> : <QrCode size={18} />}
+              {isWorking ? "Gerando QR Code..." : showGeneratedQrCode ? "Gerar novo QR Code" : "Gerar acesso via QR Code"}
             </button>
           </div>
         )}
@@ -160,7 +176,7 @@ export function EvolutionConnectionPanel({ onClose, onGoToConversations }: Evolu
             <div className="evolution-connected-symbol" aria-hidden="true"><Check size={24} strokeWidth={2.5} /></div>
             <div className="evolution-connected-copy">
               <p>Conectado via QR Code</p>
-              <strong data-testid="text-evolution-phone">{connection?.phoneNumber || connection?.profileName || "WhatsApp conectado"}</strong>
+              <strong data-testid="text-evolution-phone">{connection?.phoneNumber || "Número não identificado"}</strong>
             </div>
             {actionError && <p className="evolution-form-error" role="alert" data-testid="status-evolution-action-error"><AlertCircle size={15} />{actionError}</p>}
             <button type="button" className="evolution-disconnect-button" onClick={disconnectNow} disabled={disconnect.isPending} data-testid="button-disconnect-evolution">

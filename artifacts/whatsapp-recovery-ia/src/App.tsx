@@ -138,7 +138,10 @@ function useUpdateConversationMetadata() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
-      const payload = await response.json().catch(() => ({})) as { error?: unknown };
+      const payload = await response.json().catch(() => ({})) as {
+        error?: unknown;
+        labelSyncNotice?: string;
+      };
       if (!response.ok) {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Não foi possível atualizar a conversa.');
       }
@@ -894,7 +897,11 @@ function ContactProfilePanel({
       rawProfileName.trim() === remoteJid
       || rawProfileName.replace(/\D/g, '') === remoteJid.split('@')[0].replace(/\D/g, '')
     );
-  const profileName = rawProfileName && !rawProfileNameIsLid
+  const conversationUsesPhoneAsName = phoneAvailable
+    && conversation.contact.name === conversation.contact.phoneNumber;
+  const profileName = conversationUsesPhoneAsName
+    ? conversation.contact.phoneNumber
+    : rawProfileName && !rawProfileNameIsLid
     ? rawProfileName
     : conversation.contact.name;
   const contactIsSaved = savedLocally || (contactsQuery.data ?? []).some(
@@ -1075,6 +1082,7 @@ function ChatPanel({
   const [reactionError, setReactionError] = useState('');
   const [labelDraft, setLabelDraft] = useState('');
   const [metadataError, setMetadataError] = useState('');
+  const [metadataNotice, setMetadataNotice] = useState('');
   const messagesQuery = useListConversationMessages(conversation?.id ?? 0, {
     query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 5000 },
   });
@@ -1133,14 +1141,21 @@ function ChatPanel({
   ) => {
     if (!conversation) return;
     setMetadataError('');
+    setMetadataNotice('');
     updateMetadata.mutate(
       {
         conversationId: conversation.id,
         data: { labels: nextLabels, archived, pinned },
       },
       {
-        onSuccess: () => afterSuccess?.(),
-        onError: (error) => setMetadataError(errorText(error)),
+        onSuccess: (result) => {
+          if (result.labelSyncNotice) setMetadataNotice(result.labelSyncNotice);
+          afterSuccess?.();
+        },
+        onError: (error) => {
+          setMetadataNotice('');
+          setMetadataError(errorText(error));
+        },
       },
     );
   };
@@ -1156,8 +1171,12 @@ function ChatPanel({
       setMetadataError('Cada conversa pode ter até 12 etiquetas.');
       return;
     }
-    updateConversationSettings([...(conversation.labels ?? []), next]);
-    setLabelDraft('');
+    updateConversationSettings(
+      [...(conversation.labels ?? []), next],
+      Boolean(conversation.archivedAt),
+      Boolean(conversation.isPinned),
+      () => setLabelDraft(''),
+    );
   };
 
   useEffect(() => {
@@ -1315,6 +1334,7 @@ function ChatPanel({
                     <button type="submit" className="rounded-md px-2 text-[#a9d7b6] hover:bg-white/5" aria-label="Adicionar etiqueta" disabled={!labelDraft.trim() || updateMetadata.isPending}><Plus size={16} /></button>
                   </form>
                   {metadataError && <p className="mt-1 text-[11px] text-[#efa8a0]" role="alert">{metadataError}</p>}
+                  {metadataNotice && <p className="mt-1 text-[11px] text-[#d7c78d]" role="status">{metadataNotice}</p>}
                 </div>
                 <div className="mx-2 my-1 border-t border-white/10" />
                 <button type="button" role="menuitem" className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-[#efaaa2] hover:bg-[#432725]/50" onClick={() => { setMenuOpen(false); onDeleteConversation(); }} data-testid="button-delete-conversation">
@@ -2599,7 +2619,7 @@ function Home() {
         phoneNumbers: evolutionConnection?.connected ? [{
           id: 'evolution-active',
           displayPhoneNumber: evolutionConnection.phoneNumber ?? '',
-          verifiedName: evolutionConnection.profileName || 'WhatsApp conectado',
+          verifiedName: evolutionConnection.phoneNumber || 'WhatsApp conectado',
           qualityRating: 'N/A',
           profilePictureUrl: evolutionConnection.profilePictureUrl ?? null,
         }] : [],
