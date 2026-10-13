@@ -897,20 +897,30 @@ function ContactProfilePanel({
       rawProfileName.trim() === remoteJid
       || rawProfileName.replace(/\D/g, '') === remoteJid.split('@')[0].replace(/\D/g, '')
     );
-  const conversationUsesPhoneAsName = phoneAvailable
-    && conversation.contact.name === conversation.contact.phoneNumber;
-  const profileName = conversationUsesPhoneAsName
-    ? conversation.contact.phoneNumber
-    : rawProfileName && !rawProfileNameIsLid
-    ? rawProfileName
-    : conversation.contact.name;
-  const contactIsSaved = savedLocally || (contactsQuery.data ?? []).some(
+  const matchingSavedContact = (contactsQuery.data ?? []).find(
     (contact) => sameContactPhone(contact.phoneNumber, conversation.contact.phoneNumber),
   );
+  const contactIsSaved = savedLocally || Boolean(matchingSavedContact);
+  const normalizedProfileName = rawProfileName
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  const usableProfileName = rawProfileName
+    && !rawProfileNameIsLid
+    && !['voce', 'contato do whatsapp', 'whatsapp contact'].includes(normalizedProfileName)
+    && !/^\d{1,4}$/.test(normalizedProfileName);
+  const profileName = groupConversation
+    ? (rawProfileName && !rawProfileNameIsLid ? rawProfileName : conversation.contact.name)
+    : contactIsSaved
+      ? (matchingSavedContact?.name || conversation.contact.name)
+      : phoneAvailable
+        ? conversation.contact.phoneNumber
+        : 'Contato do WhatsApp';
   const saveCurrentContact = () => {
     if (!phoneAvailable || contactIsSaved || createContact.isPending) return;
-    const name = profileName.trim() && profileName !== 'Contato do WhatsApp'
-      ? profileName.trim()
+    const name = usableProfileName
+      ? rawProfileName.trim()
       : conversation.contact.phoneNumber;
     setSaveContactError('');
     createContact.mutate(
@@ -927,7 +937,8 @@ function ContactProfilePanel({
   };
   const [photoUnavailable, setPhotoUnavailable] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  useEffect(() => setPhotoUnavailable(false), [contactProfile?.profilePictureUrl]);
+  const contactPhotoUrl = contactProfile?.profilePictureUrl || conversation.profilePictureUrl;
+  useEffect(() => setPhotoUnavailable(false), [contactPhotoUrl]);
   const profileDetails: Array<[string, string | null]> = [
     ['Sobre', contactProfile?.about ?? null],
     ['Nome comercial', contactProfile?.verifiedName ?? null],
@@ -950,9 +961,9 @@ function ContactProfilePanel({
       </header>
       <div className="contact-profile-content quiet-scroll">
         <div className="contact-profile-hero">
-          {contactProfile?.profilePictureUrl && !photoUnavailable
-            ? <button type="button" className="avatar chat-contact-photo cursor-zoom-in border-0 p-0" onClick={() => setPhotoPreview(contactProfile.profilePictureUrl!)} aria-label="Ampliar foto do perfil">
-                <img src={contactProfile.profilePictureUrl} alt="" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
+          {contactPhotoUrl && !photoUnavailable
+            ? <button type="button" className="avatar chat-contact-photo cursor-zoom-in border-0 p-0" onClick={() => setPhotoPreview(contactPhotoUrl)} aria-label="Ampliar foto do perfil">
+                <img src={contactPhotoUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" onError={() => setPhotoUnavailable(true)} />
               </button>
             : <div className="avatar chat-contact-photo" aria-hidden="true">{initials(profileName)}</div>}
           <strong>{profileName}</strong>
@@ -1084,7 +1095,7 @@ function ChatPanel({
   const [metadataError, setMetadataError] = useState('');
   const [metadataNotice, setMetadataNotice] = useState('');
   const messagesQuery = useListConversationMessages(conversation?.id ?? 0, {
-    query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 5000 },
+    query: { enabled: Boolean(conversation?.id), queryKey: getListConversationMessagesQueryKey(conversation?.id ?? 0), refetchInterval: 15000 },
   });
   const sendMessage = useSendConversationMessage();
   const sendMedia = useSendConversationMedia();
@@ -2602,7 +2613,7 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
 }
 
 function Home() {
-  const conversationsQuery = useListConversations({ query: { refetchInterval: 5000, queryKey: getListConversationsQueryKey() } });
+  const conversationsQuery = useListConversations({ query: { refetchInterval: 10000, queryKey: getListConversationsQueryKey() } });
   const connectionQuery = useGetConnection({ query: { refetchInterval: 10000, queryKey: getGetConnectionQueryKey() } });
   const evolutionConnectionQuery = useGetEvolutionConnection({ query: { refetchInterval: 10000, queryKey: getGetEvolutionConnectionQueryKey() } });
   const conversations = conversationsQuery.data ?? [];

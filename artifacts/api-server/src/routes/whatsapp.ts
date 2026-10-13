@@ -121,6 +121,7 @@ let connectionRestorePromise: Promise<void> | null = null;
 const eventClients = new Set<Response>();
 const evolutionMessageSyncTimestamps = new Map<string, number>();
 const evolutionConversationHistorySyncTimestamps = new Map<string, number>();
+const evolutionConversationHistorySyncRequests = new Map<string, Promise<number>>();
 const evolutionConversationDedupTimestamps = new Map<string, number>();
 const evolutionConversationDedupRequests = new Map<string, Promise<void>>();
 const evolutionChatPinSyncTimestamps = new Map<string, number>();
@@ -844,9 +845,20 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
       expiresAt: Date.now() + cacheDurationMs,
     });
     if (aliases.size > 0) {
-      void deduplicateEvolutionConversations(session, true).catch((error) => {
-        logger.warn({ err: error, instanceName: session.instanceName }, "Could not merge conversations after resolving contact numbers");
-      });
+      void deduplicateEvolutionConversations(session, true)
+        .then(async () => {
+          const [conversation] = await db
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(eq(conversations.phoneNumberId, `evolution:${session.instanceName}`))
+            .limit(1);
+          if (conversation) {
+            publishConversationEvent({ conversationId: conversation.id, reason: "message" });
+          }
+        })
+        .catch((error) => {
+          logger.warn({ err: error, instanceName: session.instanceName }, "Could not merge conversations after resolving contact numbers");
+        });
     }
     return aliases;
   })();
@@ -859,6 +871,12 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
       evolutionLidAliasRequests.delete(session.instanceName);
     }
   }
+}
+
+function getCachedEvolutionLidAliases(session?: EvolutionSession | null): Map<string, string> {
+  if (!session) return new Map();
+  const cached = evolutionLidAliasCache.get(session.instanceName);
+  return cached && cached.expiresAt > Date.now() ? cached.aliases : new Map();
 }
 
 function rememberEvolutionLidAlias(
@@ -1823,13 +1841,18 @@ async function clearConversationHistory(scope: "all" | "evolution"): Promise<voi
 async function conversationResponse(
   conversation: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
+  lastMessageOverride?: typeof chatMessages.$inferSelect | null,
+  lidAliases?: ReadonlyMap<string, string>,
 ) {
-  const [lastMessage] = await db
-    .select()
-    .from(chatMessages)
-    .where(eq(chatMessages.conversationId, conversation.id))
-    .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
-    .limit(1);
+  const [queriedLastMessage] = lastMessageOverride === undefined
+    ? await db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.conversationId, conversation.id))
+        .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
+        .limit(1)
+    : [];
+  const lastMessage = lastMessageOverride === undefined ? queriedLastMessage : lastMessageOverride;
 
   const fallback = {
     id: 0,
@@ -1847,7 +1870,7 @@ async function conversationResponse(
     reactionEmoji: null,
   } as const;
 
-  const phoneNumber = await conversationPhoneNumber(conversation, contact);
+  const phoneNumber = conversationPhoneNumber(conversation, contact, lidAliases);
   const contactName = conversationContactDisplayName(conversation, contact);
   const shouldShowUnsavedNumber = activeProvider === "evolution"
     && conversation.conversationType !== "group"
@@ -1869,11 +1892,7 @@ async function conversationResponse(
       if (activeProvider !== "evolution" || !activeEvolutionSession?.connected) return null;
       const pictureLookupId = conversation.conversationType === "group"
         ? stringValue(conversation.remoteJid)
-        : phoneNumber || (
-            isEvolutionLid(conversation.remoteJid)
-              ? ""
-              : stringValue(conversation.remoteJid) || contact.phoneNumber
-          );
+        : phoneNumber || stringValue(conversation.remoteJid) || contact.phoneNumber;
       return pictureLookupId ? evolutionProfilePicturePath(pictureLookupId) : null;
     })(),
     lastMessage: lastMessage ? messageResponse(lastMessage, conversation.id) : fallback,
@@ -2192,6 +2211,19 @@ function isGeneratedContactName(name: string, phoneNumber: string): boolean {
   return name.trim() === `Cliente ${phoneNumber.slice(-4)}`;
 }
 
+function isEvolutionPlaceholderContactName(name: string, phoneNumber: string): boolean {
+  const normalized = name
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return normalized === "voce"
+    || normalized === "contato do whatsapp"
+    || normalized === "whatsapp contact"
+    || /^\d{1,4}$/.test(normalized)
+    || isGeneratedContactName(name, phoneNumber);
+}
+
 function contactDisplayName(contact: typeof contacts.$inferSelect): string {
   const name = contact.name.trim();
   if (name && !isGeneratedContactName(name, contact.phoneNumber)) return name;
@@ -2202,6 +2234,13 @@ function conversationContactDisplayName(
   conversation: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
 ): string {
+  if (
+    activeProvider === "evolution"
+    && contact.deletedAt
+    && conversation.conversationType !== "group"
+  ) {
+    return "Contato do WhatsApp";
+  }
   const name = contactDisplayName(contact);
   if (!isEvolutionLid(conversation.remoteJid)) return name;
   const lidDigits = normalizePhone(stringValue(conversation.remoteJid).split("@")[0]);
@@ -2210,10 +2249,11 @@ function conversationContactDisplayName(
     : name;
 }
 
-async function conversationPhoneNumber(
+function conversationPhoneNumber(
   conversation: typeof conversations.$inferSelect,
   contact: typeof contacts.$inferSelect,
-): Promise<string> {
+  lidAliases?: ReadonlyMap<string, string>,
+): string {
   if (conversation.conversationType === "group") return "";
 
   const remoteJid = stringValue(conversation.remoteJid);
@@ -2226,14 +2266,13 @@ async function conversationPhoneNumber(
 
   if (lidJid) {
     const lidDigits = normalizePhone(lidJid.split("@")[0]);
-    const session = activeProvider === "evolution" ? activeEvolutionSession : null;
-    if (session?.connected) {
-      const aliases = await loadEvolutionLidAliases(session);
-      const resolved = evolutionPhoneFromAlternateJid(
-        aliases.get(remoteJid) ?? aliases.get(storedPhone) ?? "",
-      );
-      if (resolved && resolved !== lidDigits) return resolved;
-    }
+    const aliases = lidAliases ?? getCachedEvolutionLidAliases(
+      activeProvider === "evolution" ? activeEvolutionSession : null,
+    );
+    const resolved = evolutionPhoneFromAlternateJid(
+      aliases.get(remoteJid) ?? aliases.get(storedPhone) ?? "",
+    );
+    if (resolved && resolved !== lidDigits) return resolved;
 
     const storedDigits = normalizePhone(storedPhone);
     return /^\d{8,15}$/.test(storedDigits) && storedDigits !== lidDigits
@@ -2247,7 +2286,11 @@ async function conversationPhoneNumber(
   return /^\d{8,15}$/.test(normalizedStoredPhone) ? storedPhone : "";
 }
 
-async function getOrCreateContact(phoneNumber: string, name?: string) {
+async function getOrCreateContact(
+  phoneNumber: string,
+  name?: string,
+  options: { preserveSavedName?: boolean } = {},
+) {
   const normalizedPhone = normalizePhone(phoneNumber);
   const explicitlyInternational = phoneNumber.trim().startsWith("+");
   const storedPhoneNumber = explicitlyInternational ? `+${normalizedPhone}` : normalizedPhone;
@@ -2255,7 +2298,9 @@ async function getOrCreateContact(phoneNumber: string, name?: string) {
 
   if (existing) {
     const incomingName = name?.trim();
-    const nextName =
+    const nextName = options.preserveSavedName && !existing.deletedAt
+      ? existing.name
+      :
       incomingName ||
       (isGeneratedContactName(existing.name, existing.phoneNumber)
         ? existing.phoneNumber
@@ -2438,8 +2483,22 @@ async function getOrCreateEvolutionConversation(
   } else {
     const phoneNumber = normalizePhone(rawPhone);
     if (/^\d{8,15}$/.test(phoneNumber)) {
-      const existingPhoneContact = await findContactByPhone(phoneNumber);
-      contact = await getOrCreateContact(phoneNumber, name);
+      let existingPhoneContact = await findContactByPhone(phoneNumber);
+      if (
+        existingPhoneContact
+        && !existingPhoneContact.deletedAt
+        && isEvolutionPlaceholderContactName(existingPhoneContact.name, existingPhoneContact.phoneNumber)
+      ) {
+        const [unsavedContact] = await db
+          .update(contacts)
+          .set({ deletedAt: new Date(), updatedAt: new Date() })
+          .where(eq(contacts.id, existingPhoneContact.id))
+          .returning();
+        existingPhoneContact = unsavedContact ?? existingPhoneContact;
+      }
+      contact = existingPhoneContact && !existingPhoneContact.deletedAt
+        ? existingPhoneContact
+        : await getOrCreateContact(phoneNumber, name, { preserveSavedName: true });
       if (!existingPhoneContact) {
         const [conversationOnlyContact] = await db
           .update(contacts)
@@ -2800,11 +2859,12 @@ async function syncEvolutionRecentMessages(session: EvolutionSession): Promise<v
         .where(eq(chatMessages.whatsappMessageId, messageId))
         .limit(1);
       const fromMe = key.fromMe === true || item.fromMe === true;
-      const contactName =
+      const contactName = !fromMe ? (
         stringValue(item.pushName)
         || stringValue(item.notifyName)
         || stringValue(item.verifiedName)
-        || undefined;
+        || undefined
+      ) : undefined;
       if (stored) {
         if (remoteJid.endsWith("@lid") && alternateRemoteJid) {
           const targetConversation = await getOrCreateEvolutionConversation(
@@ -2979,13 +3039,53 @@ async function syncEvolutionConversationHistory(
   session: EvolutionSession,
   conversation: typeof conversations.$inferSelect,
   contactName?: string,
-): Promise<void> {
+): Promise<number> {
   const cacheKey = `${session.instanceName}:${conversation.id}`;
+  if (
+    activeProvider !== "evolution"
+    || activeEvolutionSession !== session
+    || !session.connected
+  ) return 0;
+  const pending = evolutionConversationHistorySyncRequests.get(cacheKey);
+  if (pending) return pending;
   const lastSyncAt = evolutionConversationHistorySyncTimestamps.get(cacheKey) ?? 0;
-  if (Date.now() - lastSyncAt < 120_000) return;
-  if (!conversation.remoteJid || conversation.phoneNumberId !== `evolution:${session.instanceName}`) return;
+  if (Date.now() - lastSyncAt < 120_000) return 0;
+  if (!conversation.remoteJid || conversation.phoneNumberId !== `evolution:${session.instanceName}`) return 0;
 
+  const request = performEvolutionConversationHistorySync(session, conversation, contactName);
+  evolutionConversationHistorySyncRequests.set(cacheKey, request);
+  try {
+    const importedCount = await request;
+    if (activeEvolutionSession === session && session.connected) {
+      evolutionConversationHistorySyncTimestamps.set(cacheKey, Date.now());
+    }
+    return importedCount;
+  } catch (error) {
+    if (activeEvolutionSession === session && session.connected) {
+      evolutionConversationHistorySyncTimestamps.set(cacheKey, Date.now());
+    }
+    throw error;
+  } finally {
+    if (evolutionConversationHistorySyncRequests.get(cacheKey) === request) {
+      evolutionConversationHistorySyncRequests.delete(cacheKey);
+    }
+  }
+}
+
+async function performEvolutionConversationHistorySync(
+  session: EvolutionSession,
+  conversation: typeof conversations.$inferSelect,
+  contactName?: string,
+): Promise<number> {
+  const cacheKey = `${session.instanceName}:${conversation.id}`;
+  if (
+    !conversation.remoteJid
+    || activeProvider !== "evolution"
+    || activeEvolutionSession !== session
+    || !session.connected
+  ) return 0;
   const aliases = await loadEvolutionLidAliases(session);
+  if (activeEvolutionSession !== session || !session.connected) return 0;
   const remoteJids = new Set([conversation.remoteJid]);
   if (isEvolutionLid(conversation.remoteJid)) {
     const phone = evolutionPhoneFromAlternateJid(aliases.get(conversation.remoteJid) ?? "");
@@ -2996,6 +3096,7 @@ async function syncEvolutionConversationHistory(
 
   for (const remoteJid of remoteJids) {
     for (let page = 0; page < 10; page += 1) {
+      if (activeEvolutionSession !== session || !session.connected) return importedCount;
       const response = await evolutionRequest<unknown>(
         session,
         `/chat/findMessages/${encodeURIComponent(session.instanceName)}`,
@@ -3023,6 +3124,7 @@ async function syncEvolutionConversationHistory(
       ];
       const candidateRecords = candidates.find(Array.isArray);
       const records = Array.isArray(candidateRecords) ? candidateRecords.map(asRecord) : [];
+      if (activeEvolutionSession !== session || !session.connected) return importedCount;
 
       for (const item of [...records].reverse()) {
         const key = asRecord(item.key);
@@ -3049,7 +3151,9 @@ async function syncEvolutionConversationHistory(
           itemRemoteJid,
           itemRemoteJid.endsWith("@g.us")
             ? stringValue(item.subject) || stringValue(item.groupName) || undefined
-            : stringValue(item.pushName) || stringValue(item.notifyName) || contactName,
+            : (fromMe
+                ? contactName
+                : stringValue(item.pushName) || stringValue(item.notifyName) || contactName),
           session,
           alternateRemoteJid,
         );
@@ -3128,13 +3232,13 @@ async function syncEvolutionConversationHistory(
       if (records.length < pageSize) break;
     }
   }
-  evolutionConversationHistorySyncTimestamps.set(cacheKey, Date.now());
   if (importedCount > 0) {
     logger.info(
       { instanceName: session.instanceName, conversationId: conversation.id, importedCount },
       "QR Code conversation history synchronized",
     );
   }
+  return importedCount;
 }
 
 async function syncEvolutionPinnedChats(session: EvolutionSession): Promise<void> {
@@ -3239,6 +3343,30 @@ function scheduleEvolutionMessageSync(session: EvolutionSession): void {
       );
     }
   });
+}
+
+function scheduleEvolutionConversationHistorySync(
+  session: EvolutionSession,
+  conversation: typeof conversations.$inferSelect,
+  contactName?: string,
+): void {
+  void syncEvolutionConversationHistory(session, conversation, contactName)
+    .then((importedCount) => {
+      if (importedCount > 0) {
+        publishConversationEvent({ conversationId: conversation.id, reason: "message" });
+      }
+    })
+    .catch((error) => {
+      const warningKey = `history:${session.instanceName}:${conversation.id}`;
+      const lastWarningAt = evolutionMessageSyncErrorLogAt.get(warningKey) ?? 0;
+      if (Date.now() - lastWarningAt >= 60_000) {
+        evolutionMessageSyncErrorLogAt.set(warningKey, Date.now());
+        logger.warn(
+          { err: error, conversationId: conversation.id, instanceName: session.instanceName },
+          "Could not fetch older messages for the QR Code conversation",
+        );
+      }
+    });
 }
 
 async function storeOutboundMessage(
@@ -3501,6 +3629,10 @@ router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
   const whatsappId = requestedNumber.includes("@")
     ? requestedNumber
     : `${normalizePhone(requestedNumber)}@s.whatsapp.net`;
+  const lidPhoneNumber = isEvolutionLid(whatsappId)
+    ? evolutionPhoneFromAlternateJid(getCachedEvolutionLidAliases(session).get(whatsappId) ?? "")
+    : null;
+  const pictureLookupId = lidPhoneNumber || whatsappId;
   const requestedPhoneNumber = normalizePhone(requestedNumber.split("@")[0] ?? "");
   const isOwnProfile = Boolean(
     session.phoneNumber
@@ -3513,7 +3645,7 @@ router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
     try {
       pictureUrl = isOwnProfile
         ? await getEvolutionOwnProfilePictureUrl(session)
-        : await getEvolutionPictureUrl(session, whatsappId);
+        : await getEvolutionPictureUrl(session, pictureLookupId);
     } catch (error) {
       if (!isOwnProfile || !session.profilePictureUrl) throw error;
       pictureUrl = safeWhatsAppPictureUrl(session.profilePictureUrl);
@@ -3535,6 +3667,7 @@ router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
       if (!imageResponse.ok && [401, 403, 404, 410].includes(imageResponse.status)) {
         const cacheKeys = new Set([
           whatsappId,
+          pictureLookupId,
           normalizePhone(session.phoneNumber ?? ""),
           session.phoneNumber ? `${normalizePhone(session.phoneNumber)}@s.whatsapp.net` : "",
         ].filter(Boolean).map((key) => `${session.instanceName}:${key}`));
@@ -3542,7 +3675,7 @@ router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
         if (isOwnProfile) session.profilePictureFetchedAt = 0;
         const refreshedPictureUrl = isOwnProfile
           ? await getEvolutionOwnProfilePictureUrl(session)
-          : await getEvolutionPictureUrl(session, whatsappId);
+          : await getEvolutionPictureUrl(session, pictureLookupId);
         if (refreshedPictureUrl) {
           pictureUrl = refreshedPictureUrl;
           imageResponse = await fetch(pictureUrl, {
@@ -4075,8 +4208,29 @@ router.get("/conversations", async (req, res) => {
       .innerJoin(contacts, eq(conversations.contactId, contacts.id))
       .where(eq(conversations.phoneNumberId, activePhoneNumberId))
       .orderBy(desc(conversations.isPinned), desc(conversations.updatedAt));
+    const lidAliases = activeProvider === "evolution"
+      ? getCachedEvolutionLidAliases(activeEvolutionSession)
+      : new Map<string, string>();
+    const latestMessages = rows.length
+      ? await db
+          .selectDistinctOn(
+            [chatMessages.conversationId],
+            { conversationId: chatMessages.conversationId, message: chatMessages },
+          )
+          .from(chatMessages)
+          .where(inArray(chatMessages.conversationId, rows.map((row) => row.conversation.id)))
+          .orderBy(chatMessages.conversationId, desc(chatMessages.createdAt), desc(chatMessages.id))
+      : [];
+    const latestMessageByConversationId = new Map(
+      latestMessages.map((row) => [row.conversationId, row.message]),
+    );
     const result = await Promise.all(
-      rows.map((row) => conversationResponse(row.conversation, row.contact)),
+      rows.map((row) => conversationResponse(
+        row.conversation,
+        row.contact,
+        latestMessageByConversationId.get(row.conversation.id) ?? null,
+        lidAliases,
+      )),
     );
     res.json(ListConversationsResponse.parse(result));
   } catch (error) {
@@ -4520,39 +4674,18 @@ router.delete("/conversations/:conversationId", async (req, res) => {
 router.get("/conversations/:conversationId/messages", async (req, res) => {
   try {
     const params = ListConversationMessagesParams.parse(req.params);
-    const [conversation] = await db
-      .select()
+    const [row] = await db
+      .select({ conversation: conversations, contact: contacts })
       .from(conversations)
+      .innerJoin(contacts, eq(conversations.contactId, contacts.id))
       .where(eq(conversations.id, params.conversationId))
       .limit(1);
-    if (!conversation) {
+    if (!row) {
       res.status(404).json({ error: "Conversa não encontrada." });
       return;
     }
 
-    if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
-      const [contact] = await db
-        .select({ name: contacts.name })
-        .from(contacts)
-        .where(eq(contacts.id, conversation.contactId))
-        .limit(1);
-      try {
-        await syncEvolutionConversationHistory(
-          activeEvolutionSession,
-          conversation,
-          contact?.name,
-        );
-      } catch (error) {
-        evolutionConversationHistorySyncTimestamps.set(
-          `${activeEvolutionSession.instanceName}:${conversation.id}`,
-          Date.now(),
-        );
-        req.log.warn(
-          { err: error, conversationId: conversation.id },
-          "Could not fetch older QR Code conversation messages",
-        );
-      }
-    }
+    const { conversation, contact } = row;
 
     const messages = await db
       .select()
@@ -4568,6 +4701,13 @@ router.get("/conversations/:conversationId/messages", async (req, res) => {
         messages.map((message) => messageResponse(message, conversation.id)),
       ),
     );
+    if (activeProvider === "evolution" && activeEvolutionSession?.connected) {
+      scheduleEvolutionConversationHistorySync(
+        activeEvolutionSession,
+        conversation,
+        contact.name,
+      );
+    }
   } catch (error) {
     logger.error({ err: error }, "Failed to list WhatsApp messages");
     res.status(400).json({ error: "Não foi possível carregar as mensagens." });
@@ -5804,7 +5944,11 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         if (lidJid && phoneNumber) rememberEvolutionLidAlias(session, lidJid, phoneNumber);
         if (phoneNumber && /^\d{8,15}$/.test(phoneNumber)) {
           const existingPhoneContact = await findContactByPhone(phoneNumber);
-          const contact = await getOrCreateContact(phoneNumber, profileName || undefined);
+          const contact = await getOrCreateContact(
+            phoneNumber,
+            profileName || undefined,
+            { preserveSavedName: true },
+          );
           if (!existingPhoneContact && contact) {
             await db
               .update(contacts)
@@ -5906,11 +6050,12 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
         const messageId = `evolution:${session.instanceName}:${rawId}`;
         const fromMe = key.fromMe === true || item.fromMe === true;
         const details = evolutionMessageDetails(item);
-        const contactName =
+        const contactName = !fromMe ? (
           stringValue(item.pushName)
           || stringValue(item.notifyName)
           || stringValue(item.verifiedName)
-          || undefined;
+          || undefined
+        ) : undefined;
         const conversation = await getOrCreateEvolutionConversation(
           remoteJid,
           remoteJid.endsWith("@g.us")
