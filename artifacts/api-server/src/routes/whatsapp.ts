@@ -2307,6 +2307,16 @@ function conversationContactDisplayName(
     && contact.deletedAt
     && conversation.conversationType !== "group"
   ) {
+    const providerName = contact.name.trim();
+    const providerNameDigits = normalizePhone(providerName);
+    if (
+      providerName
+      && !isEvolutionPlaceholderContactName(providerName, contact.phoneNumber)
+      && !isEvolutionLid(providerName)
+      && !/^\d{8,15}$/.test(providerNameDigits)
+    ) {
+      return providerName;
+    }
     return "Contato do WhatsApp";
   }
   const name = contactDisplayName(contact);

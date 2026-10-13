@@ -916,7 +916,9 @@ function ContactProfilePanel({
       ? (matchingSavedContact?.name || conversation.contact.name)
       : phoneAvailable
         ? conversation.contact.phoneNumber
-        : 'Contato do WhatsApp';
+        : usableProfileName
+          ? rawProfileName
+          : conversation.contact.name || 'Contato do WhatsApp';
   const saveCurrentContact = () => {
     if (!phoneAvailable || contactIsSaved || createContact.isPending) return;
     const name = usableProfileName
