@@ -39,6 +39,7 @@ export * from './evolutionConnectionStatus';
 export * from './evolutionProfileNameInput';
 export * from './exportDashboardReportCsvParams';
 export * from './exportDashboardReportCsvPeriod';
+export * from './getConversationSyncStatus200';
 export * from './getDashboardReportParams';
 export * from './getDashboardReportPeriod';
 export * from './getEvolutionProfilePictureParams';

@@ -670,6 +670,10 @@ export type GetEvolutionProfilePictureParams = {
 number?: string;
 };
 
+export type GetConversationSyncStatus200 = {
+  syncing: boolean;
+};
+
 export type GetDashboardReportParams = {
 period: GetDashboardReportPeriod;
 /**

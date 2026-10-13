@@ -4259,6 +4259,16 @@ router.get("/events", (req, res) => {
   res.on("close", cleanup);
 });
 
+router.get("/conversations/sync-status", (_req, res) => {
+  const session = activeProvider === "evolution" ? activeEvolutionSession : null;
+  res.json({
+    syncing: Boolean(
+      session?.connected
+      && evolutionMessageSyncRequests.has(session.instanceName),
+    ),
+  });
+});
+
 router.get("/conversations", async (req, res) => {
   try {
     if (activeProvider === "none") {

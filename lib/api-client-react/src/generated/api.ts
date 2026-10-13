@@ -39,6 +39,7 @@ import type {
   EvolutionConnectionStatus,
   EvolutionProfileNameInput,
   ExportDashboardReportCsvParams,
+  GetConversationSyncStatus200,
   GetDashboardReportParams,
   GetEvolutionProfilePictureParams,
   HealthStatus,
@@ -1526,6 +1527,83 @@ export function useListConversations<TData = Awaited<ReturnType<typeof listConve
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getListConversationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetConversationSyncStatusUrl = () => {
+
+
+
+
+  return `/api/conversations/sync-status`
+}
+
+/**
+ * @summary Get the current QR Code conversation synchronization status
+ */
+export const getConversationSyncStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetConversationSyncStatus200> => {
+
+  return customFetch<GetConversationSyncStatus200>(getGetConversationSyncStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConversationSyncStatusQueryKey = () => {
+    return [
+    `/api/conversations/sync-status`
+    ] as const;
+    }
+
+
+export const getGetConversationSyncStatusQueryOptions = <TData = Awaited<ReturnType<typeof getConversationSyncStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationSyncStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConversationSyncStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationSyncStatus>>> = ({ signal }) => getConversationSyncStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversationSyncStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConversationSyncStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getConversationSyncStatus>>>
+export type GetConversationSyncStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the current QR Code conversation synchronization status
+ */
+
+export function useGetConversationSyncStatus<TData = Awaited<ReturnType<typeof getConversationSyncStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationSyncStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConversationSyncStatusQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

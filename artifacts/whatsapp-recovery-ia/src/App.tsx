@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import {
   getGetConnectionQueryKey,
+  getGetConversationSyncStatusQueryKey,
   getGetConversationContactProfileQueryKey,
   getGetEvolutionConnectionQueryKey,
   getGetTemplateDispatchQueryKey,
@@ -59,6 +60,7 @@ import {
   useDeleteContacts,
   useDispatchTemplate,
   useGetConnection,
+  useGetConversationSyncStatus,
   useGetConversationContactProfile,
   useGetEvolutionConnection,
   useUpdateEvolutionProfileName,
@@ -484,6 +486,7 @@ function Sidebar({
   connected,
   connection,
   loading,
+  syncingConversations,
   error,
   onSettings,
   onNewConversation,
@@ -501,6 +504,7 @@ function Sidebar({
   connected: boolean;
   connection?: ConnectionStatus;
   loading: boolean;
+  syncingConversations: boolean;
   error: unknown;
   onSettings: () => void;
   onNewConversation: () => void;
@@ -564,6 +568,14 @@ function Sidebar({
           <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#3b4941] px-1 text-[9px] font-semibold leading-none text-[#d5e5da]">{archivedCount}</span>
         </button>
       </div>
+      {syncingConversations && (
+        <div className="conversation-sync-status" role="status" aria-live="polite" data-testid="status-conversation-sync">
+          <span>Sincronizando conversas</span>
+          <div className="conversation-sync-track" aria-hidden="true">
+            <div className="conversation-sync-indicator" />
+          </div>
+        </div>
+      )}
 
       <div className="conversation-list quiet-scroll">
         {loading && (
@@ -2622,6 +2634,15 @@ function Home() {
   const connection = connectionQuery.data;
   const evolutionConnection = evolutionConnectionQuery.data;
   const evolutionMode = Boolean(evolutionConnection?.active);
+  const conversationSyncQuery = useGetConversationSyncStatus({
+    query: {
+      enabled: Boolean(evolutionMode && evolutionConnection?.connected),
+      queryKey: getGetConversationSyncStatusQueryKey(),
+      refetchInterval: 1000,
+      staleTime: 0,
+    },
+  });
+  const syncingConversations = Boolean(conversationSyncQuery.data?.syncing);
   const chatConnected = evolutionMode
     ? Boolean(evolutionConnection?.connected)
     : Boolean(connection?.connected);
@@ -2737,7 +2758,7 @@ function Home() {
               ? <ContactsWorkspace onBackToInbox={() => { setActiveSection('inbox'); setMobileListOpen(true); }} />
               : (
           <>
-            <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setConversationManuallyClosed(false); setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} profilePicturesEnabled={evolutionMode} loading={conversationsQuery.isLoading} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
+             <Sidebar conversations={conversations} selectedId={selectedId} setSelectedId={(id) => { setConversationManuallyClosed(false); setSelectedId(id); setMobileListOpen(false); }} connected={chatConnected} connection={displayConnection} canEditProfileName={Boolean(evolutionMode && evolutionConnection?.connected)} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'WhatsApp Cloud API ativo'} profilePicturesEnabled={evolutionMode} loading={conversationsQuery.isLoading} syncingConversations={syncingConversations} error={conversationsQuery.error} onSettings={() => setSettingsOpen(true)} onNewConversation={() => setNewConversationOpen(true)} onTemplates={() => setActiveSection('templates')} onDashboard={() => setActiveSection('dashboard')} mobileOpen={mobileListOpen} onCloseMobile={() => setMobileListOpen(false)} />
             <button type="button" className="mobile-scrim" aria-label="Fechar lista de conversas" onClick={() => setMobileListOpen(false)} data-testid="button-mobile-scrim" />
               <ChatPanel conversation={selectedConversation} connected={chatConnected} evolutionMode={evolutionMode} connectionLabel={evolutionMode ? 'Conectado via QR Code' : 'API oficial da Meta'} onBack={() => setMobileListOpen(true)} onCloseConversation={() => { setConversationManuallyClosed(true); setSelectedId(null); setMobileListOpen(true); }} onSettings={() => setSettingsOpen(true)} onArchive={() => { setSelectedId(null); setMobileListOpen(true); }} onDeleteConversation={() => { if (selectedConversation) { setDeleteError(''); setConversationToDelete(selectedConversation); } }} />
           </>

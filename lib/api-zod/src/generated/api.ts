@@ -388,6 +388,14 @@ export const ListConversationsResponse = zod.array(ListConversationsResponseItem
 
 
 /**
+ * @summary Get the current QR Code conversation synchronization status
+ */
+export const GetConversationSyncStatusResponse = zod.object({
+  "syncing": zod.boolean()
+})
+
+
+/**
  * @summary Get WhatsApp conversation and campaign analytics
  */
 export const getDashboardReportQueryPageDefault = 1;

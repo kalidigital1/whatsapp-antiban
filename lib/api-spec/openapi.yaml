@@ -394,6 +394,22 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Conversation"
+  /conversations/sync-status:
+    get:
+      operationId: getConversationSyncStatus
+      tags: [whatsapp]
+      summary: Get the current QR Code conversation synchronization status
+      responses:
+        "200":
+          description: Whether the latest chats and messages are currently synchronizing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [syncing]
+                properties:
+                  syncing:
+                    type: boolean
   /dashboard:
     get:
       operationId: getDashboardReport
