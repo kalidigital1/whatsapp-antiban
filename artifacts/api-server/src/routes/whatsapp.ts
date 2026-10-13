@@ -101,6 +101,7 @@ type EvolutionConfig = {
 
 type EvolutionSession = EvolutionConfig & {
   connected: boolean;
+  hasConnectedBefore?: boolean;
   state: string | null;
   phoneNumber: string | null;
   profileName: string | null;
@@ -264,6 +265,7 @@ function evolutionConfigPayload(session: EvolutionSession) {
     phoneNumber: session.phoneNumber,
     profileName: session.profileName,
     profilePictureUrl: session.profilePictureUrl ?? null,
+    hasConnectedBefore: Boolean(session.hasConnectedBefore),
   });
 }
 
@@ -324,13 +326,22 @@ async function restoreActiveConnection() {
       }
       if (!activeEvolutionSession && settings.whatsappEvolutionConfigEncrypted) {
         const storedConfig = asRecord(JSON.parse(decryptEvolutionConfig(settings.whatsappEvolutionConfigEncrypted)));
+        const storedPhoneNumber = phoneNumberFromJid(storedConfig.phoneNumber);
+        const hasPersistedConnectionHistory = typeof storedConfig.hasConnectedBefore === "boolean";
         activeEvolutionSession = {
           serverUrl: stringValue(storedConfig.serverUrl),
           apiKey: stringValue(storedConfig.apiKey),
           instanceName: stringValue(storedConfig.instanceName),
           connected: false,
+          hasConnectedBefore: hasPersistedConnectionHistory
+            ? storedConfig.hasConnectedBefore === true
+            : Boolean(
+                storedPhoneNumber
+                || firstStringValue(storedConfig.profileName)
+                || safeWhatsAppPictureUrl(storedConfig.profilePictureUrl),
+              ),
           state: "connecting",
-          phoneNumber: phoneNumberFromJid(storedConfig.phoneNumber),
+          phoneNumber: storedPhoneNumber,
           profileName: firstStringValue(storedConfig.profileName),
           profilePictureUrl: safeWhatsAppPictureUrl(storedConfig.profilePictureUrl),
           qrCode: null,
@@ -1132,6 +1143,7 @@ async function refreshEvolutionSession(
   const state = stringValue(asRecord(stateBody.instance).state) || stringValue(stateBody.state) || "unknown";
   session.state = state;
   session.connected = state.toLowerCase() === "open";
+  if (session.connected) session.hasConnectedBefore = true;
   const instance = asRecord(stateBody.instance);
   const stateData = asRecord(stateBody.data);
   session.phoneNumber = evolutionOwnerPhoneNumber(instance, stateBody, stateData) || session.phoneNumber;
@@ -1240,10 +1252,8 @@ function evolutionConnectionResponse(
 
 function isKnownEvolutionDisconnectedState(state: string | null): boolean {
   const normalizedState = state?.trim().toLowerCase() ?? "";
-  return normalizedState.length > 0
-    && normalizedState !== "open"
-    && normalizedState !== "unknown"
-    && normalizedState !== "unreachable";
+  return ["close", "closed", "disconnected", "logout", "logged_out", "logged out"]
+    .includes(normalizedState);
 }
 
 function connectionStatus(req: Request) {
@@ -1855,9 +1865,17 @@ async function conversationResponse(
       name: shouldShowUnsavedNumber ? phoneNumber : contactName,
       phoneNumber,
     },
-    profilePictureUrl: activeProvider === "evolution" && activeEvolutionSession?.connected
-      ? evolutionProfilePicturePath(conversation.remoteJid || contact.phoneNumber)
-      : null,
+    profilePictureUrl: (() => {
+      if (activeProvider !== "evolution" || !activeEvolutionSession?.connected) return null;
+      const pictureLookupId = conversation.conversationType === "group"
+        ? stringValue(conversation.remoteJid)
+        : phoneNumber || (
+            isEvolutionLid(conversation.remoteJid)
+              ? ""
+              : stringValue(conversation.remoteJid) || contact.phoneNumber
+          );
+      return pictureLookupId ? evolutionProfilePicturePath(pictureLookupId) : null;
+    })(),
     lastMessage: lastMessage ? messageResponse(lastMessage, conversation.id) : fallback,
     unreadCount: conversation.unreadCount,
     updatedAt: conversation.updatedAt.toISOString(),
@@ -3411,6 +3429,7 @@ router.get("/connection", (req, res) => {
 router.get("/evolution/connection", async (req, res) => {
   const session = activeEvolutionSession;
   const wasConnected = Boolean(session?.connected);
+  const hadConnectedBeforeRefresh = Boolean(session?.hasConnectedBefore);
   const previousMetadata = session
     ? JSON.stringify([session.phoneNumber, session.profileName, session.profilePictureUrl ?? null])
     : null;
@@ -3428,7 +3447,10 @@ router.get("/evolution/connection", async (req, res) => {
       logger.warn({ err: error, instanceName: session.instanceName }, "Evolution API state check failed");
     }
     const currentMetadata = JSON.stringify([session.phoneNumber, session.profileName, session.profilePictureUrl ?? null]);
-    if (session.connected && previousMetadata !== currentMetadata) {
+    if (session.connected && (
+      previousMetadata !== currentMetadata
+      || !hadConnectedBeforeRefresh
+    )) {
       try {
         await persistEvolutionSession(session);
       } catch (error) {
@@ -3438,10 +3460,13 @@ router.get("/evolution/connection", async (req, res) => {
     if (
       activeProvider === "evolution"
       && !session.connected
+      && session.hasConnectedBefore
       && isKnownEvolutionDisconnectedState(session.state)
     ) {
       try {
         await clearConversationHistory("all");
+        session.hasConnectedBefore = false;
+        await persistEvolutionSession(session);
       } catch (error) {
         logger.error({ err: error, instanceName: session.instanceName }, "Could not clear WhatsApp history after QR disconnection");
         res.status(500).json({ error: "Não foi possível limpar o histórico após desconectar o WhatsApp." });
@@ -3502,11 +3527,31 @@ router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
-      const imageResponse = await fetch(pictureUrl, {
+      let imageResponse = await fetch(pictureUrl, {
         signal: controller.signal,
         redirect: "error",
         headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/*" },
       });
+      if (!imageResponse.ok && [401, 403, 404, 410].includes(imageResponse.status)) {
+        const cacheKeys = new Set([
+          whatsappId,
+          normalizePhone(session.phoneNumber ?? ""),
+          session.phoneNumber ? `${normalizePhone(session.phoneNumber)}@s.whatsapp.net` : "",
+        ].filter(Boolean).map((key) => `${session.instanceName}:${key}`));
+        for (const key of cacheKeys) evolutionProfilePictureUrlCache.delete(key);
+        if (isOwnProfile) session.profilePictureFetchedAt = 0;
+        const refreshedPictureUrl = isOwnProfile
+          ? await getEvolutionOwnProfilePictureUrl(session)
+          : await getEvolutionPictureUrl(session, whatsappId);
+        if (refreshedPictureUrl) {
+          pictureUrl = refreshedPictureUrl;
+          imageResponse = await fetch(pictureUrl, {
+            signal: controller.signal,
+            redirect: "error",
+            headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/*" },
+          });
+        }
+      }
       if (!imageResponse.ok) {
         res.status(404).json({ error: "A foto de perfil não está disponível." });
         return;
@@ -3544,7 +3589,7 @@ router.get("/evolution/profile-picture", async (req, res): Promise<void> => {
       res
         .status(200)
         .set({
-          "Cache-Control": "private, max-age=300",
+          "Cache-Control": "private, max-age=60, must-revalidate",
           "Content-Type": contentType,
           "X-Content-Type-Options": "nosniff",
         })
@@ -3584,6 +3629,7 @@ router.post("/evolution/connection", async (req, res) => {
       apiKey,
       instanceName,
       connected: false,
+      hasConnectedBefore: false,
       state: "connecting",
       phoneNumber: null,
       profileName: null,
@@ -3661,7 +3707,19 @@ router.post("/evolution/connection/qr", async (_req, res) => {
   try {
     await refreshEvolutionSession(session, true);
     if (shouldActivateSession) {
-      await clearConversationHistory("all");
+      if (
+        !session.connected
+        && session.hasConnectedBefore
+        && isKnownEvolutionDisconnectedState(session.state)
+      ) {
+        await clearConversationHistory("all");
+        session.hasConnectedBefore = false;
+        try {
+          await persistEvolutionSession(session);
+        } catch (error) {
+          logger.warn({ err: error, instanceName: session.instanceName }, "Could not persist confirmed QR disconnection");
+        }
+      }
       await db
         .update(appSettings)
         .set({ whatsappActiveProvider: "evolution", updatedAt: new Date() })
@@ -3983,14 +4041,10 @@ router.get("/events", (req, res) => {
 router.get("/conversations", async (req, res) => {
   try {
     if (activeProvider === "none") {
-      await clearConversationHistory("all");
       res.json(ListConversationsResponse.parse([]));
       return;
     }
     if (activeProvider === "evolution" && !activeEvolutionSession?.connected) {
-      if (activeEvolutionSession && isKnownEvolutionDisconnectedState(activeEvolutionSession.state)) {
-        await clearConversationHistory("all");
-      }
       res.json(ListConversationsResponse.parse([]));
       return;
     }
@@ -5670,6 +5724,7 @@ const handleEvolutionWebhook = async (req: Request, res: Response): Promise<void
       if (state) {
         session.state = state;
         session.connected = state.toLowerCase() === "open";
+        if (session.connected) session.hasConnectedBefore = true;
         if (session.connected) session.qrCode = null;
       }
       session.profileName =

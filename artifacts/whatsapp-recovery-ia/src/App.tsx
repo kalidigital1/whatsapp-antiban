@@ -2619,7 +2619,7 @@ function Home() {
         phoneNumbers: evolutionConnection?.connected ? [{
           id: 'evolution-active',
           displayPhoneNumber: evolutionConnection.phoneNumber ?? '',
-          verifiedName: evolutionConnection.phoneNumber || 'WhatsApp conectado',
+          verifiedName: evolutionConnection.profileName || evolutionConnection.phoneNumber || 'WhatsApp conectado',
           qualityRating: 'N/A',
           profilePictureUrl: evolutionConnection.profilePictureUrl ?? null,
         }] : [],
