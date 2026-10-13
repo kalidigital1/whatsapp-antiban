@@ -759,74 +759,142 @@ async function loadEvolutionLidAliases(session: EvolutionSession): Promise<Map<s
 
   const request = (async () => {
     const aliases = new Map<string, string>();
-    let cacheDurationMs = 5 * 60_000;
+    let cacheDurationMs = 30_000;
     try {
-      const pageSize = 1000;
-      for (let page = 0; page < 20; page += 1) {
-        const response = await evolutionRequest<unknown>(
+      const [contactsResult, chatsResult] = await Promise.allSettled([
+        evolutionRequest<unknown>(
           session,
           `/chat/findContacts/${encodeURIComponent(session.instanceName)}`,
           {
             method: "POST",
-            body: JSON.stringify({ where: {}, take: pageSize, skip: page * pageSize }),
+            body: JSON.stringify({ where: {}, take: 1000, skip: 0 }),
           },
-          8_000,
-        );
+          10_000,
+        ),
+        evolutionRequest<unknown>(
+          session,
+          `/chat/findChats/${encodeURIComponent(session.instanceName)}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ where: {}, take: 1000, skip: 0 }),
+          },
+          10_000,
+        ),
+      ]);
+      if (contactsResult.status === "rejected" && chatsResult.status === "rejected") {
+        throw contactsResult.reason;
+      }
+
+      const responses = [
+        ...(contactsResult.status === "fulfilled"
+          ? [{ source: "contacts" as const, value: contactsResult.value }]
+          : []),
+        ...(chatsResult.status === "fulfilled"
+          ? [{ source: "chats" as const, value: chatsResult.value }]
+          : []),
+      ];
+      let contactRecordsSeen = 0;
+      let chatRecordsSeen = 0;
+      for (const { source, value: response } of responses) {
         const root = asRecord(response);
         const data = asRecord(root.data);
         const contactsContainer = asRecord(root.contacts);
+        const chatsContainer = asRecord(root.chats);
         const dataContactsContainer = asRecord(data.contacts);
+        const dataChatsContainer = asRecord(data.chats);
         const collectionCandidates = [
           response,
           root.contacts,
+          root.chats,
           root.records,
           root.result,
           root.data,
           root.results,
           data.contacts,
+          data.chats,
           data.records,
           data.result,
           data.results,
           contactsContainer.records,
           contactsContainer.results,
+          chatsContainer.records,
+          chatsContainer.results,
           dataContactsContainer.records,
           dataContactsContainer.results,
+          dataChatsContainer.records,
+          dataChatsContainer.results,
         ];
         const collection = collectionCandidates.find(Array.isArray);
-        const pageContacts = Array.isArray(collection) ? collection : [];
-        for (const value of pageContacts) {
-          const contact = asRecord(value);
+        const records = Array.isArray(collection) ? collection.map(asRecord) : [];
+        if (source === "contacts") contactRecordsSeen = records.length;
+        else chatRecordsSeen = records.length;
+        for (const contact of records) {
+          const key = asRecord(contact.key);
           const lidJids = [
             contact.id,
             contact.jid,
             contact.remoteJid,
             contact.lid,
             contact.lidJid,
-            asRecord(contact.key).remoteJid,
+            key.remoteJid,
           ].map(stringValue).filter(isEvolutionLid);
           const phoneCandidates = [
+            contact.id,
             contact.number,
             contact.phoneNumber,
             contact.remoteJidAlt,
+            contact.remoteJid,
+            contact.jid,
             contact.phone,
             contact.whatsappNumber,
+            contact.wuid,
+            key.remoteJid,
+            key.remoteJidAlt,
+            key.participantAlt,
+            contact.participantAlt,
           ].map((candidate) => evolutionPhoneFromAlternateJid(evolutionValueString(candidate)))
             .filter((candidate): candidate is string => Boolean(candidate));
+          const pictureUrl = safeWhatsAppPictureUrl(firstStringValue(
+            contact.profilePictureUrl,
+            contact.profilePicUrl,
+            contact.profile_pic_url,
+            contact.pictureUrl,
+            contact.picture,
+          ));
+          if (pictureUrl) {
+            for (const phone of phoneCandidates) {
+              cacheEvolutionPictureUrl(session, phone, pictureUrl);
+              cacheEvolutionPictureUrl(session, `${phone}@s.whatsapp.net`, pictureUrl);
+            }
+          }
           for (const lidJid of lidJids) {
             const lidDigits = normalizePhone(lidJid.split("@")[0]);
             const phone = phoneCandidates.find((candidate) => candidate !== lidDigits);
-            if (phone) aliases.set(lidJid, phone);
+            if (phone) {
+              aliases.set(lidJid, phone);
+              if (pictureUrl) {
+                cacheEvolutionPictureUrl(session, lidJid, pictureUrl);
+                cacheEvolutionPictureUrl(session, phone, pictureUrl);
+                cacheEvolutionPictureUrl(session, `${phone}@s.whatsapp.net`, pictureUrl);
+              }
+            }
           }
         }
-        const total = Number(
-          root.total
-          ?? data.total
-          ?? contactsContainer.total
-          ?? dataContactsContainer.total,
+      }
+      if (aliases.size > 0) cacheDurationMs = 5 * 60_000;
+      const warningKey = `lid-aliases:${session.instanceName}`;
+      const lastWarningAt = evolutionMessageSyncErrorLogAt.get(warningKey) ?? 0;
+      if (aliases.size > 0) {
+        logger.info(
+          { instanceName: session.instanceName, contactRecordsSeen, chatRecordsSeen, resolvedLidAliases: aliases.size },
+          "Resolved QR Code contact phone numbers",
         );
-        if (pageContacts.length < pageSize || (Number.isFinite(total) && (page + 1) * pageSize >= total)) {
-          break;
-        }
+      } else if (Date.now() - lastWarningAt >= 60_000) {
+        evolutionMessageSyncErrorLogAt.set(warningKey, Date.now());
+        logger.warn(
+          { instanceName: session.instanceName, contactRecordsSeen, chatRecordsSeen },
+          "Evolution returned no verified phone mapping for linked contact identifiers",
+        );
       }
     } catch (error) {
       cacheDurationMs = aliases.size ? 60_000 : 30_000;
@@ -2429,13 +2497,23 @@ async function getOrCreateEvolutionConversation(
   let aliases = cachedAliases && cachedAliases.expiresAt > Date.now()
     ? cachedAliases.aliases
     : new Map<string, string>();
+  const remotePhone = !isGroup ? phoneNumberFromJid(remoteJid) : null;
   const alternatePhone = !isGroup
     ? evolutionPhoneFromAlternateJid(alternateRemoteJid ?? "")
     : null;
+  const observedLidJid = isEvolutionLid(remoteJid)
+    ? remoteJid
+    : isEvolutionLid(alternateRemoteJid)
+      ? alternateRemoteJid
+      : null;
+  const observedPhone = alternatePhone || remotePhone;
+  if (observedLidJid && observedPhone) {
+    rememberEvolutionLidAlias(session, observedLidJid, observedPhone);
+    aliases = getCachedEvolutionLidAliases(session);
+  }
   if (!isGroup && isEvolutionLid(remoteJid) && !alternatePhone && !aliases.has(remoteJid)) {
     aliases = await loadEvolutionLidAliases(session);
   }
-  const remotePhone = !isGroup ? phoneNumberFromJid(remoteJid) : null;
   const aliasedPhone = !isGroup && isEvolutionLid(remoteJid)
     ? evolutionPhoneFromAlternateJid(aliases.get(remoteJid) ?? "")
     : null;
