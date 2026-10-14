@@ -2311,6 +2311,120 @@ function parseContactCsv(source: string): { rows: ContactImportInput['contacts']
   return { rows };
 }
 
+function decodeVCardQuotedPrintable(value: string): string {
+  const bytes: number[] = [];
+  const encoder = new TextEncoder();
+  for (let index = 0; index < value.length; index += 1) {
+    const encodedByte = value.slice(index).match(/^=([0-9a-f]{2})/i)?.[1];
+    if (encodedByte) {
+      bytes.push(Number.parseInt(encodedByte, 16));
+      index += 2;
+    } else {
+      bytes.push(...encoder.encode(value[index] ?? ''));
+    }
+  }
+  return new TextDecoder('utf-8').decode(new Uint8Array(bytes));
+}
+
+function unescapeVCardValue(value: string): string {
+  return value
+    .replace(/\\[nN]/g, '\n')
+    .replace(/\\([,;\\])/g, '$1')
+    .trim();
+}
+
+function parseContactVCard(source: string): {
+  rows: ContactImportInput['contacts'];
+  skippedCount: number;
+  error?: string;
+} {
+  const normalizedLines = source.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n');
+  const lines: string[] = [];
+  for (const line of normalizedLines) {
+    const previous = lines.at(-1);
+    if (
+      previous?.endsWith('=')
+      && /(?:ENCODING=QUOTED-PRINTABLE|ENCODING=QP)/i.test(previous.split(':', 1)[0] ?? '')
+    ) {
+      lines[lines.length - 1] = previous.slice(0, -1) + line.replace(/^[ \t]/, '');
+    } else if (previous && /^[ \t]/.test(line)) {
+      lines[lines.length - 1] = previous + line.slice(1);
+    } else {
+      lines.push(line);
+    }
+  }
+
+  const cards: string[][] = [];
+  let currentCard: string[] | null = null;
+  for (const line of lines) {
+    if (/^BEGIN:VCARD\s*$/i.test(line.trim())) {
+      currentCard = [];
+    } else if (/^END:VCARD\s*$/i.test(line.trim())) {
+      if (currentCard) cards.push(currentCard);
+      currentCard = null;
+    } else if (currentCard) {
+      currentCard.push(line);
+    }
+  }
+  if (cards.length === 0) {
+    return { rows: [], skippedCount: 0, error: 'O arquivo não contém cartões vCard válidos.' };
+  }
+
+  const rows: ContactImportInput['contacts'] = [];
+  let skippedCount = 0;
+  for (const [cardIndex, card] of cards.entries()) {
+    let formattedName = '';
+    let structuredName = '';
+    const phoneNumbers: string[] = [];
+
+    for (const line of card) {
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex < 0) continue;
+      const propertyAndParams = line.slice(0, separatorIndex);
+      const rawValue = line.slice(separatorIndex + 1);
+      const segments = propertyAndParams.split(';');
+      const property = (segments[0]?.split('.').at(-1) ?? '').toUpperCase();
+      const parameters = segments.slice(1).join(';');
+      const value = /(?:ENCODING=QUOTED-PRINTABLE|ENCODING=QP)/i.test(parameters)
+        ? decodeVCardQuotedPrintable(rawValue)
+        : rawValue;
+
+      if (property === 'FN' && !formattedName) {
+        formattedName = unescapeVCardValue(value);
+      } else if (property === 'N' && !structuredName) {
+        const [family = '', given = '', additional = '', prefix = '', suffix = ''] =
+          value.split(/(?<!\\);/).map(unescapeVCardValue);
+        structuredName = [prefix, given, additional, family, suffix].filter(Boolean).join(' ');
+      } else if (property === 'TEL') {
+        const phone = value
+          .replace(/^tel:/i, '')
+          .replace(/;(?:ext|isub)=.*$/i, '')
+          .trim();
+        if (phone) phoneNumbers.push(phone);
+      }
+    }
+
+    const name = formattedName || structuredName;
+    const uniqueNumbers = [...new Set(phoneNumbers)];
+    if (!name || uniqueNumbers.length === 0) {
+      skippedCount += 1;
+      continue;
+    }
+    for (const phoneNumber of uniqueNumbers) {
+      rows.push({ rowNumber: cardIndex + 1, name, phoneNumber });
+    }
+  }
+
+  return rows.length > 0
+    ? { rows, skippedCount }
+    : { rows, skippedCount, error: 'Nenhum contato com nome e telefone foi encontrado no vCard.' };
+}
+
+function importPhoneKey(phoneNumber: string): string {
+  const digits = phoneNumber.replace(/\D/g, '');
+  return digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+}
+
 function downloadContactsCsv(content: string, fileName: string) {
   const file = new Blob(['\uFEFF', content], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(file);
@@ -2335,6 +2449,8 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
   const [importRows, setImportRows] = useState<ContactImportInput['contacts']>([]);
   const [importFileName, setImportFileName] = useState('');
   const [importError, setImportError] = useState('');
+  const [importNotice, setImportNotice] = useState('');
+  const [importPartial, setImportPartial] = useState(false);
   const [importSummary, setImportSummary] = useState<ContactImportSummary | null>(null);
   const [selectedContactNumbers, setSelectedContactNumbers] = useState<Set<string>>(() => new Set());
   const [contactDeleteTargets, setContactDeleteTargets] = useState<string[] | null>(null);
@@ -2356,7 +2472,11 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
     event.currentTarget.value = '';
     if (!file) return;
     setImportError('');
+    setImportNotice('');
+    setImportPartial(false);
     setImportSummary(null);
+    setImportRows([]);
+    setImportFileName('');
     try {
       if (file.size > 5 * 1024 * 1024) {
         setImportRows([]);
@@ -2375,18 +2495,115 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
     }
   };
 
+  const handleVCardFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = '';
+    if (files.length === 0) return;
+    setImportError('');
+    setImportNotice('');
+    setImportPartial(false);
+    setImportSummary(null);
+    setImportRows([]);
+    setImportFileName('');
+
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    if (files.some((file) => file.size > 5 * 1024 * 1024) || totalSize > 25 * 1024 * 1024) {
+      setImportRows([]);
+      setImportFileName('');
+      setImportError('Cada arquivo pode ter até 5 MB e o total selecionado até 25 MB.');
+      return;
+    }
+
+    const rows: ContactImportInput['contacts'] = [];
+    const errors: string[] = [];
+    const seenPhones = new Set<string>();
+    let skippedCount = 0;
+    let duplicateCount = 0;
+    try {
+      for (const file of files) {
+        const parsed = parseContactVCard(await file.text());
+        if (parsed.error) {
+          errors.push(`${file.name}: ${parsed.error}`);
+          continue;
+        }
+        skippedCount += parsed.skippedCount;
+        for (const row of parsed.rows) {
+          const digits = row.phoneNumber.replace(/\D/g, '');
+          if (digits.length < 8 || digits.length > 15) {
+            skippedCount += 1;
+            continue;
+          }
+          const key = importPhoneKey(row.phoneNumber);
+          if (key && seenPhones.has(key)) {
+            duplicateCount += 1;
+            continue;
+          }
+          if (key) seenPhones.add(key);
+          rows.push({ ...row, rowNumber: rows.length + 1 });
+        }
+      }
+    } catch {
+      setImportRows([]);
+      setImportFileName('');
+      setImportError('Não foi possível ler um dos arquivos VCF selecionados.');
+      return;
+    }
+
+    if (errors.length > 0) {
+      setImportError(errors.join(' '));
+      return;
+    }
+    setImportRows(rows);
+    setImportFileName(files.length === 1
+      ? files[0]?.name ?? '1 arquivo VCF'
+      : `${files.length} arquivos VCF: ${files.map((file) => file.name).join(', ')}`);
+    if (skippedCount > 0 || duplicateCount > 0) {
+      const notes: string[] = [];
+      if (skippedCount > 0) notes.push(`${skippedCount} contato(s) sem nome ou com telefone inválido ignorado(s)`);
+      if (duplicateCount > 0) notes.push(`${duplicateCount} número(s) repetido(s) consolidado(s)`);
+      setImportNotice(`${notes.join(' · ')}.`);
+    }
+    if (rows.length === 0 && errors.length === 0) {
+      setImportError('Nenhum contato com nome e telefone foi encontrado nos arquivos selecionados.');
+    }
+  };
+
   const submitImport = async () => {
     if (importRows.length === 0 || importContacts.isPending) return;
     setImportError('');
+    setImportPartial(false);
     setImportSummary(null);
+    const combined: ContactImportSummary = {
+      createdCount: 0,
+      updatedCount: 0,
+      rejectedCount: 0,
+      errors: [],
+    };
+    let processedRows = 0;
     try {
-      const result = await importContacts.mutateAsync({ data: { contacts: importRows } });
-      setImportSummary(result);
+      for (let offset = 0; offset < importRows.length; offset += 1000) {
+        const result = await importContacts.mutateAsync({
+          data: { contacts: importRows.slice(offset, offset + 1000) },
+        });
+        combined.createdCount += result.createdCount;
+        combined.updatedCount += result.updatedCount;
+        combined.rejectedCount += result.rejectedCount;
+        combined.errors.push(...result.errors);
+        processedRows += Math.min(1000, importRows.length - offset);
+      }
+      setImportSummary(combined);
       setImportRows([]);
       setImportFileName('');
       void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
     } catch (error) {
-      setImportError(errorText(error));
+      if (processedRows > 0) {
+        setImportSummary(combined);
+        setImportPartial(true);
+        setImportError(`A importação foi interrompida após processar ${processedRows} contato(s).`);
+        void queryClient.invalidateQueries({ queryKey: getListContactsQueryKey() });
+      } else {
+        setImportError(errorText(error));
+      }
     }
   };
 
@@ -2488,23 +2705,28 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
           <section className="contacts-card" aria-label="Importar contatos">
             <div className="contacts-card-heading">
               <span className="contacts-card-icon"><Upload size={17} /></span>
-              <div><h2>Importar contatos</h2><p>Envie um CSV com as colunas Nome e Telefone.</p></div>
+              <div><h2>Importar contatos</h2><p>Importe uma planilha CSV ou backups VCF, inclusive vários arquivos.</p></div>
             </div>
             <div className="contacts-import-actions">
               <label className="contacts-secondary-button contacts-file-button">
                 <Upload size={15} /> Selecionar CSV
                 <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} data-testid="input-import-contacts" />
               </label>
+              <label className="contacts-secondary-button contacts-file-button">
+                <Upload size={15} /> Selecionar VCF(s)
+                <input type="file" accept=".vcf,.vcard,text/vcard,text/x-vcard" multiple onChange={handleVCardFiles} data-testid="input-import-contacts-vcf" />
+              </label>
               <button type="button" className="contacts-text-button" onClick={() => downloadContactsCsv('"Nome";"Telefone"\r\n', 'modelo-contatos.csv')} data-testid="button-download-contacts-template">
                 Baixar modelo
               </button>
             </div>
-            <p className="contacts-help">Números com DDI são recomendados. Contatos com o mesmo telefone serão atualizados, sem criar duplicatas.</p>
+            <p className="contacts-help">Números com DDI são recomendados. Telefones repetidos nos arquivos são consolidados; contatos existentes são atualizados.</p>
             {importFileName && importRows.length > 0 && <p className="contacts-file-note" data-testid="text-import-file">{importFileName} · {importRows.length} linha(s) pronta(s)</p>}
+            {importNotice && <p className="contacts-help" role="status" data-testid="text-import-contacts-notice">{importNotice}</p>}
             {importRows.length > 0 && <button type="button" className="contacts-primary-button" onClick={() => void submitImport()} disabled={importContacts.isPending} data-testid="button-confirm-import-contacts">{importContacts.isPending ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}{importContacts.isPending ? 'Importando…' : `Importar ${importRows.length} contato(s)`}</button>}
             {importError && <p className="contacts-inline-error" role="alert" data-testid="status-import-contacts-error"><AlertCircle size={15} />{importError}</p>}
             {importSummary && <div className="contacts-import-summary" role="status" data-testid="status-import-contacts-result">
-              <strong>Importação concluída</strong>
+              <strong>{importPartial ? 'Importação parcial' : 'Importação concluída'}</strong>
               <span>{importSummary.createdCount} novo(s) · {importSummary.updatedCount} atualizado(s) · {importSummary.rejectedCount} rejeitado(s)</span>
               {importSummary.errors.slice(0, 8).map((item) => <small key={`${item.rowNumber}-${item.reason}`}>Linha {item.rowNumber}: {item.reason}</small>)}
               {importSummary.errors.length > 8 && <small>Mais {importSummary.errors.length - 8} linha(s) com erro.</small>}
@@ -2563,7 +2785,7 @@ function ContactsWorkspace({ onBackToInbox }: { onBackToInbox: () => void }) {
           {contactDeleteFeedback && <p className="contacts-delete-feedback" role="status" data-testid="status-delete-contacts">{contactDeleteFeedback}</p>}
           {contactsQuery.isLoading && <div className="contacts-state" data-testid="state-contacts-loading"><Loader2 size={18} className="animate-spin" /> Carregando contatos…</div>}
           {contactsQuery.isError && <div className="contacts-state contacts-inline-error" role="alert" data-testid="state-contacts-error"><AlertCircle size={16} />Não foi possível carregar os contatos.</div>}
-          {!contactsQuery.isLoading && !contactsQuery.isError && filteredContacts.length === 0 && <div className="contacts-state" data-testid="state-contacts-empty">{search ? 'Nenhum contato corresponde à busca.' : 'Ainda não há contatos. Adicione um ou importe um CSV.'}</div>}
+          {!contactsQuery.isLoading && !contactsQuery.isError && filteredContacts.length === 0 && <div className="contacts-state" data-testid="state-contacts-empty">{search ? 'Nenhum contato corresponde à busca.' : 'Ainda não há contatos. Adicione um ou importe CSV/VCF.'}</div>}
           {filteredContacts.length > 0 && <div className="contacts-table-wrap">
             <table className="contacts-table">
               <thead><tr><th><span className="sr-only">Selecionar</span></th><th>Nome</th><th>Telefone</th><th><span className="sr-only">Ações</span></th></tr></thead>
