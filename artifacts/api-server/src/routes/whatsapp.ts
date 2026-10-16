@@ -144,37 +144,6 @@ router.use((_req, res, next) => {
   next();
 });
 
-let conversationControlsSchemaPromise: Promise<void> | null = null;
-function ensureConversationControlsSchema(): Promise<void> {
-  if (!conversationControlsSchemaPromise) {
-    conversationControlsSchemaPromise = (async () => {
-      await db.execute(sql`
-        ALTER TABLE whatsapp_conversations
-        ADD COLUMN IF NOT EXISTS labels jsonb NOT NULL DEFAULT '[]'::jsonb
-      `);
-      await db.execute(sql`
-        ALTER TABLE whatsapp_conversations
-        ADD COLUMN IF NOT EXISTS archived_at timestamptz
-      `);
-      await db.execute(sql`
-        ALTER TABLE whatsapp_conversations
-        ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false
-      `);
-    })();
-  }
-  return conversationControlsSchemaPromise.catch((error) => {
-    conversationControlsSchemaPromise = null;
-    throw error;
-  });
-}
-
-router.use((_req, res, next) => {
-  void ensureConversationControlsSchema().then(() => next()).catch((error) => {
-    logger.error({ err: error }, "Could not prepare conversation labels and archive fields");
-    res.status(500).json({ error: "Não foi possível preparar os controles das conversas." });
-  });
-});
-
 type ConversationEvent = {
   conversationId: number;
   reason: "message" | "status";
