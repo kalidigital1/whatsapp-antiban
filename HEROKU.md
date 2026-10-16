@@ -4,27 +4,21 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
 
 ## Configuração
 
-1. Crie um app no Heroku e adicione o **Heroku Postgres antes do primeiro deploy**:
+1. Crie o app no Heroku e escolha o banco que ele usará:
 
    ```bash
    heroku create SEU_APP
+   ```
+
+   Se for usar Heroku Postgres, adicione o add-on; ele cria `DATABASE_URL`:
+
+   ```bash
    heroku addons:create heroku-postgresql:essential-0 -a SEU_APP
    ```
 
-   O add-on cria automaticamente a Config Var `DATABASE_URL`. Se você usar um
-   Postgres externo, configure essa variável manualmente:
-
-   ```bash
-   heroku config:set DATABASE_URL='postgresql://...' -a SEU_APP
-   ```
-
-   Confirme que a variável existe antes de fazer o push:
-
-   ```bash
-   heroku config:get DATABASE_URL -a SEU_APP
-   ```
-
-   Nunca coloque esse valor no repositório ou em arquivos versionados.
+   Se for usar Neon ou outro PostgreSQL externo, não é necessário adicionar Heroku
+   Postgres; configure `EXTERNAL_DATABASE_URL` nas Config Vars conforme o passo 3.
+   Não imprima nem compartilhe valores de conexão.
 
 2. Faça o deploy do repositório:
 
@@ -35,8 +29,8 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
 
 3. Configure as variáveis no Heroku Config Vars:
 
-   - `DATABASE_URL`: fornecida pelo Heroku Postgres, se esse add-on for usado.
-   - `EXTERNAL_DATABASE_URL`: opcional; use para conectar uma NeonDB ou outro PostgreSQL externo. Ela tem prioridade sobre `DATABASE_URL`.
+   - `EXTERNAL_DATABASE_URL`: conexão da Neon ou outro PostgreSQL externo. Tem prioridade sobre `DATABASE_URL`.
+   - `DATABASE_URL`: criada pelo add-on Heroku Postgres, caso esse seja o banco escolhido. Só é usada quando `EXTERNAL_DATABASE_URL` não está definida.
    - `SESSION_SECRET`: valor aleatório longo para assinar as sessões.
    - `APP_LOGIN_PASSWORD`: senha do login da aplicação.
    - `WHATSAPP_WEBHOOK_VERIFY_TOKEN`: token escolhido no painel da Meta.
@@ -45,10 +39,14 @@ O projeto está preparado para rodar em um único dyno web: o processo Node serv
    - `WHATSAPP_ESTIMATED_COST_CURRENCY`: opcional; o padrão é `BRL`.
    - `EVOLUTION_API_URL`: URL base do serviço usado para conectar pelo QR Code.
    - `EVOLUTION_API_KEY`: chave desse serviço, mantida somente nas Config Vars.
+   - `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID` e `R2_SECRET_ACCESS_KEY`: credenciais do Cloudflare R2 para uploads e mídias no Heroku. Configure todas as quatro; não reutilize as credenciais do Replit.
 
-   Os dados da conta WhatsApp conectada são configurados pela tela de configurações e persistidos no banco. Os valores guardados nos Secrets do Replit não são copiados para o Heroku; configure-os novamente nas Config Vars do app. Não substitua a `DATABASE_URL` gerenciada pelo Replit para apontar à Neon.
+   Os dados da conta WhatsApp conectada são configurados pela tela de configurações e persistidos no banco. Secrets do Replit não são copiados para o Heroku; configure-os novamente nas Config Vars do app. Se `EXTERNAL_DATABASE_URL` e `DATABASE_URL` estiverem ambas definidas, a Neon será o banco usado pelo app e pelo release.
 
-4. O Heroku instala a versão de pnpm declarada em `packageManager`, executa o build pelo `heroku-postbuild` e roda o `release` do `Procfile` para aplicar o schema do banco antes de iniciar o dyno web. O `drizzle-kit` precisa permanecer disponível nas dependências de produção para essa etapa.
+4. O Heroku instala a versão de pnpm declarada em `packageManager`, executa o build pelo `heroku-postbuild` e roda o `release` do `Procfile` antes de iniciar o dyno web. O release aplica o schema, sem `--force`, ao banco selecionado pelas Config Vars. O `drizzle-kit` fica nas dependências de produção porque o release precisa dele. O comando está em modo verbose para que erros e operações de schema apareçam nos logs.
+
+   **Importante:** esse `push` pode alterar o schema do banco de produção em cada release. Não use `push-force` em produção: ele pode aprovar automaticamente operações com perda de dados. Faça backup do banco antes de mudanças de schema. O projeto ainda não tem um histórico de migrações versionadas; migrar para `drizzle-kit migrate` exige criar um baseline compatível com o estado atual do banco, sem reaplicar a criação das tabelas existentes.
+
 5. No painel da Meta, configure o callback para:
 
    ```text
@@ -76,29 +74,37 @@ curl https://SEU_APP.herokuapp.com/api/healthz
 
 O health check deve responder `{"status":"ok"}`. A tela principal pode exigir login, enquanto `/api/healthz` permanece público para monitoramento.
 
-## Erro `DATABASE_URL, ensure the database is provisioned`
+## Erro de conexão ou permissão no release
 
-Esse erro acontece quando o `release` foi executado sem uma Config Var
-`DATABASE_URL`. O banco é obrigatório: o backend também não inicia sem ele.
+O release usa `EXTERNAL_DATABASE_URL` se ela existir; caso contrário, usa
+`DATABASE_URL`. Assim, ter as duas variáveis não faz o app alternar entre bancos.
+Confirme no painel do Heroku apenas qual variável está definida, sem copiar o
+valor para logs ou chat. A role da conexão precisa ter permissões para as
+alterações de schema necessárias.
 
-No app correto, execute:
+Se o release falhar, consulte a saída completa da fase **release** em Activity.
+O aviso de SSL do `pg-connection-string` não identifica a causa por si só. Não
+use `push-force` como tentativa de correção.
+
+## Erro `EXTERNAL_DATABASE_URL or DATABASE_URL must be set`
+
+Esse erro acontece quando nenhuma das Config Vars de banco está definida. Para
+Neon, configure `EXTERNAL_DATABASE_URL`; para Heroku Postgres, o add-on fornece
+`DATABASE_URL`. Se ambas existirem, `EXTERNAL_DATABASE_URL` tem prioridade.
+Confira apenas a presença da variável no painel, sem copiar ou imprimir o valor.
+
+Só crie o add-on abaixo se a escolha for Heroku Postgres:
 
 ```bash
 heroku addons:create heroku-postgresql:essential-0 -a SEU_APP
-heroku config:get DATABASE_URL -a SEU_APP
 git push heroku main
 ```
 
-Se o Postgres já existe, verifique se ele está associado a este app e se a
-variável não foi removida:
+Se usar Neon, configure a variável em **Settings → Config Vars** no app Heroku
+e depois faça um novo deploy. Não compartilhe o valor da URL.
 
-```bash
-heroku addons -a SEU_APP
-heroku config -a SEU_APP
-```
-
-Não remova a etapa `release` do `Procfile`: ela aplica o schema necessário
-antes do dyno web iniciar.
+Não remova a etapa `release` do `Procfile` sem confirmar que o schema já está
+aplicado; o dyno web depende das tabelas existentes.
 
 ## Observações
 
